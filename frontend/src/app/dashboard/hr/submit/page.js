@@ -60,7 +60,7 @@ export default function SubmitToCEO() {
       <div className="mb-[20px] flex justify-between items-end">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-            &#128228; CEO Approval Queue
+            &#128228; Submit to CEO
           </div>
           <div className="text-[13px] text-[#6b7280]">Manage appraisals queued for Executive review and final approval</div>
         </div>

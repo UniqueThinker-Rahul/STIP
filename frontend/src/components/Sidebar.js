@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
   Home, Activity, CheckCircle, FileText, Users, BarChart, 
-  UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare
+  UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
+  Lock, Shield, Database, Calendar
 } from 'lucide-react';
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
@@ -56,20 +57,28 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         category: 'Appraisals',
         items: [
           { name: 'Review Appraisals', href: '/dashboard/hr/review', icon: CheckSquare },
-          { name: 'Master List', href: '/dashboard/hr/appraisals', icon: FileText },
-          { name: 'Validate Awards', href: '/dashboard/hr/validate', icon: Activity }
+          { name: 'Submit to CEO', href: '/dashboard/hr/submit', icon: CheckCircle },
+          { name: 'All Appraisals', href: '/dashboard/hr/appraisals', icon: Activity }
         ]
       },
       {
         category: 'Staff',
         items: [
-          { name: 'Staff Directory', href: '/dashboard/hr/staff', icon: Users }
+          { name: 'Staff Management', href: '/dashboard/hr/staff', icon: Users },
+          { name: 'Add New Staff', href: '/dashboard/hr/add-staff', icon: Users }
         ]
       },
       {
-        category: 'System',
+        category: 'Awards',
         items: [
-          { name: 'System Setup', href: '/dashboard/hr/setup', icon: Settings }
+          { name: 'Validate Awards', href: '/dashboard/hr/validate', icon: Activity }
+        ]
+      },
+      {
+        category: 'Reports',
+        items: [
+          { name: 'Reports', href: '/dashboard/hr/reports', icon: Calendar },
+         
         ]
       }
     ],
@@ -97,21 +106,48 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
     ],
     EMPLOYEE: [
       {
-        category: 'Main Menu',
+        category: 'My Overview',
         items: [
-          { name: 'My Dashboard', href: '/dashboard/employee', icon: Home }
+          { name: 'My Dashboard', href: '/dashboard/employee', icon: Home },
+          { name: 'My Profile', href: '/dashboard/employee/profile', icon: UserPlus }
         ]
       },
       {
-        category: 'Staff',
+        category: 'My Appraisal',
         items: [
-          { name: 'My Profile', href: '/dashboard/employee/profile', icon: UserPlus }
+          { name: 'Appraisal', href: '/dashboard/employee/appraisal', icon: FileText },
+           { name: 'My Award', href: '/dashboard/employee/award', icon: Activity },
+            { name: 'Acknowledge', href: '/dashboard/employee/acknowledge', icon: CheckSquare }
         ]
       },
       {
         category: 'Information',
         items: [
-          { name: 'STIP Guide & FAQ', href: '/dashboard/employee/info', icon: HelpCircle }
+          { name: 'STIP Guide & FAQ', href: '/dashboard/employee/info', icon: HelpCircle },
+          { name: 'Deadlines', href: '/dashboard/employee/deadlines', icon: Calendar }
+        ]
+      }
+    ],
+    ICT_ADMIN: [
+      {
+        category: 'Main Menu',
+        items: [
+          { name: 'Dashboard', href: '/dashboard/ict', icon: Home }
+        ]
+      },
+      {
+        category: 'System Controls',
+        items: [
+          { name: 'Scorecard Lock', href: '/dashboard/ict/scorecard', icon: Lock },
+          { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
+          { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
+          { name: 'System Status', href: '/dashboard/ict/system', icon: Database }
+        ]
+      },
+      {
+        category: 'Information',
+        items: [
+          { name: 'Staff Data', href: '/dashboard/ict/staff', icon: Users }
         ]
       }
     ]
