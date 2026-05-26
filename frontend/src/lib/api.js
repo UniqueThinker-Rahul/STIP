@@ -3,11 +3,12 @@ import Cookies from 'js-cookie';
 
 // Create an Axios instance
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api/v1',
+  // 🚨 CRITICAL FIX: Use the environment variable FIRST. Fall back to localhost ONLY if the variable doesn't exist.
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true, // FIX: Allows cross-origin cookie handling
+  withCredentials: true, // Allows cross-origin cookie handling
 });
 
 // Intercept outgoing requests
@@ -23,7 +24,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // FIX: Using optional chaining ?. to prevent crashes if error object is incomplete
+    // Handling 401 Unauthorized errors
     if (error.response?.status === 401) {
       Cookies.remove('stip_token');
       Cookies.remove('stip_user');
