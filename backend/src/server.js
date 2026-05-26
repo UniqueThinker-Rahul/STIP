@@ -9,13 +9,16 @@ const userRoutes = require('./routes/userRoutes');
 const appraisalRoutes = require('./routes/appraisalRoutes');
 const reportRoutes = require('./routes/reportRoutes'); 
 const settingsRoutes = require('./routes/settingsRoutes');
-const companyMetricsRoutes = require('./routes/companyMetricsRoutes'); // <-- NEW: Company Metrics
+const companyMetricsRoutes = require('./routes/companyMetricsRoutes');
 
 const app = express();
+
+// 🚨 UPDATED CORS CONFIGURATION
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://stipdash.vercel.app/' 
+    'https://stipdash.vercel.app', // <-- Removed the trailing slash!
+    'https://stipdash-mkidimz0m-cyber-trunks-projects.vercel.app' // <-- Added your specific deployment URL
   ],
   credentials: true
 }));
@@ -28,7 +31,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/appraisals', appraisalRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
-app.use('/api/v1/company-metrics', companyMetricsRoutes); // <-- NEW: Mapped to /company-metrics
+app.use('/api/v1/company-metrics', companyMetricsRoutes);
 
 const PORT = process.env.PORT || 5000;
 mongoose.connect(process.env.MONGO_URI)
