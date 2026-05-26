@@ -1,0 +1,42 @@
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema({
+  employeeId: { type: String, required: true, unique: true },
+  companyCode: { type: String, required: true },
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  
+  personalDetails: {
+    firstName: { type: String, required: true },
+    lastName: { type: String, required: true }
+  },
+  
+  employmentDetails: {
+    jobTitle: { type: String, required: true },
+    dateOfHire: { type: Date, required: true },
+    prorateValue: { type: Number, default: 12 },
+    rawManagerName: { type: String }, // Temporary field for importing
+    reportingTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    isActive: { type: Boolean, default: true }
+  },
+
+  security: {
+  role: { 
+    type: String, 
+    enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'], 
+    default: 'EMPLOYEE' 
+  },
+    isFirstLogin: { type: Boolean, default: true },
+    currentSessionId: { type: String, default: null }
+  }
+  
+}, { timestamps: true });
+
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+
+module.exports = mongoose.model('User', userSchema);
