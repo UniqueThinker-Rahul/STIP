@@ -33,29 +33,33 @@ export default function AllStaff() {
     fetchStaff();
   }, []);
 
-  // 🚨 BULLETPROOF MANAGER NAME EXTRACTION
+  // 🚨 BULLETPROOF MANAGER NAME EXTRACTION (FIXED)
   const getManagerName = (userObj) => {
-    // 1. Check direct string reference
+    // 1. Check direct string reference (If you saved it explicitly)
     if (userObj.employmentDetails?.rawManagerName) {
       return userObj.employmentDetails.rawManagerName;
     }
     
-    // 2. Check if manager is populated as an object by the backend
-    if (userObj.employmentDetails?.managerId?.personalDetails) {
-      const { firstName, lastName } = userObj.employmentDetails.managerId.personalDetails;
-      return `${firstName || ''} ${lastName || ''}`.trim();
+    // 2. Identify the actual ID (Schema uses 'reportingTo', but we check 'managerId' too)
+    const mId = userObj.employmentDetails?.reportingTo || userObj.employmentDetails?.managerId || userObj.reportingTo;
+
+    // 3. If the backend automatically populated the user object
+    if (mId && typeof mId === 'object' && mId.personalDetails) {
+      const { firstName, lastName } = mId.personalDetails;
+      return `${firstName || ''} ${lastName || ''}`.trim() || 'Manager Found';
     }
     
-    // 3. 🚨 CRITICAL FIX: If managerId is just a string (ObjectId), find that user in our staffList!
-    if (typeof userObj.employmentDetails?.managerId === 'string') {
-      const managerUser = staffList.find(u => u._id === userObj.employmentDetails.managerId);
+    // 4. If it's just an ID string, find the manager in our existing list!
+    if (mId && typeof mId === 'string') {
+      const managerUser = staffList.find(u => u._id === mId);
       if (managerUser) {
-        const { firstName, lastName } = managerUser.personalDetails || {};
-        return `${firstName || ''} ${lastName || ''}`.trim() || 'Manager Found (No Name)';
+        const fName = managerUser.personalDetails?.firstName || managerUser.firstName || '';
+        const lName = managerUser.personalDetails?.lastName || managerUser.lastName || '';
+        return `${fName} ${lName}`.trim() || 'Unknown Manager';
       }
     }
 
-    // 4. Check top level fallback
+    // 5. Final Top-Level Fallback
     if (userObj.managerName) return userObj.managerName;
     
     return 'Not Assigned';
@@ -111,7 +115,7 @@ export default function AllStaff() {
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
             &#128101; All Staff
           </div>
-          <div className="text-[13px] text-[#6b7280]">{staffList.length} STIP-eligible employees — full read-only access including salary data</div>
+          <div className="text-[13px] text-[#6b7280]">{staffList.length} STIP-eligible employees — full read-only access</div>
         </div>
       </div>
 
@@ -168,8 +172,8 @@ export default function AllStaff() {
                 </tr>
               ) : (
                 currentStaffPage.map((e, i) => {
-                  const fName = e.personalDetails?.firstName || '';
-                  const lName = e.personalDetails?.lastName || '';
+                  const fName = e.personalDetails?.firstName || e.firstName || '';
+                  const lName = e.personalDetails?.lastName || e.lastName || '';
                   const init1 = fName[0] || '';
                   const init2 = lName[0] || '';
                   const coCode = e.companyCode || 'FSM';
@@ -196,7 +200,7 @@ export default function AllStaff() {
                         </div>
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-[12px] text-[#0f1923]">
-                        {e.employmentDetails?.jobTitle}
+                        {e.employmentDetails?.jobTitle || e.jobTitle || 'Not Assigned'}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center text-[#6b7280] font-mono text-[12px]">
                         {e.employeeId}

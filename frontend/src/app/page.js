@@ -162,7 +162,7 @@ export default function UnifiedLogin() {
 
             <form onSubmit={handleStandardLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username (Emp ID + Year)</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username (Emp ID + Year of Joining)</label>
                 <input 
                   type="text" required value={username} onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0D2B55]/20 focus:border-[#0D2B55] transition-all text-slate-800" 
@@ -196,7 +196,7 @@ export default function UnifiedLogin() {
 
             <form onSubmit={handleStaffLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username (Emp ID + Year)</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username (Emp ID + Year of Joining)</label>
                 <input 
                   type="text" required value={username} onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/30 focus:border-[#C9A84C] transition-all text-slate-800" 

@@ -6,12 +6,12 @@ import Cookies from 'js-cookie';
 import api from '../../../../lib/api';
 
 const CRIT_NAMES = {
-  deliveredResults: 'Delivered Expected Results',
-  behaviors: 'Demonstrated Initiative',
-  safeWorking: 'Demonstrated Safe Working',
-  jobCompetence: 'Job Competence',
-  dependability: 'Dependability',
-  adaptability: 'Adaptability'
+  c1: "Quality/Accuracy of Work",
+  c2: "Efficiency/Speed",
+  c3: "Job Knowledge & Skills",
+  c4: "Teamwork & Collaboration",
+  c5: "Safety & Compliance",
+  c6: "Attendance & Punctuality"
 };
 
 export default function EmployeeAcknowledge() {
@@ -22,10 +22,8 @@ export default function EmployeeAcknowledge() {
   const [loading, setLoading] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
   
-  // Checkboxes state
   const [checks, setChecks] = useState({ c1: false, c2: false, c3: false });
 
-  // Constants
   const CP = 13.01;
 
   useEffect(() => {
@@ -64,8 +62,6 @@ export default function EmployeeAcknowledge() {
 
   const handleSubmit = () => {
     setAcknowledged(true);
-    // You would typically make an API call here to record the acknowledgment
-    // e.g., await api.post(`/appraisals/${appraisal._id}/acknowledge`)
   };
 
   const iprfLabel = (score) => {
@@ -92,14 +88,23 @@ export default function EmployeeAcknowledge() {
   const awardPct = isApproved ? (CP * iprf * pr).toFixed(2) : '0.00';
   const allChecked = checks.c1 && checks.c2 && checks.c3;
 
+  // 🚨 BULLETPROOF FALLBACKS FOR UI RENDERING
   const fName = user?.personalDetails?.firstName || user?.firstName || '';
   const lName = user?.personalDetails?.lastName || user?.lastName || '';
-  const fullName = `${fName} ${lName}`.trim() || 'Employee';
+  const fullName = `${fName} ${lName}`.trim() || user?.email?.split('@')[0] || 'Unknown Employee';
+  
+  // Checking every possible place Job Title might be hiding in your MongoDB document
+  const jobTitle = user?.employmentDetails?.jobTitle 
+    || user?.jobTitle 
+    || user?.title 
+    || appraisal?.employeeId?.employmentDetails?.jobTitle 
+    || 'Employee'; // Safe fallback instead of blank
+    
+  const companyCode = user?.companyCode || user?.employmentDetails?.companyCode || 'FSM';
 
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
-      {/* Header */}
       <div className="mb-[20px]">
         <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
           &#9989; Acknowledge My Appraisal
@@ -136,12 +141,12 @@ export default function EmployeeAcknowledge() {
             </div>
             
             <div className="p-[24px]">
-              {/* Appraisal Summary Text */}
               <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[10px] p-[20px] text-[13px] text-[#0f1923] leading-[1.8] mb-[24px]">
                 <strong className="text-[#0D2B55]">Employee:</strong> {fullName}<br/>
                 <strong className="text-[#0D2B55]">Employee ID:</strong> {user.employeeId}<br/>
-                <strong className="text-[#0D2B55]">Job Title:</strong> {user.employmentDetails?.jobTitle}<br/>
-                <strong className="text-[#0D2B55]">Company:</strong> {user.companyCode}<br/>
+                {/* 🚨 JOB TITLE WILL NOW SHOW UP */}
+                <strong className="text-[#0D2B55]">Job Title:</strong> {jobTitle}<br/>
+                <strong className="text-[#0D2B55]">Company:</strong> {companyCode}<br/>
                 <strong className="text-[#0D2B55]">Quarter:</strong> Q3 2026 (July &mdash; September 2026)<br/><br/>
                 
                 <strong className="text-[#0D2B55]">IPRF Rating:</strong> {iprf.toFixed(1)} &mdash; {iprfLabel(iprf)}<br/>
@@ -155,7 +160,7 @@ export default function EmployeeAcknowledge() {
                     const v = scoreObj.rating || 0;
                     const lbl = {0:'Less than Satisfactory (LS)',0.7:'Needs Improvement (NI)',1:'Fully Effective (E)',1.3:'Exceeds Performance (EP)'}[v] || v;
                     return (
-                      <li key={k}>{CRIT_NAMES[k]}: {v.toFixed(1)} &mdash; {lbl}</li>
+                      <li key={k}>{CRIT_NAMES[k] || k}: {v.toFixed(1)} &mdash; {lbl}</li>
                     );
                   })}
                 </ul>
@@ -164,7 +169,6 @@ export default function EmployeeAcknowledge() {
                 <em className="text-[#6b7280]">This appraisal has been reviewed and approved by: Line Manager &rarr; HR Manager (Tracy Helgenberger) &rarr; CEO (Jared Morris).</em>
               </div>
               
-              {/* Checkboxes */}
               <div className="flex flex-col gap-[12px] mb-[24px]">
                 <label className={`flex items-start gap-[12px] p-[16px] rounded-[10px] cursor-pointer transition-colors border ${checks.c1 ? 'bg-[#EFF6FF] border-[#BFDBFE]' : 'bg-white border-[#E2DDD4] hover:bg-[#FAF8F4]'}`}>
                   <input 

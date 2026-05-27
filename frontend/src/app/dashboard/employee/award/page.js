@@ -15,6 +15,33 @@ export default function EmployeeAward() {
   // Constants
   const CP = 13.01;
 
+  // 🚨 FIXED: Restored missing Criteria Constants
+  const CRIT_NAMES = {
+    c1: "Quality/Accuracy of Work",
+    c2: "Efficiency/Speed",
+    c3: "Job Knowledge & Skills",
+    c4: "Teamwork & Collaboration",
+    c5: "Safety & Compliance",
+    c6: "Attendance & Punctuality"
+  };
+
+  const CRIT_WTS = {
+    c1: "25%",
+    c2: "20%",
+    c3: "20%",
+    c4: "15%",
+    c5: "10%",
+    c6: "10%"
+  };
+
+  // 🚨 FIXED: Restored missing Color Function
+  const iprfColor = (score) => {
+    if (score >= 1.3) return '#1E40AF'; // EP (Blue)
+    if (score >= 1.0) return '#059669'; // E (Green)
+    if (score >= 0.7) return '#D97706'; // NI (Amber)
+    return '#DC2626'; // LS (Red)
+  };
+
   useEffect(() => {
     const fetchAwardData = async () => {
       try {

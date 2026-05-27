@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import Cookies from 'js-cookie';
 import { 
   Home, Activity, CheckCircle, FileText, Users, BarChart, 
   UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
@@ -10,6 +12,25 @@ import {
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
   const pathname = usePathname();
+
+  // STATE: Hold user data locally to handle missing props
+  const [currentUser, setCurrentUser] = useState(user);
+
+  // EFFECT: Fetch user from cookie if the prop is empty (matching Header logic)
+  useEffect(() => {
+    if (user && Object.keys(user).length > 0) {
+      setCurrentUser(user);
+    } else {
+      const stipUser = Cookies.get('stip_user');
+      if (stipUser) {
+        try {
+          setCurrentUser(JSON.parse(stipUser));
+        } catch (error) {
+          console.error('Failed to parse user cookie', error);
+        }
+      }
+    }
+  }, [user]);
 
   // Dynamic Navigation mapped to roles and grouped by categories
   const navigationConfig = {
@@ -78,7 +99,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         category: 'Reports',
         items: [
           { name: 'Reports', href: '/dashboard/hr/reports', icon: Calendar },
-         
+          
         ]
       }
     ],
@@ -153,12 +174,14 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
     ]
   };
 
-  const navSections = navigationConfig[role] || navigationConfig.EMPLOYEE;
+  // Safe fallback for role routing
+  const activeRole = role || currentUser?.role || 'EMPLOYEE';
+  const navSections = navigationConfig[activeRole] || navigationConfig.EMPLOYEE;
 
-  // 🚨 BULLETPROOF NAME EXTRACTION
-  const fName = user?.personalDetails?.firstName || user?.firstName || '';
-  const lName = user?.personalDetails?.lastName || user?.lastName || '';
-  const email = user?.email || '';
+  // 🚨 BULLETPROOF NAME EXTRACTION (Using currentUser state)
+  const fName = currentUser?.personalDetails?.firstName || currentUser?.firstName || '';
+  const lName = currentUser?.personalDetails?.lastName || currentUser?.lastName || '';
+  const email = currentUser?.email || '';
   
   // Fallback to email prefix if name isn't loaded
   const fullName = fName || lName ? `${fName} ${lName}`.trim() : (email.split('@')[0] || 'Unknown User');
@@ -249,7 +272,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
                 {fullName}
               </p>
               <p className="text-[10px] font-[700] text-[#C9A84C] uppercase tracking-widest mt-[2px] truncate">
-                {role ? role.replace('_', ' ') : 'Employee'}
+                {activeRole ? activeRole.replace('_', ' ') : 'EMPLOYEE'}
               </p>
             </div>
           </div>
