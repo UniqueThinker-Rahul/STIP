@@ -103,7 +103,11 @@ export default function UnifiedLogin() {
         </div>
         <div className="text-sm text-slate-500 mb-10 leading-relaxed">
           FSM Petroleum Corporation — Short-Term Incentive Program<br/>
+<<<<<<< HEAD
           {/* Unified Test Environment — All 5 Panels */}
+=======
+    
+>>>>>>> 6f8c5c98755fe8962fd2abf023c3fa71b9691d5a
         </div>
 
         {view === 'role_select' && (
