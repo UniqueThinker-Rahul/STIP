@@ -10,6 +10,9 @@ const appraisalRoutes = require('./routes/appraisalRoutes');
 const reportRoutes = require('./routes/reportRoutes'); 
 const settingsRoutes = require('./routes/settingsRoutes');
 const companyMetricsRoutes = require('./routes/companyMetricsRoutes');
+const AppConfig = require('./models/AppConfig');
+const User = require('./models/User'); // Required for dependency checks
+const { authGuard, roleGuard } = require('./middleware/auth'); // Required for securing config routes
 
 const app = express();
 
@@ -17,8 +20,9 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://stipdash.vercel.app', // <-- Removed the trailing slash!
-    'https://stipdash-mkidimz0m-cyber-trunks-projects.vercel.app' // <-- Added your specific deployment URL
+    'https://stipdash.vercel.app', 
+    'https://stipdash-mkidimz0m-cyber-trunks-projects.vercel.app',
+    'https://stip-production.up.railway.app' 
   ],
   credentials: true
 }));
@@ -32,6 +36,124 @@ app.use('/api/v1/appraisals', appraisalRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/company-metrics', companyMetricsRoutes);
+
+// GET /api/v1/config/dropdowns
+app.get('/api/v1/config/dropdowns', async (req, res) => {
+  try {
+    let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
+    
+    // Fallback failsafe if the database isn't populated yet
+    if (!config) {
+      config = {
+        companyCodes: ["FSM", "CDU", "NAR", "GUM"],
+        officeLocations: ["HR", "P3MO", "Communications", "ICT", "Finance", "ORCA", "Administration", "Pohnpei Terminal", "CDU", "NPP", "AMMO", "Chuuk Terminal", "Maritime", "Tonoas", "Guam", "Yap Terminal", "Kosrae Terminal", "Nauru Terminal"],
+        jobTitles: [] // Left empty for brevity, but you can populate it
+      };
+    }
+    
+    res.json({ success: true, data: config });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch dropdown configurations.' });
+  }
+});
+
+// PUT /api/v1/config/dropdowns/:category
+// Handles ADD, EDIT, and DELETE with strict Database Dependency Checks
+app.put(
+  '/api/v1/config/dropdowns/:category', 
+  authGuard, 
+  roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), // 🚨 Managers are explicitly blocked
+  async (req, res) => {
+    try {
+      const { category } = req.params; // 'companyCodes', 'officeLocations', or 'jobTitles'
+      const { action, value, oldValue, newValue } = req.body;
+
+      // Validate category
+      if (!['companyCodes', 'officeLocations', 'jobTitles'].includes(category)) {
+        return res.status(400).json({ message: "Invalid configuration category." });
+      }
+
+      let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
+      
+      // Auto-create config if it doesn't exist during the first update
+      if (!config) {
+          config = new AppConfig({
+              configType: 'SYSTEM_DROPDOWNS',
+              companyCodes: ["FSM", "CDU", "NAR", "GUM"],
+              officeLocations: ["HR", "P3MO", "Communications", "ICT", "Finance", "ORCA", "Administration", "Pohnpei Terminal", "CDU", "NPP", "AMMO", "Chuuk Terminal", "Maritime", "Tonoas", "Guam", "Yap Terminal", "Kosrae Terminal", "Nauru Terminal"],
+              jobTitles: []
+          });
+      }
+
+      // ---------------------------------------------------------
+      // ACTION: DELETE (Strict Dependency Check)
+      // ---------------------------------------------------------
+      if (action === 'DELETE') {
+        let usageCount = 0;
+
+        // 1. Check if the value is currently assigned to any user
+        if (category === 'companyCodes') {
+          usageCount = await User.countDocuments({ companyCode: value });
+        } else if (category === 'officeLocations') {
+          usageCount = await User.countDocuments({ 'employmentDetails.officeLocation': value });
+        } else if (category === 'jobTitles') {
+          usageCount = await User.countDocuments({ 'employmentDetails.jobTitle': value });
+        }
+
+        // 2. Block deletion if in use
+        if (usageCount > 0) {
+          return res.status(409).json({ 
+            message: `Deletion Blocked: "${value}" is currently assigned to ${usageCount} employee(s). You must reassign them before deleting this value.` 
+          });
+        }
+
+        // 3. Safe to delete
+        config[category] = config[category].filter(item => item !== value);
+      }
+
+      // ---------------------------------------------------------
+      // ACTION: EDIT (Cascade Updates to Users)
+      // ---------------------------------------------------------
+      else if (action === 'EDIT') {
+        if (!newValue || newValue.trim() === '') return res.status(400).json({ message: "Value cannot be empty." });
+        if (config[category].includes(newValue)) return res.status(400).json({ message: "This value already exists." });
+
+        // 1. Update the Config Array
+        const index = config[category].indexOf(oldValue);
+        if (index !== -1) config[category][index] = newValue.trim();
+
+        // 2. CASCADE UPDATE: Automatically update all users using the old value
+        if (category === 'companyCodes') {
+          await User.updateMany({ companyCode: oldValue }, { $set: { companyCode: newValue.trim() } });
+        } else if (category === 'officeLocations') {
+          await User.updateMany({ 'employmentDetails.officeLocation': oldValue }, { $set: { 'employmentDetails.officeLocation': newValue.trim() } });
+        } else if (category === 'jobTitles') {
+          await User.updateMany({ 'employmentDetails.jobTitle': oldValue }, { $set: { 'employmentDetails.jobTitle': newValue.trim() } });
+        }
+      }
+
+      // ---------------------------------------------------------
+      // ACTION: ADD
+      // ---------------------------------------------------------
+      else if (action === 'ADD') {
+        if (!value || value.trim() === '') return res.status(400).json({ message: "Value cannot be empty." });
+        if (config[category].includes(value.trim())) return res.status(400).json({ message: "This value already exists." });
+        
+        config[category].push(value.trim());
+      }
+
+      else {
+        return res.status(400).json({ message: "Invalid action." });
+      }
+
+      await config.save();
+      res.json({ success: true, message: `Successfully updated ${category}.`, data: config });
+
+    } catch (error) {
+      console.error("Config Update Error:", error);
+      res.status(500).json({ message: 'Server error processing configuration update.' });
+    }
+});
 
 const PORT = process.env.PORT || 5000;
 mongoose.connect(process.env.MONGO_URI)

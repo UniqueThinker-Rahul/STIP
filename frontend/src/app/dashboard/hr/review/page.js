@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../../../lib/api';
 import { useRouter } from 'next/navigation';
-import { Check, AlertTriangle, Calculator, ChevronDown, Info } from 'lucide-react';
+import { Check, AlertTriangle, Calculator, ChevronDown, Info, Clock } from 'lucide-react';
 
 const CRITERIA = [
   { id: 'deliveredResults', short: 'Results', name: "Delivered Expected Results", wt: 0.30, pct: "30%", desc: "Did the employee deliver the expected results of their position in 2025/2026?" },
@@ -192,7 +192,7 @@ export default function ReviewAppraisals() {
           ) : (
             <div className="bg-white border border-[#E2DDD4] rounded-xl overflow-hidden flex flex-col h-full animate-in fade-in duration-200 shadow-sm">
               
-              {/* Inspector Header (Exact match to reference image) */}
+              {/* Inspector Header */}
               <div className="p-[24px_24px_20px] border-b border-[#E2DDD4] flex justify-between items-start bg-white relative">
                 <button onClick={() => setSelectedReview(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-slate-100 flex items-center justify-center text-[#6b7280] hover:bg-slate-200 hover:text-[#0D2B55] transition-colors">&times;</button>
                 
@@ -214,6 +214,29 @@ export default function ReviewAppraisals() {
               {/* Inspector Body */}
               <div className="p-[24px] flex-1 overflow-y-auto bg-[#FAF8F4]">
                 
+                {/* 🚨 UPGRADED: Timestamp Tracking Box */}
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-[16px] mb-[20px] shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-8 h-8 text-blue-400 shrink-0" />
+                    <div>
+                      <div className="text-[10px] font-[800] text-blue-600 uppercase tracking-widest mb-[2px]">Manager Submission Time</div>
+                      <div className="text-[13px] font-[700] text-[#0D2B55]">
+                        {new Date(selectedReview.updatedAt || selectedReview.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(selectedReview.updatedAt || selectedReview.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="h-8 w-px bg-blue-200 hidden md:block"></div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-500 font-bold shrink-0">HR</div>
+                    <div>
+                      <div className="text-[10px] font-[800] text-blue-600 uppercase tracking-widest mb-[2px]">Your Review Initiated</div>
+                      <div className="text-[13px] font-[700] text-[#0D2B55]">
+                        {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Employee Details Grid */}
                 <div className="bg-white border border-[#E2DDD4] rounded-xl p-[20px] mb-[20px] shadow-sm">
                   <h3 className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[16px] border-b border-[#E2DDD4] pb-[8px]">
@@ -241,7 +264,7 @@ export default function ReviewAppraisals() {
                   </div>
                 </div>
 
-                {/* IPRF Breakdown Card (Sleek accordion style matching form) */}
+                {/* IPRF Breakdown Card */}
                 <div className="bg-white border border-[#E2DDD4] rounded-xl shadow-sm overflow-hidden mb-[20px]">
                   <div 
                     className="p-[16px] border-b border-[#E2DDD4] flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors"

@@ -5,10 +5,17 @@ import { User, CheckCircle, Calculator, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 
+const CP = 0.1301;
+
 export default function AddNewStaff() {
   const router = useRouter();
 
+  // 🚨 DYNAMIC DB STATES: All dropdowns pull from the backend now
   const [managerList, setManagerList] = useState([]);
+  const [companyCodes, setCompanyCodes] = useState([]);
+  const [officeLocations, setOfficeLocations] = useState([]);
+  const [jobTitles, setJobTitles] = useState([]); 
+  
   const [successModalOpen, setSuccessModalOpen] = useState(false);
   const [successDetail, setSuccessDetail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -16,24 +23,35 @@ export default function AddNewStaff() {
   const [formData, setFormData] = useState({
     fn: '',
     ln: '',
-    title: '',
+    title: '', // Now maps to the dynamic select
+    office: '',
     co: '',
     mgrId: '',
     hire: '',
     empId: '' 
   });
 
-  // Fetch Managers on mount
+  // Fetch Managers and Dynamic Configuration Arrays on mount
   useEffect(() => {
-    const fetchManagers = async () => {
+    const fetchData = async () => {
       try {
-        const res = await api.get('/users/managers');
-        setManagerList(res.data?.data || []);
+        const [mgrRes, configRes] = await Promise.all([
+          api.get('/users/managers'),
+          api.get('/config/dropdowns') // 🚨 Your new AppConfig API route
+        ]);
+        
+        setManagerList(mgrRes.data?.data || []);
+        
+        const configData = configRes.data?.data || {};
+        setCompanyCodes(configData.companyCodes || []);
+        setOfficeLocations(configData.officeLocations || []);
+        setJobTitles(configData.jobTitles || []); // 🚨 Capturing Job Titles from DB
+        
       } catch (error) {
-        console.error("Failed to load managers:", error);
+        console.error("Failed to load initial data:", error);
       }
     };
-    fetchManagers();
+    fetchData();
   }, []);
 
   const handleInputChange = (e) => {
@@ -50,7 +68,7 @@ export default function AddNewStaff() {
 
   if (formData.hire) {
     const hireDate = new Date(formData.hire);
-    const currentYear = new Date().getFullYear(); // Automatically adapts to 2026, 2027, etc.
+    const currentYear = new Date().getFullYear(); 
     
     // Set exact start/end boundaries for the calculation year
     const yearStart = new Date(`${currentYear}-01-01T00:00:00`);
@@ -72,39 +90,36 @@ export default function AddNewStaff() {
   }
 
   const saveNewStaff = async () => {
-    const { fn, ln, title, co, mgrId, hire, empId } = formData;
+    const { fn, ln, title, office, co, mgrId, hire, empId } = formData;
     
-    if (!fn || !ln || !title || !co || !mgrId || !hire || !empId) {
-      alert('Please fill in all required fields, including the Employee ID.');
+    if (!fn || !ln || !title || !office || !co || !mgrId || !hire || !empId) {
+      alert('Please fill in all required fields, including Office Location and Employee ID.');
       return;
     }
 
     try {
       setIsSubmitting(true);
       
-      // FIX 1: Safely generate email by stripping ALL spaces
       const safeFirst = fn.toLowerCase().replace(/\s+/g, '');
       const safeLast = ln.toLowerCase().replace(/\s+/g, '');
       const generatedEmail = `${safeFirst}.${safeLast}@fsmpc.fm`;
 
-      // FIX 2: Reverted to the flat data structure your backend expects
       const payload = {
         employeeId: empId.trim(),
         firstName: fn.trim(),
         lastName: ln.trim(),
         jobTitle: title.trim(),
+        officeLocation: office,
         companyCode: co,
         dateOfHire: hire, 
         role: "EMPLOYEE",
         reportingTo: mgrId || null,
-        
         email: generatedEmail,
         password: "Password123!",
         isActive: true,
         prorateValue: prMonths
       };
 
-      // Create user in DB
       await api.post('/users', payload);
 
       setSuccessDetail(`${fn} ${ln} (${title}) added to the system with ID ${empId}. Pro-Rata: ${(prMonths / 12).toFixed(3)}.`);
@@ -113,12 +128,9 @@ export default function AddNewStaff() {
       
     } catch (error) {
       console.error('Failed to save staff:', error);
-      
-      // Improved error message extraction to help debug future backend issues
       const backendMessage = error.response?.data?.message 
         || JSON.stringify(error.response?.data) 
         || "An error occurred while creating the employee.";
-        
       alert(`Server Error: ${backendMessage}`);
     } finally {
       setIsSubmitting(false);
@@ -126,7 +138,7 @@ export default function AddNewStaff() {
   };
 
   const clearForm = () => {
-    setFormData({ fn: '', ln: '', title: '', co: '', mgrId: '', hire: '', empId: '' });
+    setFormData({ fn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '' });
   };
 
   return (
@@ -190,17 +202,35 @@ export default function AddNewStaff() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[14px]">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-[12px] mb-[14px]">
               <div className="flex flex-col gap-[6px]">
                 <label className="text-[11px] font-[800] text-[#0D2B55]">Job Title <span className="text-[#DC2626]">*</span></label>
-                <input
+                {/* 🚨 UPGRADED: Now a dynamic dropdown pulled from MongoDB */}
+                <select
                   id="ntitle"
-                  type="text"
-                  className="px-[12px] py-[9px] border-[1.5px] border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
-                  placeholder="e.g. Terminal Operator"
                   value={formData.title}
                   onChange={handleInputChange}
-                />
+                  className="px-[12px] py-[9px] border-[1.5px] border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] bg-white transition-colors"
+                >
+                  <option value="" disabled>Select Job Title</option>
+                  {jobTitles.map((title, idx) => (
+                    <option key={`jt-${idx}`} value={title}>{title}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-[6px]">
+                <label className="text-[11px] font-[800] text-[#0D2B55]">Office Location <span className="text-[#DC2626]">*</span></label>
+                <select
+                  id="noffice"
+                  value={formData.office}
+                  onChange={handleInputChange}
+                  className="px-[12px] py-[9px] border-[1.5px] border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] bg-white transition-colors"
+                >
+                  <option value="" disabled>Select Office</option>
+                  {officeLocations.map((loc, idx) => (
+                    <option key={`loc-${idx}`} value={loc}>{loc}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex flex-col gap-[6px]">
                 <label className="text-[11px] font-[800] text-[#0D2B55]">Company Code <span className="text-[#DC2626]">*</span></label>
@@ -210,11 +240,10 @@ export default function AddNewStaff() {
                   onChange={handleInputChange}
                   className="px-[12px] py-[9px] border-[1.5px] border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] bg-white transition-colors"
                 >
-                  <option value="">Select company</option>
-                  <option value="FSM">FSM</option>
-                  <option value="CDU">CDU</option>
-                  <option value="NAR">NAR</option>
-                  <option value="GUM">GUM</option>
+                  <option value="" disabled>Select company</option>
+                  {companyCodes.map((code, idx) => (
+                    <option key={`co-${idx}`} value={code}>{code}</option>
+                  ))}
                 </select>
               </div>
             </div>

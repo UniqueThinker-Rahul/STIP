@@ -16,7 +16,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
   // STATE: Hold user data locally to handle missing props
   const [currentUser, setCurrentUser] = useState(user);
 
-  // EFFECT: Fetch user from cookie if the prop is empty (matching Header logic)
+  // EFFECT: Fetch user from cookie if the prop is empty
   useEffect(() => {
     if (user && Object.keys(user).length > 0) {
       setCurrentUser(user);
@@ -83,10 +83,12 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         ]
       },
       {
+        // 🚨 UPGRADED: Added System Config to the HR Admin menu
         category: 'Staff',
         items: [
           { name: 'Staff Management', href: '/dashboard/hr/staff', icon: Users },
-          { name: 'Add New Staff', href: '/dashboard/hr/add-staff', icon: Users }
+          { name: 'Add New Staff', href: '/dashboard/hr/add-staff', icon: UserPlus },
+          { name: 'System Config', href: '/dashboard/hr/system-config', icon: Settings }
         ]
       },
       {
@@ -98,8 +100,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Reports',
         items: [
-          { name: 'Reports', href: '/dashboard/hr/reports', icon: Calendar },
-          
+          { name: 'Reports', href: '/dashboard/hr/reports', icon: Calendar }
         ]
       }
     ],
@@ -162,6 +163,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'Scorecard Lock', href: '/dashboard/ict/scorecard', icon: Lock },
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
           { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
+           { name: 'Panel Permissions', href: '/dashboard/ict/users/roles', icon: Lock },
           { name: 'System Status', href: '/dashboard/ict/system', icon: Database }
         ]
       },
@@ -178,14 +180,21 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
   const activeRole = role || currentUser?.role || 'EMPLOYEE';
   const navSections = navigationConfig[activeRole] || navigationConfig.EMPLOYEE;
 
-  // 🚨 BULLETPROOF NAME EXTRACTION (Using currentUser state)
+  // Name extraction
   const fName = currentUser?.personalDetails?.firstName || currentUser?.firstName || '';
   const lName = currentUser?.personalDetails?.lastName || currentUser?.lastName || '';
   const email = currentUser?.email || '';
   
-  // Fallback to email prefix if name isn't loaded
   const fullName = fName || lName ? `${fName} ${lName}`.trim() : (email.split('@')[0] || 'Unknown User');
   const init = fName ? fName[0].toUpperCase() : (fullName[0] || 'U').toUpperCase();
+
+  // Route calculation for the bottom button
+  const getBasePath = (r) => {
+    if (r === 'HR_ADMIN') return '/dashboard/hr';
+    if (r === 'ICT_ADMIN') return '/dashboard/ict';
+    return `/dashboard/${r.toLowerCase()}`;
+  };
+  const profileLink = `${getBasePath(activeRole)}/profile`;
 
   return (
     <>
@@ -228,7 +237,6 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
               </div>
               
               {section.items.map((item) => {
-                // 🚨 EXACT MATCH LOGIC: Fixes the "Always Selected" Bug
                 const isDashboardRoot = item.href.split('/').length === 3; 
                 const isActive = isDashboardRoot 
                   ? pathname === item.href 
@@ -248,10 +256,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
                         : 'text-white/70 hover:text-[#C9A84C] hover:bg-white/10'} 
                     `}
                   >
-                    {/* Active Indicator Bar */}
                     {isActive && <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-[#C9A84C]"></div>}
-                    
-                    {/* Icon color changes based on active/hover state */}
                     <Icon className={`w-[18px] h-[18px] mr-[12px] transition-colors ${isActive ? 'text-[#C9A84C]' : 'text-white/50 group-hover:text-[#C9A84C]'}`} />
                     {item.name}
                   </Link>
@@ -261,13 +266,17 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           ))}
         </nav>
 
-        {/* Footer Role Badge */}
-        <div className="p-[20px] bg-black/20 border-t border-white/5 shrink-0">
-          <div className="bg-white/5 border border-white/10 rounded-[10px] p-[12px] flex items-center gap-[12px]">
+        {/* Footer Role Badge - Now fully functional and using the Settings icon */}
+        <Link 
+          href={profileLink}
+          onClick={() => setIsOpen(false)}
+          className="p-[20px] bg-black/20 border-t border-white/5 shrink-0 block hover:bg-black/30 transition-colors cursor-pointer group"
+        >
+          <div className="bg-white/5 border border-white/10 rounded-[10px] p-[12px] flex items-center gap-[12px] group-hover:border-white/20 transition-colors">
             <div className="w-[36px] h-[36px] rounded-full bg-[#C9A84C] flex items-center justify-center text-[#0D2B55] font-[800] text-[14px] shadow-sm shrink-0">
               {init}
             </div>
-            <div className="overflow-hidden">
+            <div className="overflow-hidden flex-1">
               <p className="text-[13px] font-[800] text-white tracking-wide truncate" title={fullName}>
                 {fullName}
               </p>
@@ -275,8 +284,12 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
                 {activeRole ? activeRole.replace('_', ' ') : 'EMPLOYEE'}
               </p>
             </div>
+            {/* The Settings Icon is applied right here */}
+            <div className="text-white/30 group-hover:text-[#C9A84C] transition-colors">
+              <Settings size={16} />
+            </div>
           </div>
-        </div>
+        </Link>
       </aside>
     </>
   );

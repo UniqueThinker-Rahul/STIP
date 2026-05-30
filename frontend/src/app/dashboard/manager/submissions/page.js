@@ -81,7 +81,8 @@ export default function MySubmissions() {
                 <div className="flex-1">
                   <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
                   <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} 2026 &middot; Submitted {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} &middot; IPRF: {iprf.toFixed(1)} &mdash; Award: {awardPct}%
+                    {/* 🚨 UPGRADED: Added exact local time to the submission timestamp string */}
+                    {jobTitle} &middot; {quarter} 2026 &middot; Submitted {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &middot; IPRF: {iprf.toFixed(1)} &mdash; Award: {awardPct}%
                   </div>
                   
                   {a.narrative?.generalComments && a.workflow?.status === 'REOPENED' && (

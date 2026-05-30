@@ -15,8 +15,52 @@ export default function Drafts() {
         setLoading(true);
         const res = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
         const allApps = res.data?.data || [];
-        // FIX: Correct nested schema checking!
-        setDrafts(allApps.filter(a => a.workflow?.status === 'DRAFT'));
+        
+        // 🚨 UPGRADE: Smart Auto-Cleanup & Garbage Collection
+        
+        // 1. Identify all appraisals that are ALREADY submitted (Status is NOT draft)
+        const submittedApps = allApps.filter(a => a.workflow?.status !== 'DRAFT');
+        
+        // 2. Create a unique footprint (EmployeeID + Quarter) for submitted appraisals
+        const submittedSignatures = new Set(
+          submittedApps.map(a => {
+            const empId = a.employeeId?._id || a.employeeId || 'unknown';
+            const qtr = a.period?.quarter || 'unknown';
+            return `${empId}-${qtr}`;
+          })
+        );
+
+        // 3. Sort raw drafts by date (Newest first) so we always keep the most recent one
+        const rawDrafts = allApps.filter(a => a.workflow?.status === 'DRAFT');
+        rawDrafts.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+
+        const validDrafts = [];
+        const seenDraftSignatures = new Set();
+
+        // 4. Scan all drafts to filter out obsolete or duplicate ones
+        for (const draft of rawDrafts) {
+          const empId = draft.employeeId?._id || draft.employeeId || 'unknown';
+          const qtr = draft.period?.quarter || 'unknown';
+          const signature = `${empId}-${qtr}`;
+
+          if (submittedSignatures.has(signature)) {
+            // SCENARIO A: Obsolete Draft! A submitted version already exists.
+            // Silently delete the orphaned draft from the database.
+            api.delete(`/appraisals/${draft._id}`).catch(e => console.error('Auto-cleanup failed', e));
+          } 
+          else if (seenDraftSignatures.has(signature)) {
+            // SCENARIO B: Duplicate Draft! A newer draft already exists for this quarter.
+            // Silently delete the older duplicate.
+            api.delete(`/appraisals/${draft._id}`).catch(e => console.error('Auto-cleanup duplicate failed', e));
+          } 
+          else {
+            // SCENARIO C: Valid, most recent draft! Keep it.
+            seenDraftSignatures.add(signature);
+            validDrafts.push(draft);
+          }
+        }
+
+        setDrafts(validDrafts);
       } catch (e) { 
         console.error('Error fetching drafts:', e); 
       } finally { 
@@ -55,7 +99,6 @@ export default function Drafts() {
       ) : (
         <div className="flex flex-col gap-[12px]">
           {drafts.map((d) => {
-            // FIX: Remap to complex schema
             const fName = d.employeeId?.personalDetails?.firstName || 'Unknown';
             const lName = d.employeeId?.personalDetails?.lastName || '';
             const jobTitle = d.employeeId?.employmentDetails?.jobTitle || 'Staff';
@@ -66,7 +109,7 @@ export default function Drafts() {
                 <div className="flex-1">
                   <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
                   <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} 2026 &middot; Last saved {new Date(d.updatedAt || d.createdAt).toLocaleDateString()}
+                    {jobTitle} &middot; {quarter} 2026 &middot; Last saved {new Date(d.updatedAt || d.createdAt).toLocaleDateString()} at {new Date(d.updatedAt || d.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
                 

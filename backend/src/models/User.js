@@ -14,11 +14,13 @@ const userSchema = new mongoose.Schema({
   
   employmentDetails: {
     jobTitle: { type: String, required: true },
+    officeLocation: { type: String, default: 'Unassigned' },
+    salary: { type: Number, default: 0 }, // 🚨 ADDED: Salary Field
     dateOfHire: { type: Date, required: true },
     prorateValue: { type: Number, default: 12 },
     rawManagerName: { type: String }, // Temporary field for importing
     reportingTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    isActive: { type: Boolean, default: true }
+    isActive: { type: Boolean, default: true } // 🚨 Account Status Field
   },
 
   security: {

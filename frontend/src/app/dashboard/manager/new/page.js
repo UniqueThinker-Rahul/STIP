@@ -138,6 +138,7 @@ function NewAppraisalForm() {
   const [formData, setFormData] = useState({ title: '', quarter: 'Q3', comments: '', epJustification: '' });
   const [scores, setScores] = useState({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
   const [expandedCrit, setExpandedCrit] = useState('expectedResults'); 
+  const [rejectionReason, setRejectionReason] = useState('');
 
   const [quarterStatuses, setQuarterStatuses] = useState({
     Q1: 'pending', Q2: 'pending', Q3: 'now', Q4: 'upcoming'
@@ -210,17 +211,26 @@ function NewAppraisalForm() {
           empHistory.forEach(app => {
             const q = app.period?.quarter;
             if (q) {
-              newStatuses[q] = app.workflow?.status === 'DRAFT' ? 'draft' : 'submitted';
+              if (app.workflow?.status === 'DRAFT') {
+                newStatuses[q] = 'draft';
+              } else if (app.workflow?.status === 'NOT_APPROVED' || app.workflow?.status === 'REOPENED') {
+                newStatuses[q] = 'reopened'; 
+                setRejectionReason(app.narrative?.ceoComments || app.narrative?.hrComments || app.narrative?.generalComments || 'Please revise your submission.');
+              } else {
+                newStatuses[q] = 'submitted'; 
+              }
             }
           });
           
           setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
           const emp = team.find(s => s._id === selectedStaffId);
           setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
+          setRejectionReason('');
         } else {
            setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
            const emp = team.find(s => s._id === selectedStaffId);
            setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
+           setRejectionReason('');
         }
 
         setQuarterStatuses(newStatuses);
@@ -248,7 +258,9 @@ function NewAppraisalForm() {
   }
 
   const requiresEPJustification = calculatedIPRF >= 1.3;
-  const isCurrentQuarterLocked = quarterConfig.lockedQuarters.includes(formData.quarter);
+  
+  const isAlreadySubmitted = quarterStatuses[formData.quarter] === 'submitted';
+  const isCurrentQuarterLocked = quarterConfig.lockedQuarters.includes(formData.quarter) || isAlreadySubmitted;
 
   let proRata = 1.0;
   let prMonths = 12;
@@ -275,6 +287,7 @@ function NewAppraisalForm() {
     setSelectedStaffId('');
     setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
     setFormData({ title: '', quarter: quarterConfig.activeQuarter, comments: '', epJustification: '' });
+    setRejectionReason('');
     if (draftId) router.replace('/dashboard/manager/new'); 
   };
 
@@ -292,7 +305,7 @@ function NewAppraisalForm() {
 
   const handleSubmit = async (isDraft) => {
     if (!selectedStaffId) return alert("Please select an employee.");
-    if (isCurrentQuarterLocked) return alert("This period is locked by HR Admin and cannot accept entry updates.");
+    if (isCurrentQuarterLocked) return alert("This appraisal is locked or has already been submitted to HR.");
     if (!isDraft && ratedCount < 6) return alert("Please rate all 6 criteria before submitting.");
     if (!isDraft && requiresEPJustification && formData.epJustification.trim().length < 10) {
       return alert("A comprehensive EP Justification is mandatory.");
@@ -303,21 +316,28 @@ function NewAppraisalForm() {
       const payload = {
         employeeId: selectedStaffId,
         reviewYear: 2026,
-        quarter: formData.quarter,
-        metrics: scores, 
-        individualAssessment: calculatedIPRF,
-        stipAward: stipAwardPct,
-        comments: `${formData.comments} ${formData.epJustification ? '| EP Justification: ' + formData.epJustification : ''}`.trim(),
+        period: { quarter: formData.quarter },
+        scores: scores,
+        calculatedResults: { finalIprfScore: calculatedIPRF },
+        stipAward: parseFloat(stipAwardPct),
+        narrative: {
+          generalComments: formData.comments.trim(),
+          epJustification: formData.epJustification.trim()
+        },
         status: isDraft ? 'DRAFT' : 'SUBMITTED' 
       };
 
       await api.post('/appraisals', payload);
       
+      // 🚨 UPGRADE: Capture exact system time
+      const submissionDate = new Date().toLocaleDateString();
+      const submissionTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
       if (isDraft) {
-        alert("Draft saved successfully!");
+        alert(`Draft saved successfully on ${submissionDate} at ${submissionTime}!`);
         router.push('/dashboard/manager/drafts');
       } else {
-        alert("Appraisal successfully submitted to HR Manager!");
+        alert(`Appraisal successfully submitted to HR Manager on ${submissionDate} at ${submissionTime}!`);
         router.push('/dashboard/manager/submissions'); 
       }
     } catch (err) {
@@ -398,7 +418,19 @@ function NewAppraisalForm() {
 
           {selectedStaffId && (
             <>
-              {/* UPGRADED: EMPLOYEE DETAILS FORM BLOCK (Matches screenshot) */}
+              {/* Rejection Notification Alert Box */}
+              {quarterStatuses[formData.quarter] === 'reopened' && rejectionReason && (
+                <div className="mb-4 bg-red-50 border-l-4 border-red-500 rounded-xl p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                    <span className="text-[12px] font-black text-red-800 uppercase tracking-wider">Appraisal Rejected — Revision Required</span>
+                  </div>
+                  <div className="text-sm text-red-700 font-medium ml-7 bg-white p-3 rounded-lg border border-red-100 shadow-inner">
+                    {rejectionReason}
+                  </div>
+                </div>
+              )}
+
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3 bg-gray-50/50">
                   <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[14px] shrink-0">&#128100;</div>
@@ -430,21 +462,40 @@ function NewAppraisalForm() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[11px] font-[600] text-[#0D2B55]">Job Title <span className="text-red-500">*</span></label>
-                      <select 
-                        value={formData.title} 
-                        onChange={e => setFormData({...formData, title: e.target.value})}
-                        className="p-2 border border-gray-300 rounded-lg text-xs text-gray-900 bg-white outline-none cursor-pointer"
-                      >
-                        <option value="">-- Select Job Title --</option>
-                        {JOB_TITLES.map(title => <option key={title} value={title}>{title}</option>)}
-                      </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                    <div className="flex flex-col gap-1 sm:col-span-2">
+                      <label className="text-[11px] font-[600] text-[#0D2B55]">
+                        Job Title {selectedStaff?.employmentDetails?.jobTitle ? <span className="text-[9px] font-[700] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-1 uppercase">Auto</span> : <span className="text-red-500">*</span>}
+                      </label>
+                      {selectedStaff?.employmentDetails?.jobTitle ? (
+                        <input 
+                          readOnly 
+                          value={selectedStaff.employmentDetails.jobTitle} 
+                          className="p-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-500 bg-gray-50 cursor-default" 
+                        />
+                      ) : (
+                        <select 
+                          value={formData.title} 
+                          onChange={e => setFormData({...formData, title: e.target.value})}
+                          disabled={isCurrentQuarterLocked}
+                          className="p-2 border border-gray-300 rounded-lg text-xs text-gray-900 bg-white outline-none cursor-pointer disabled:bg-gray-100 disabled:opacity-70"
+                        >
+                          <option value="">-- Select Job Title --</option>
+                          {JOB_TITLES.map(title => <option key={title} value={title}>{title}</option>)}
+                        </select>
+                      )}
                     </div>
-                    <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1">
                       <label className="text-[11px] font-[600] text-[#0D2B55]">Reporting Manager <span className="text-[9px] font-[700] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-1 uppercase">Auto</span></label>
-                      <input readOnly value="Assigned Line Manager" className="p-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-500 bg-gray-50 cursor-default" />
+                      <input 
+                        readOnly 
+                        value={
+                          selectedStaff?.employmentDetails?.reportingTo?.personalDetails 
+                            ? `${selectedStaff.employmentDetails.reportingTo.personalDetails.firstName} ${selectedStaff.employmentDetails.reportingTo.personalDetails.lastName}`
+                            : selectedStaff?.employmentDetails?.rawManagerName || "Assigned Line Manager"
+                        } 
+                        className="p-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-500 bg-gray-50 cursor-default" 
+                      />
                     </div>
                   </div>
 
@@ -471,14 +522,17 @@ function NewAppraisalForm() {
                   
                   {isCurrentQuarterLocked && (
                     <div className="flex items-center gap-1.5 text-[10px] text-amber-700 font-bold mt-2">
-                      <Calendar className="w-3 h-3" /> Selected period is locked by HR Administration. Overrides only.
+                      <Calendar className="w-3 h-3 shrink-0" /> 
+                      {isAlreadySubmitted 
+                        ? "LOCKED: An active appraisal for this quarter is already in the system. You cannot edit it." 
+                        : "LOCKED: Selected period is locked by HR Administration."}
                     </div>
                   )}
                 </div>
               </div>
 
               {/* STEP 3: PERFORMANCE CRITERIA COMPLIANCE INTERFACE */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-4">
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-[14px] shrink-0">&#11088;</div>
@@ -553,9 +607,7 @@ function NewAppraisalForm() {
                                 { v: 1.3, l: 'Exceeds Performance', bg: 'bg-blue-50 text-blue-700 border-blue-300' }
                               ].map(opt => (
                                 <button 
-                                  key={opt.v}
-                                  type="button"
-                                  disabled={isCurrentQuarterLocked}
+                                  key={opt.v} type="button" disabled={isCurrentQuarterLocked}
                                   onClick={() => handleScore(crit.id, opt.v)}
                                   className={`p-2.5 rounded-xl border-2 text-center transition-all ${isCurrentQuarterLocked ? 'opacity-40 cursor-not-allowed' : ''} ${
                                     val === opt.v ? `${opt.bg} shadow-md scale-[1.02] border-current font-black` : 'border-gray-200 bg-white hover:bg-slate-50 text-gray-500'
@@ -645,7 +697,7 @@ function NewAppraisalForm() {
               </div>
 
               {/* ACTION PIPELINE ROW CONTROLS */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row gap-3 pt-2 mt-4">
                 <button type="button" onClick={handleClear} className="px-5 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-50 transition-all">← Start Over</button>
                 
                 <button 
@@ -697,7 +749,14 @@ function NewAppraisalForm() {
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between"><span className="text-gray-500">ID</span><span className="font-bold text-gray-800">{selectedStaff.employeeId}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Company</span><span className="font-bold text-gray-800">{selectedStaff.companyCode || 'FSM'}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Manager</span><span className="font-bold text-gray-800 text-right text-[10px] max-w-[130px] truncate">Assigned Line Manager</span></div>
+                   <div className="flex justify-between">
+                      <span className="text-gray-500">Manager</span>
+                      <span className="font-bold text-gray-800 text-right text-[10px] max-w-[130px] truncate">
+                        {selectedStaff?.employmentDetails?.reportingTo?.personalDetails 
+                          ? `${selectedStaff.employmentDetails.reportingTo.personalDetails.firstName} ${selectedStaff.employmentDetails.reportingTo.personalDetails.lastName}`
+                          : selectedStaff?.employmentDetails?.rawManagerName || "Assigned Line Manager"}
+                      </span>
+                    </div>
                     <div className="flex justify-between mt-2 pt-2 border-t border-gray-50"><span className="text-gray-500">Pro-Rata</span><span className="font-bold text-[#0D2B55]">{proRata.toFixed(3)}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Months</span><span className="font-bold text-[#0D2B55]">{prMonths}/12</span></div>
                   </div>

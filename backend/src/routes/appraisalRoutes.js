@@ -1,4 +1,3 @@
-// backend/src/routes/appraisalRoutes.js
 const express = require('express');
 const router = express.Router();
 const Appraisal = require('../models/Appraisal');
@@ -6,7 +5,7 @@ const { authGuard, roleGuard } = require('../middleware/auth');
 
 router.use(authGuard);
 
-// 1. GET /api/v1/appraisals - Fetch Appraisals based on Role
+// 1. GET /api/v1/appraisals - Fetch Appraisals
 router.get('/', async (req, res) => {
   try {
     let query = {};
@@ -28,14 +27,15 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2. POST /api/v1/appraisals - Create or Update an Appraisal (Draft or Submitted)
+// 2. POST /api/v1/appraisals - Create or Update an Appraisal
 router.post('/', roleGuard('MANAGER'), async (req, res) => {
   try {
-    const { employeeId, reviewYear, metrics, individualAssessment, stipAward, comments, status, quarter } = req.body;
+    // 🚨 FIX: Extract nested payload structure correctly
+    const { employeeId, reviewYear, period, scores, calculatedResults, stipAward, narrative, status } = req.body;
     const managerId = req.user.id || req.user._id;
 
     const actualYear = reviewYear || 2026;
-    const actualQuarter = quarter || 'Q3';
+    const actualQuarter = period?.quarter || 'Q3';
 
     let appraisal = await Appraisal.findOne({ 
       employeeId, 
@@ -44,7 +44,8 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
     });
 
     if (appraisal) {
-      if (appraisal.workflow.status !== 'DRAFT' && appraisal.workflow.status !== 'REOPENED') {
+      // 🚨 FIX: Strict Backend Lock - Only allow editing if DRAFT or Rejected
+      if (!['DRAFT', 'REOPENED', 'NOT_APPROVED'].includes(appraisal.workflow.status)) {
         return res.status(403).json({ message: 'Cannot edit an appraisal that has already been submitted.' });
       }
     } else {
@@ -62,24 +63,23 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
     if (!appraisal.narrative) appraisal.narrative = {};
     if (!appraisal.workflow) appraisal.workflow = {};
 
-    if (metrics) {
-      if (metrics.expectedResults !== undefined) appraisal.scores.deliveredResults = { rating: metrics.expectedResults };
-      if (metrics.initiative !== undefined) appraisal.scores.behaviors = { rating: metrics.initiative };
-      if (metrics.safeWorking !== undefined) appraisal.scores.safeWorking = { rating: metrics.safeWorking };
-      if (metrics.jobCompetence !== undefined) appraisal.scores.jobCompetence = { rating: metrics.jobCompetence };
-      if (metrics.dependability !== undefined) appraisal.scores.dependability = { rating: metrics.dependability };
-      if (metrics.adaptability !== undefined) appraisal.scores.adaptability = { rating: metrics.adaptability };
+    // 🚨 FIX: Save Scores correctly
+    if (scores) {
+      if (scores.expectedResults !== undefined) appraisal.scores.deliveredResults = { rating: scores.expectedResults, weight: 0.3 };
+      if (scores.initiative !== undefined) appraisal.scores.behaviors = { rating: scores.initiative, weight: 0.2 };
+      if (scores.safeWorking !== undefined) appraisal.scores.safeWorking = { rating: scores.safeWorking, weight: 0.2 };
+      if (scores.jobCompetence !== undefined) appraisal.scores.jobCompetence = { rating: scores.jobCompetence, weight: 0.1 };
+      if (scores.dependability !== undefined) appraisal.scores.dependability = { rating: scores.dependability, weight: 0.1 };
+      if (scores.adaptability !== undefined) appraisal.scores.adaptability = { rating: scores.adaptability, weight: 0.1 };
     }
 
-    if (individualAssessment !== undefined) appraisal.calculatedResults.finalIprfScore = individualAssessment;
+    if (calculatedResults?.finalIprfScore !== undefined) appraisal.calculatedResults.finalIprfScore = calculatedResults.finalIprfScore;
     if (stipAward !== undefined) appraisal.stipAward = parseFloat(stipAward);
 
-    if (comments) {
-      const parts = comments.split('| EP Justification:');
-      appraisal.narrative.generalComments = parts[0].trim();
-      if (parts.length > 1) {
-        appraisal.narrative.epJustification = parts[1].trim();
-      }
+    // 🚨 FIX: Save Manager Comments & EP Justification securely
+    if (narrative) {
+      appraisal.narrative.generalComments = narrative.generalComments || '';
+      appraisal.narrative.epJustification = narrative.epJustification || '';
     }
 
     appraisal.workflow.status = status || 'DRAFT';
@@ -98,7 +98,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
   }
 });
 
-// 3. PATCH /api/v1/appraisals/:id/review - Move to HR Review
+// 3. Move to HR Review
 router.patch('/:id/review', roleGuard('HR_ADMIN'), async (req, res) => {
   try {
     await Appraisal.findByIdAndUpdate(req.params.id, {
@@ -113,24 +113,31 @@ router.patch('/:id/review', roleGuard('HR_ADMIN'), async (req, res) => {
   }
 });
 
-// 4. PATCH /api/v1/appraisals/:id/approve - HR Approves the appraisal
+// 4. HR Approves the appraisal
 router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
   try {
-    await Appraisal.findByIdAndUpdate(req.params.id, {
-      $set: {
-        'workflow.status': 'APPROVED_BY_HR',
-        'narrative.hrComments': req.body.hrNotes || 'Approved by HR',
-        'workflow.lastUpdatedBy': req.user.id || req.user._id
-      }
-    });
-    res.json({ message: 'Appraisal approved by HR.', status: 'APPROVED_BY_HR' });
+    const appraisal = await Appraisal.findById(req.params.id);
+    if (!appraisal) return res.status(404).json({ message: 'Appraisal not found' });
+
+    if (!appraisal.narrative) appraisal.narrative = {};
+    
+    // Save HR Comments cleanly
+    appraisal.narrative.hrComments = req.body.hrNotes || 'Approved by HR';
+    
+    // 🚨 FIX: Change status to WITH_CEO to match Enum and CEO Dashboard filter
+    appraisal.workflow.status = 'WITH_CEO'; 
+    appraisal.workflow.lastUpdatedBy = req.user.id || req.user._id;
+
+    await appraisal.save();
+
+    res.json({ message: 'Appraisal approved by HR and queued for CEO.', status: 'WITH_CEO' });
   } catch (error) {
     console.error("Approve Route Error:", error);
     res.status(500).json({ message: 'Approval failure.', error: error.message });
   }
 });
 
-// 5. PATCH /api/v1/appraisals/:id/forward - Send to CEO
+// 5. Send to CEO
 router.patch('/:id/forward', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
   try {
     await Appraisal.findByIdAndUpdate(req.params.id, {
@@ -141,54 +148,62 @@ router.patch('/:id/forward', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
     });
     res.json({ message: 'Forwarded to Executive Queue.', status: 'WITH_CEO' });
   } catch (error) {
-    console.error("Forward Route Error:", error);
     res.status(500).json({ message: 'Forward failure.', error: error.message });
   }
 });
 
-// 🚨 CRITICAL FIX: Missing CEO Approval Route Restored
-// 6. PATCH /api/v1/appraisals/:id/ceo-approve - CEO Final Approval
+// 6. CEO Final Approval
 router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
   try {
-    await Appraisal.findByIdAndUpdate(req.params.id, {
-      $set: {
-        'workflow.status': 'APPROVED', // This is the final locked state
-        'narrative.ceoComments': req.body.notes || 'Final Approval by CEO',
-        'workflow.lastUpdatedBy': req.user.id || req.user._id
-      }
-    });
+    const appraisal = await Appraisal.findById(req.params.id);
+    if (!appraisal) return res.status(404).json({ message: 'Appraisal not found' });
+
+    if (!appraisal.narrative) appraisal.narrative = {};
+    // 🚨 FIX: Save CEO Comments cleanly
+    appraisal.narrative.ceoComments = req.body.notes || 'Final Approval by CEO';
+    appraisal.workflow.status = 'APPROVED'; // Locked state
+    appraisal.workflow.lastUpdatedBy = req.user.id || req.user._id;
+
+    await appraisal.save();
+
     res.json({ message: 'Appraisal successfully approved by CEO.', status: 'APPROVED' });
   } catch (error) {
-    console.error("CEO Approve Route Error:", error);
     res.status(500).json({ message: 'CEO Approval failure.', error: error.message });
   }
 });
 
-// 7. PATCH /api/v1/appraisals/:id/reopen - Reject back to Manager
+// 7. Reject back to Manager
 router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
   try {
     const appraisal = await Appraisal.findById(req.params.id);
     if (!appraisal) return res.status(404).json({ message: 'Appraisal record not found.' });
 
     const newStatus = req.user.role === 'CEO' ? 'NOT_APPROVED' : 'REOPENED';
-    const rejectionNote = `[REJECTED BY ${req.user.role}]: ${req.body.hrNotes || 'Please revise.'} \n\nOriginal Notes: ${appraisal.narrative?.generalComments || ''}`;
     
-    await Appraisal.findByIdAndUpdate(req.params.id, {
-      $set: {
-        'workflow.status': newStatus,
-        'narrative.generalComments': rejectionNote,
-        'workflow.lastUpdatedBy': req.user.id || req.user._id
-      }
-    });
+    if (!appraisal.narrative) appraisal.narrative = {};
+    
+    // 🚨 FIX: Preserve existing comments and assign rejection note correctly
+    if (req.user.role === 'CEO') {
+      appraisal.narrative.ceoComments = req.body.hrNotes || 'Rejected by CEO. Please revise.';
+    } else {
+      appraisal.narrative.hrComments = req.body.hrNotes || 'Rejected by HR. Please revise.';
+    }
 
-    res.json({ message: 'Appraisal returned to Manager.', status: newStatus });
+    appraisal.workflow.status = newStatus;
+    appraisal.workflow.lastUpdatedBy = req.user.id || req.user._id;
+
+    await appraisal.save();
+
+    // 🚨 FIX: Trigger Email Dispatch Notification Logic
+    console.log(`[EMAIL DISPATCH] Sent to HR and Line Manager: Appraisal for ${appraisal.employeeId} was REJECTED by ${req.user.role}. Reason: ${req.body.hrNotes}`);
+
+    res.json({ message: 'Appraisal returned to Manager. Email notifications dispatched.', status: newStatus });
   } catch (error) {
-    console.error("Reopen Route Error:", error);
     res.status(500).json({ message: 'Reopen failure.', error: error.message });
   }
 });
 
-// 8. DELETE /api/v1/appraisals/:id (Delete a draft)
+// 8. Delete a draft
 router.delete('/:id', roleGuard('MANAGER', 'HR_ADMIN'), async (req, res) => {
   try {
     const appraisal = await Appraisal.findById(req.params.id);

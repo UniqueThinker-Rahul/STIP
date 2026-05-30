@@ -125,7 +125,11 @@ export default function SubmitToCEO() {
                         </div>
                         <div>
                           <div className="font-[800] text-[#0D2B55] text-[13px]">{empName}</div>
-                          <div className="text-[10px] text-[#6b7280] font-[600]">{a.employeeId?.companyCode || 'FSM'}</div>
+                          <div className="text-[10px] text-[#6b7280] font-[600]">
+                            {a.employeeId?.companyCode || 'FSM'}
+                            {/* 🚨 UPGRADED: Added exact Timestamp info here */}
+                            <span className="font-normal text-gray-400"> &middot; {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} at {new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
                         </div>
                       </div>
                     </td>

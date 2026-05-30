@@ -25,26 +25,31 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
-// --- UPGRADED: Added HR Update Logic ---
+// --- UPGRADED: Added HR Update Logic with Office Location ---
 exports.updateUserByHR = async (req, res) => {
   try {
-    const { firstName, lastName, jobTitle, companyCode, role, reportingTo } = req.body;
+    const { firstName, lastName, jobTitle, officeLocation, companyCode, role, reportingTo } = req.body;
     
-   // Change this:
-const updatedUser = await User.findByIdAndUpdate(
-  req.params.id,
-  {
-    $set: {
-      'personalDetails.firstName': firstName,
-      'personalDetails.lastName': lastName,
-      'employmentDetails.jobTitle': jobTitle,
-      'employmentDetails.reportingTo': reportingTo || null,
-      companyCode: companyCode,
-      'security.role': role
+    // 🚨 ADDED: Protection against deleting Company Code if not reassigned
+    if (!companyCode || companyCode.trim() === '') {
+       return res.status(400).json({ success: false, message: "Company Code cannot be empty. Please reassign the employee to a valid company code." });
     }
-  },
-  { returnDocument: 'after' } // UPDATED HERE
-);
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          'personalDetails.firstName': firstName,
+          'personalDetails.lastName': lastName,
+          'employmentDetails.jobTitle': jobTitle,
+          'employmentDetails.officeLocation': officeLocation, // 🚨 ADDED
+          'employmentDetails.reportingTo': reportingTo || null,
+          'companyCode': companyCode,
+          'security.role': role
+        }
+      },
+      { new: true }
+    );
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User not found" });

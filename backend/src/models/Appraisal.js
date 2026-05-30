@@ -15,7 +15,8 @@ const appraisalSchema = new mongoose.Schema({
       type: String, 
       enum: ['DRAFT', 'SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED', 'REOPENED', 'NOT_APPROVED'],
       default: 'DRAFT'
-    }
+    },
+    lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   },
   
   scores: {
@@ -30,7 +31,19 @@ const appraisalSchema = new mongoose.Schema({
   calculatedResults: {
     finalIprfScore: { type: Number, default: 0 },
     isExceedingPerformance: { type: Boolean, default: false }
-  }
+  },
+
+  // 🚨 FIX: Added the missing narrative block so MongoDB stops deleting your comments!
+  narrative: {
+    generalComments: { type: String, default: '' },
+    epJustification: { type: String, default: '' },
+    hrComments: { type: String, default: '' },
+    ceoComments: { type: String, default: '' }
+  },
+
+  // 🚨 FIX: Added stipAward so it stops getting deleted!
+  stipAward: { type: Number, default: 0 }
+  
 }, { timestamps: true });
 
 module.exports = mongoose.model('Appraisal', appraisalSchema);

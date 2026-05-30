@@ -3,7 +3,6 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const userController = require('../controllers/userController');
-//const { authGuard } = require('../middleware/auth');
 
 // 1. IMPORT MIDDLEWARE 
 // (We only import from auth.js, preventing duplicate declarations)
@@ -73,34 +72,49 @@ router.get('/:id', async (req, res) => {
 });
 
 // 7. POST /api/v1/users (Create new staff)
-router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN'), async (req, res) => {
+// 🚨 UPGRADED: Added flexible ICT Admin role string variations
+router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
   try {
-    const { employeeId, firstName, lastName, jobTitle, dateOfHire, role, reportingTo } = req.body;
+    // 🚨 UPGRADED: Extracted 'salary' to sync with the new database schema
+    const { employeeId, firstName, lastName, jobTitle, officeLocation, companyCode, dateOfHire, role, reportingTo, prorateValue, isActive, salary } = req.body;
+    
     const hiringYear = new Date(dateOfHire).getFullYear();
     const username = `${employeeId}${hiringYear}`;
     const password = `STIP+${employeeId}`;
 
     const newUser = new User({
       employeeId,
-      companyCode: 'FSM',
+      companyCode: companyCode || 'FSM', 
       username,
       password,
       personalDetails: { firstName, lastName },
-      employmentDetails: { jobTitle, dateOfHire, reportingTo: reportingTo || null },
+      employmentDetails: { 
+        jobTitle, 
+        officeLocation: officeLocation || 'Unassigned', 
+        salary: salary || 0, // 🚨 Added salary fallback
+        dateOfHire, 
+        prorateValue: prorateValue || 12,               
+        reportingTo: reportingTo || null,
+        isActive: isActive !== undefined ? isActive : true
+      },
       security: { role: role || 'EMPLOYEE', isFirstLogin: true }
     });
 
     await newUser.save();
     res.status(201).json({ message: 'Staff member created successfully.', username });
   } catch (error) {
-    res.status(400).json({ message: 'Error creating user.' });
+    console.error("Error creating user:", error);
+    // Return specific error message to the frontend for easier debugging
+    res.status(400).json({ message: error.message || 'Error creating user.' });
   }
 });
 
-// 8. PATCH /api/v1/users/:id/hr-update (Edit, Upgrade Role, Reassign Manager)
-router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN'), userController.updateUserByHR);
+// 8. PATCH /api/v1/users/:id/hr-update (Edit, Upgrade Role, Reassign Manager, ICT Manage Access)
+// 🚨 UPGRADED: Added flexible ICT Admin role string variations
+router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), userController.updateUserByHR);
 
 // 9. DELETE /api/v1/users/:id (Delete staff)
-router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN'), userController.deleteUser);
+// 🚨 UPGRADED: Added flexible ICT Admin role string variations
+router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), userController.deleteUser);
 
 module.exports = router;

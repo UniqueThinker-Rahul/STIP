@@ -4,10 +4,16 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto'); // Built into Node.js
 const User = require('../models/User');
+
+// 🚨 THE FIX: Use your existing auth.js file and your authGuard function!
 const { authGuard } = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
+const { updatePassword } = require('../controllers/authController');
 
-// 💡 UPGRADE: Increased max to 100 to prevent React Fast Refresh from locking you out
+// 🚨 THE FIX: Use authGuard instead of protect
+router.patch('/update-password', authGuard, updatePassword);
+
+// ⚡ UPGRADE: Increased max to 100 to prevent React Fast Refresh from locking you out
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, 
@@ -16,8 +22,6 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// POST /api/v1/auth/login
-// UPGRADE: Injected loginLimiter middleware to actively enforce brute-force protection
 // POST /api/v1/auth/login
 router.post('/login', loginLimiter, async (req, res) => {
   try {
@@ -37,7 +41,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
-    // 🚨 DYNAMIC PORTAL CLEARANCE CHECK 🚨
+    // ⚡ DYNAMIC PORTAL CLEARANCE CHECK ⚡
     const actualRole = user.security.role;
     let authorized = false;
 
@@ -54,11 +58,14 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     const sessionId = crypto.randomBytes(16).toString('hex');
-    user.security.currentSessionId = sessionId;
-    await user.save();
+    
+    // 🚨 SECURE FIX: Bypass full document validation (prevents missing jobTitle crashes)
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'security.currentSessionId': sessionId } }
+    );
 
-    // 💡 THE SANDBOX: Issue the token for the specific portal they requested!
-    // If the CEO logs into the Manager portal, their session is restricted to 'MANAGER' capabilities.
+    // ⚡ THE SANDBOX: Issue the token for the specific portal they requested!
     const tokenRole = requestedPortal || actualRole;
 
     const token = jwt.sign(
@@ -91,12 +98,10 @@ router.post('/login', loginLimiter, async (req, res) => {
 });
 
 // POST /api/v1/auth/staff-login
-// Dedicated route for the Staff Access Portal. Uses standard credentials but issues an EMPLOYEE token.
 router.post('/staff-login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    // Sanitize input to prevent hidden space errors
     const safeUsername = username ? username.trim() : '';
 
     const user = await User.findOne({ username: safeUsername });
@@ -111,13 +116,15 @@ router.post('/staff-login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
-    // SUCCESS! Generate Session ID
     const sessionId = crypto.randomBytes(16).toString('hex');
-    user.security.currentSessionId = sessionId;
-    await user.save();
+    
+    // 🚨 SECURE FIX: Bypass full document validation
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'security.currentSessionId': sessionId } }
+    );
 
     // THE CRITICAL TWIST: Force the token role to 'EMPLOYEE'
-    // This sandboxes the user to the Employee Dashboard for this session, even if they are a Line Manager!
     const token = jwt.sign(
       { 
         id: user._id, 
@@ -136,8 +143,8 @@ router.post('/staff-login', loginLimiter, async (req, res) => {
         username: user.username,
         firstName: user.personalDetails.firstName,
         lastName: user.personalDetails.lastName,
-        role: 'EMPLOYEE', // Send the downgraded role to the frontend
-        isFirstLogin: user.security.isFirstLogin // Make sure to pass this along so the frontend can force password changes
+        role: 'EMPLOYEE', 
+        isFirstLogin: user.security.isFirstLogin 
       }
     });
 
@@ -146,13 +153,14 @@ router.post('/staff-login', loginLimiter, async (req, res) => {
     res.status(500).json({ message: 'Server error during staff verification.' });
   }
 });
+
 // POST /api/v1/auth/logout (Securely destroys the session)
 router.post('/logout', authGuard, async (req, res) => {
   try {
-    // Find the user and wipe out the session ID in the database
-    await User.findByIdAndUpdate(req.user.id, {
-      $set: { 'security.currentSessionId': null }
-    });
+    await User.updateOne(
+      { _id: req.user.id },
+      { $set: { 'security.currentSessionId': null } }
+    );
     
     res.json({ message: 'Successfully logged out.' });
   } catch (error) {
@@ -165,7 +173,6 @@ router.patch('/change-password', authGuard, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     
-    // 1. Enforce minimum password strength (e.g., 8 characters)
     if (!newPassword || newPassword.length < 8) {
       return res.status(400).json({ message: 'New password must be at least 8 characters long.' });
     }
@@ -173,21 +180,28 @@ router.patch('/change-password', authGuard, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found.' });
 
-    // 2. Verify they know their current password (security best practice)
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: 'Incorrect current password.' });
     }
 
-    // 3. Update the password. 
-    // (Note: The userSchema.pre('save') hook we wrote earlier will automatically hash this before it hits the database!)
-    user.password = newPassword;
-    user.security.isFirstLogin = false;
+    // 🚨 SECURE FIX: Manually hash the new password, then updateOne to bypass strict schema validation
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
     
-    await user.save();
+    await User.updateOne(
+      { _id: user._id },
+      { 
+        $set: { 
+          password: hashedPassword,
+          'security.isFirstLogin': false 
+        } 
+      }
+    );
 
     res.json({ message: 'Password successfully updated. Your account is secure.' });
   } catch (error) {
+    console.error('Change Password Error:', error);
     res.status(500).json({ message: 'Server error during password update.' });
   }
 });

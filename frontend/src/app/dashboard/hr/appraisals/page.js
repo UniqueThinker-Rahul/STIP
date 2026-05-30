@@ -138,7 +138,8 @@ export default function AllAppraisals() {
                     <tr key={a._id} className="hover:bg-[#FAF8F4] transition-colors">
                       <td className="p-[12px_16px]">
                         <div className="font-[700] text-[#0D2B55]">{empName}</div>
-                        <div className="text-[11px] text-[#6b7280]">{a.employeeId?.employmentDetails?.jobTitle}</div>
+                        {/* 🚨 UPGRADED: Added exact Timestamp info directly below the job title */}
+                        <div className="text-[11px] text-[#6b7280]">{a.employeeId?.employmentDetails?.jobTitle} &middot; {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                       </td>
                       <td className="p-[12px_16px] text-[#0f1923] text-[12px]">{mgrName || 'Unknown'}</td>
                       <td className="p-[12px_16px] text-center">
@@ -190,8 +191,9 @@ export default function AllAppraisals() {
                   <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
                     {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
                   </h3>
+                  {/* 🚨 UPGRADED: Added exact Timestamp info to Audit Modal Header */}
                   <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; ID: {selectedAppraisal.employeeId?.employeeId}
+                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Last updated {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               </div>

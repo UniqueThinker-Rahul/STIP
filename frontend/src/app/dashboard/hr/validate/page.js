@@ -10,18 +10,29 @@ export default function ValidateAwards() {
   const [success, setSuccess] = useState({show: false, icon: '', title: '', detail: ''});
   const [viewCalc, setViewCalc] = useState(null);
   
-  // Real-time Metrics State replacing the static CP_PCT and SCORECARD_LOCKED
+  // Real-time Metrics State
   const [metrics, setMetrics] = useState({ cpPct: null, locked: false });
+  const [totalStaff, setTotalStaff] = useState(0);
+  
+  // 🚨 ADDED: Live System Time State
+  const [currentTime, setCurrentTime] = useState(null);
+
+  // Live Clock Effect
+  useEffect(() => {
+    setCurrentTime(new Date());
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        // Fetch both appraisals and company metrics concurrently
-        const [appraisalsRes, metricsRes] = await Promise.all([
+        const [appraisalsRes, metricsRes, usersRes] = await Promise.all([
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
-          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }))
+          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+          api.get('/users').catch(() => ({ data: { data: [] } }))
         ]);
 
         // Handle Appraisals
@@ -36,6 +47,10 @@ export default function ValidateAwards() {
             locked: metricsRes.data.data.locked
           });
         }
+
+        // Set Total Staff Count
+        const usersData = usersRes.data?.data || [];
+        setTotalStaff(usersData.length);
         
       } catch (error) {
         console.error('Failed to fetch awards data:', error);
@@ -59,7 +74,7 @@ export default function ValidateAwards() {
       const coCode = a.employeeId?.companyCode || 'FSM';
       const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
       
-      const sal = a.employeeBaseSalary || 30000;
+      const sal = a.employeeId?.employmentDetails?.salary || 0; 
       const iprf = a.calculatedResults?.finalIprfScore || 0;
       const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
       const proRataValue = prMonths / 12;
@@ -75,7 +90,11 @@ export default function ValidateAwards() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `STIP_Validation_Report_CY2026.csv`);
+    
+    // 🚨 UPGRADED: Include precise timestamp in filename (e.g., 2026-05-30_14-30-00)
+    const timestamp = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
+    link.setAttribute("download", `STIP_Validation_Report_${timestamp}.csv`);
+    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -90,13 +109,17 @@ export default function ValidateAwards() {
   const downloadPDF = () => {
     if (appraisals.length === 0 || metrics.cpPct === null) return;
 
+    // 🚨 UPGRADED: Capture precise generation time for the PDF Header
+    const generationTime = new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'medium' });
+
     let htmlContent = `
       <html>
         <head>
           <title>STIP Payroll Validation Report CY2026</title>
           <style>
             body { font-family: Arial, sans-serif; font-size: 12px; color: #333; }
-            h1 { color: #0D2B55; text-align: center; }
+            h1 { color: #0D2B55; text-align: center; margin-bottom: 5px; }
+            .timestamp { text-align: center; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
             th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
             th { background-color: #f4f4f4; color: #0D2B55; }
@@ -105,6 +128,8 @@ export default function ValidateAwards() {
         </head>
         <body>
           <h1>STIP Payroll Validation Report — CY2026</h1>
+          <p class="timestamp">Generated on: ${generationTime}</p>
+          
           <p><strong>Company Performance (CP):</strong> ${metrics.cpPct.toFixed(2)}%</p>
           <p><strong>Total Approved Appraisals:</strong> ${appraisals.length}</p>
           <table>
@@ -129,7 +154,7 @@ export default function ValidateAwards() {
       const empIdStr = a.employeeId?.employeeId || 'Unknown';
       const coCode = a.employeeId?.companyCode || 'FSM';
       
-      const sal = a.employeeBaseSalary || 30000;
+      const sal = a.employeeId?.employmentDetails?.salary || 0; 
       const iprf = a.calculatedResults?.finalIprfScore || 0;
       const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
       const proRataValue = prMonths / 12;
@@ -166,7 +191,6 @@ export default function ValidateAwards() {
     printWindow.document.close();
     printWindow.focus();
     
-    // Slight delay to allow CSS to load before opening print dialog
     setTimeout(() => {
       printWindow.print();
     }, 250);
@@ -192,7 +216,7 @@ export default function ValidateAwards() {
 
   const total = appraisals.reduce((s, a) => {
     if (metrics.cpPct === null) return s;
-    const sal = a.employeeBaseSalary || 30000;
+    const sal = a.employeeId?.employmentDetails?.salary || 0; 
     const iprf = a.calculatedResults?.finalIprfScore || 0;
     const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
     const proRataValue = prMonths / 12;
@@ -208,7 +232,13 @@ export default function ValidateAwards() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">🏆 Validate Awards</h1>
           <p className="text-sm text-slate-500 mt-1">Validate STIP award calculations and export for payroll</p>
+          
+          {/* 🚨 ADDED: Live System Clock UI */}
+          <div className="text-xs font-semibold text-[#0D2B55] mt-2 flex items-center gap-1.5 bg-[#0D2B55]/5 w-max px-2.5 py-1 rounded-md">
+            🕒 {currentTime ? currentTime.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'medium' }) : 'Syncing system time...'}
+          </div>
         </div>
+        
         <div className="flex gap-3">
           <button 
             className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2"
@@ -244,7 +274,7 @@ export default function ValidateAwards() {
             </div>
             <div>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Staff</div>
-              <div className="text-2xl font-bold text-white">190</div>
+              <div className="text-2xl font-bold text-white">{loading ? '...' : totalStaff}</div>
             </div>
             <div>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Approved Appraisals</div>
@@ -307,7 +337,7 @@ export default function ValidateAwards() {
                     const init2 = a.employeeId?.personalDetails?.lastName?.[0] || '';
                     const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
                     
-                    const sal = a.employeeBaseSalary || 30000;
+                    const sal = a.employeeId?.employmentDetails?.salary || 0; 
                     const iprf = a.calculatedResults?.finalIprfScore || 0;
                     const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
                     const proRataValue = prMonths / 12;
@@ -398,7 +428,7 @@ export default function ValidateAwards() {
       {viewCalc && metrics.cpPct !== null && (() => {
         const empName = `${viewCalc.employeeId?.personalDetails?.firstName || ''} ${viewCalc.employeeId?.personalDetails?.lastName || ''}`.trim() || 'Unknown';
         const jobTitle = viewCalc.employeeId?.employmentDetails?.jobTitle || 'Staff';
-        const sal = viewCalc.employeeBaseSalary || 30000;
+        const sal = viewCalc.employeeId?.employmentDetails?.salary || 0;
         const iprf = viewCalc.calculatedResults?.finalIprfScore || 0;
         const prMonths = viewCalc.employeeId?.employmentDetails?.prorateValue || 12;
         const proRataValue = prMonths / 12;
