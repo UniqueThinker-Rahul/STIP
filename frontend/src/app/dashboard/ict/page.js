@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
 import { Server, Database, Mail, Shield, FileText } from 'lucide-react';
 
+// Fallback colors for dynamically generated company badges
+const BADGE_COLORS = [
+  'bg-[#DBEAFE] text-[#1E40AF]', // Blue
+  'bg-[#D1FAE5] text-[#065F46]', // Green
+  'bg-[#FEF3C7] text-[#92400E]', // Amber
+  'bg-[#EDE9FE] text-[#4C1D95]', // Purple
+  'bg-[#FCE7F3] text-[#9D174D]', // Pink
+  'bg-[#CCFBF1] text-[#115E59]'  // Teal
+];
+
 export default function ICTDashboard() {
   const router = useRouter();
 
@@ -12,20 +22,35 @@ export default function ICTDashboard() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Mocking audit logs for now as it usually requires a separate collection
-  const [auditLogCount, setAuditLogCount] = useState(14); 
+  // 🚨 UPGRADE: Dynamic Company Codes State
+  const [companyCodes, setCompanyCodes] = useState([]);
+
+  // Dynamically tracks the real database count
+  const [auditLogCount, setAuditLogCount] = useState(0); 
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [usersRes, metricsRes] = await Promise.all([
+        const [usersRes, metricsRes, auditRes, configRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
-          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }))
+          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+          api.get('/audit').catch(() => ({ data: { data: [] } })), // Fetch real logs
+          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) // 🚨 Fetch config
         ]);
 
         setStaff(usersRes.data?.data || []);
         setMetrics(metricsRes.data?.data || null);
+        setAuditLogCount(auditRes.data?.data?.length || 0);
+
+        // 🚨 UPGRADE: Set the dynamic company codes from the DB
+        if (configRes.data?.data?.companyCodes) {
+          setCompanyCodes(configRes.data.data.companyCodes);
+        } else {
+          // Fallback just in case the DB is empty
+          setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
+        }
+
       } catch (error) {
         console.error('Failed to load ICT dashboard data', error);
       } finally {
@@ -36,12 +61,6 @@ export default function ICTDashboard() {
     fetchDashboardData();
   }, []);
 
-  const fsmCount = staff.filter(s => s.companyCode === 'FSM').length;
-  const cduCount = staff.filter(s => s.companyCode === 'CDU').length;
-  const narCount = staff.filter(s => s.companyCode === 'NAR').length;
-  const gumCount = staff.filter(s => s.companyCode === 'GUM').length;
-
-  // Active users count (assuming all fetched users are 'active' in this context)
   const activeUsers = staff.length; 
 
   const scorecardLocked = metrics?.locked || false;
@@ -81,22 +100,26 @@ export default function ICTDashboard() {
       {/* Row 1: Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[16px] mb-[24px]">
         
-        {/* Total Staff */}
         <div className="bg-[#0D2B55] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-white/50 mb-[4px]">Total Staff</div>
             <div className="text-[32px] font-[800] text-[#e8c96a] leading-none mb-[6px]">{staff.length}</div>
             <div className="text-[12px] font-[600] text-white/40">STIP-eligible employees</div>
           </div>
-          <div className="flex gap-[6px] mt-[14px] flex-wrap">
-            <span className="bg-[#DBEAFE] text-[#1E40AF] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">FSM {fsmCount}</span>
-            <span className="bg-[#D1FAE5] text-[#065F46] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">CDU {cduCount}</span>
-            <span className="bg-[#FEF3C7] text-[#92400E] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">NAR {narCount}</span>
-            <span className="bg-[#EDE9FE] text-[#4C1D95] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">GUM {gumCount}</span>
+          {/* 🚨 UPGRADE: Dynamic Map for Company Code Badges with Auto-Scroll */}
+          <div className="flex gap-[6px] mt-[14px] overflow-x-auto pb-1 custom-scrollbar whitespace-nowrap">
+            {companyCodes.map((code, index) => {
+              const count = staff.filter(s => s.companyCode === code).length || 0;
+              const colorClass = BADGE_COLORS[index % BADGE_COLORS.length];
+              return (
+                <span key={code} className={`${colorClass} px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800] shrink-0`}>
+                  {code} {count}
+                </span>
+              );
+            })}
           </div>
         </div>
 
-        {/* Active Users */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Active Users</div>
@@ -112,7 +135,6 @@ export default function ICTDashboard() {
           </div>
         </div>
 
-        {/* Scorecard Status */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Scorecard Status</div>
@@ -133,7 +155,6 @@ export default function ICTDashboard() {
           </div>
         </div>
 
-        {/* Audit Events */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Audit Events Today</div>
@@ -232,7 +253,6 @@ export default function ICTDashboard() {
         {/* Right Sidebar Columns */}
         <div className="flex flex-col gap-[16px]">
           
-          {/* Quick Actions */}
           <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
             <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
               <div className="w-[30px] h-[30px] rounded-[8px] bg-[#FEE2E2] flex items-center justify-center text-[14px]">&#9889;</div>
@@ -263,16 +283,9 @@ export default function ICTDashboard() {
               >
                 &#128203; Full Audit Trail
               </button>
-              <button 
-                className="w-full bg-white hover:bg-[#FAF8F4] border border-[#E2DDD4] hover:border-[#0D2B55] text-[#0f1923] font-[700] text-[13px] py-[10px] rounded-[8px] transition-colors"
-                onClick={() => router.push('/dashboard/ict/system')}
-              >
-                &#128312; System Status
-              </button>
             </div>
           </div>
 
-          {/* Critical Settings */}
           <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
             <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
               <div className="w-[30px] h-[30px] rounded-[8px] bg-[#FEF3C7] flex items-center justify-center text-[14px]">&#9888;</div>

@@ -5,6 +5,9 @@ const appraisalSchema = new mongoose.Schema({
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   
+  // 🚨 UPGRADE: Connected the Appraisal directly to the new AppraisalQuarter model
+  appraisalQuarter: { type: mongoose.Schema.Types.ObjectId, ref: 'AppraisalQuarter', required: true },
+  
   period: {
     year: { type: Number, required: true },
     quarter: { type: String, enum: ['Q1', 'Q2', 'Q3', 'Q4'], required: true }
@@ -33,7 +36,6 @@ const appraisalSchema = new mongoose.Schema({
     isExceedingPerformance: { type: Boolean, default: false }
   },
 
-  // 🚨 FIX: Added the missing narrative block so MongoDB stops deleting your comments!
   narrative: {
     generalComments: { type: String, default: '' },
     epJustification: { type: String, default: '' },
@@ -41,7 +43,6 @@ const appraisalSchema = new mongoose.Schema({
     ceoComments: { type: String, default: '' }
   },
 
-  // 🚨 FIX: Added stipAward so it stops getting deleted!
   stipAward: { type: Number, default: 0 }
   
 }, { timestamps: true });

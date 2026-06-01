@@ -38,7 +38,17 @@ export default function CEOReports() {
   const cpPct = metrics?.cpPct || null;
   const bscRaw = metrics?.bscRawScore || null;
   const locked = metrics?.locked || false;
-  const lockedBy = metrics?.lockedBy || 'Jared Morris';
+
+  // 🚨 FIX: Safely parse the lockedBy field whether it's a string, an object, or null.
+  let lockedByStr = 'Jared Morris';
+  if (metrics?.lockedBy) {
+    if (typeof metrics.lockedBy === 'object' && metrics.lockedBy.personalDetails) {
+      lockedByStr = `${metrics.lockedBy.personalDetails.firstName || ''} ${metrics.lockedBy.personalDetails.lastName || ''}`.trim();
+    } else if (typeof metrics.lockedBy === 'string') {
+      lockedByStr = metrics.lockedBy;
+    }
+  }
+
   const lockedAt = metrics?.lockedAt ? new Date(metrics.lockedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
 
   const ep = appraisals.filter(a => a.calculatedResults?.finalIprfScore >= 1.3).length;
@@ -119,7 +129,7 @@ export default function CEOReports() {
       csv += `"Standard Award (E)","${(cpPct * 1.0).toFixed(2)}%","For Fully Effective rating"\r\n`;
       csv += `"CEO Approved Appraisals","${approvedApps.length}","Final approvals completed"\r\n`;
       csv += `"Estimated Gross Payout","$${estimatedPayout.toFixed(2)}","Subject to FSM income tax"\r\n`;
-      csv += `"Locked By","${lockedBy}","CEO who locked the scorecard"\r\n`;
+      csv += `"Locked By","${lockedByStr}","CEO who locked the scorecard"\r\n`;
       csv += `"Locked At","${lockedAt}","Date of lock"\r\n`;
       triggerCSV(csv, `STIP_Board_Summary_CY2026.csv`);
     } else {
@@ -135,7 +145,7 @@ export default function CEOReports() {
             <tr><td>Standard Award (E)</td><td class="center">${(cpPct * 1.0).toFixed(2)}%</td><td>For Fully Effective rating</td></tr>
             <tr><td>CEO Approved Appraisals</td><td class="center">${approvedApps.length}</td><td>Final approvals completed</td></tr>
             <tr><td>Estimated Gross Payout</td><td class="center" style="font-weight:bold;">$${estimatedPayout.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td><td>Subject to FSM income tax</td></tr>
-            <tr><td>Locked By</td><td class="center">${lockedBy}</td><td>Executive authorization</td></tr>
+            <tr><td>Locked By</td><td class="center">${lockedByStr}</td><td>Executive authorization</td></tr>
             <tr><td>Locked At</td><td class="center">${lockedAt}</td><td>Timestamp of execution</td></tr>
           </tbody>
         </table>
@@ -306,10 +316,9 @@ export default function CEOReports() {
         <span>Click <strong>&#128196;&nbsp;PDF</strong> for a formatted printable report or <strong>&#128200;&nbsp;CSV</strong> for Excel/payroll import. Board Summary and Full Award require scorecard to be locked first.</span>
       </div>
 
-      {/* Grid containing all 6 cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[16px] mb-[20px]">
         
-        {/* Card 1: Board Summary */}
+        {/* Card 1 */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
           <div className="p-[16px_18px] border-b border-[#E2DDD4] flex-1">
             <div className="text-[24px] mb-[7px]">&#128203;</div>
@@ -329,7 +338,7 @@ export default function CEOReports() {
           </div>
         </div>
 
-        {/* Card 2: Appraisal Completion */}
+        {/* Card 2 */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
           <div className="p-[16px_18px] border-b border-[#E2DDD4] flex-1">
             <div className="text-[24px] mb-[7px]">&#9989;</div>
@@ -349,7 +358,7 @@ export default function CEOReports() {
           </div>
         </div>
 
-        {/* Card 3: Full Award */}
+        {/* Card 3 */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
           <div className="p-[16px_18px] border-b border-[#E2DDD4] flex-1">
             <div className="text-[24px] mb-[7px]">&#128176;</div>
@@ -369,7 +378,7 @@ export default function CEOReports() {
           </div>
         </div>
 
-        {/* Card 4: Report by Office */}
+        {/* Card 4 */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
           <div className="p-[16px_18px] border-b border-[#E2DDD4] flex-1">
             <div className="text-[24px] mb-[7px]">🏢</div>
@@ -389,7 +398,7 @@ export default function CEOReports() {
           </div>
         </div>
 
-        {/* Card 5: Evaluated Criteria */}
+        {/* Card 5 */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
           <div className="p-[16px_18px] border-b border-[#E2DDD4] flex-1">
             <div className="text-[24px] mb-[7px]">⭐</div>
@@ -409,7 +418,7 @@ export default function CEOReports() {
           </div>
         </div>
 
-        {/* Card 6: Audit Trail */}
+        {/* Card 6 */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
           <div className="p-[16px_18px] border-b border-[#E2DDD4] flex-1">
             <div className="text-[24px] mb-[7px]">📋</div>
@@ -478,7 +487,8 @@ export default function CEOReports() {
               <div className="bg-white/10 rounded-[9px] p-[12px_14px] flex flex-col justify-center">
                 <div className="flex justify-between text-[12px] mb-[6px] border-b border-white/10 pb-[4px]">
                   <span className="text-white/60">Locked By:</span>
-                  <span className="font-[700] text-white">{locked ? lockedBy : '—'}</span>
+                  {/* 🚨 THE CRITICAL FIX IS RENDERED HERE */}
+                  <span className="font-[700] text-white">{locked ? lockedByStr : '—'}</span>
                 </div>
                 <div className="flex justify-between text-[12px]">
                   <span className="text-white/60">Locked At:</span>

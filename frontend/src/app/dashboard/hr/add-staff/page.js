@@ -5,12 +5,10 @@ import { User, CheckCircle, Calculator, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 
-const CP = 0.1301;
-
 export default function AddNewStaff() {
   const router = useRouter();
 
-  // 🚨 DYNAMIC DB STATES: All dropdowns pull from the backend now
+  // 🚨 DYNAMIC DB STATES
   const [managerList, setManagerList] = useState([]);
   const [companyCodes, setCompanyCodes] = useState([]);
   const [officeLocations, setOfficeLocations] = useState([]);
@@ -20,24 +18,17 @@ export default function AddNewStaff() {
   const [successDetail, setSuccessDetail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 🚨 UPGRADE: Added middle name (mn) to state
   const [formData, setFormData] = useState({
-    fn: '',
-    ln: '',
-    title: '', // Now maps to the dynamic select
-    office: '',
-    co: '',
-    mgrId: '',
-    hire: '',
-    empId: '' 
+    fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '' 
   });
 
-  // Fetch Managers and Dynamic Configuration Arrays on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [mgrRes, configRes] = await Promise.all([
           api.get('/users/managers'),
-          api.get('/config/dropdowns') // 🚨 Your new AppConfig API route
+          api.get('/config/dropdowns') 
         ]);
         
         setManagerList(mgrRes.data?.data || []);
@@ -45,7 +36,7 @@ export default function AddNewStaff() {
         const configData = configRes.data?.data || {};
         setCompanyCodes(configData.companyCodes || []);
         setOfficeLocations(configData.officeLocations || []);
-        setJobTitles(configData.jobTitles || []); // 🚨 Capturing Job Titles from DB
+        setJobTitles(configData.jobTitles || []); 
         
       } catch (error) {
         console.error("Failed to load initial data:", error);
@@ -59,7 +50,7 @@ export default function AddNewStaff() {
     setFormData(prev => ({ ...prev, [id.replace('n', '')]: value }));
   };
 
-  // Real-time Pro-Rata Math Calculation (Upgraded to dynamic year)
+  // Real-time Pro-Rata Math Calculation
   let prStr = '';
   let prColor = '';
   let prDays = 0;
@@ -70,7 +61,6 @@ export default function AddNewStaff() {
     const hireDate = new Date(formData.hire);
     const currentYear = new Date().getFullYear(); 
     
-    // Set exact start/end boundaries for the calculation year
     const yearStart = new Date(`${currentYear}-01-01T00:00:00`);
     const yearEnd = new Date(`${currentYear}-12-31T23:59:59`);
     
@@ -90,7 +80,7 @@ export default function AddNewStaff() {
   }
 
   const saveNewStaff = async () => {
-    const { fn, ln, title, office, co, mgrId, hire, empId } = formData;
+    const { fn, mn, ln, title, office, co, mgrId, hire, empId } = formData;
     
     if (!fn || !ln || !title || !office || !co || !mgrId || !hire || !empId) {
       alert('Please fill in all required fields, including Office Location and Employee ID.');
@@ -104,9 +94,12 @@ export default function AddNewStaff() {
       const safeLast = ln.toLowerCase().replace(/\s+/g, '');
       const generatedEmail = `${safeFirst}.${safeLast}@fsmpc.fm`;
 
+      // 🚨 UPGRADE: Combine First and Middle Name so it safely saves to existing DB schema
+      const fullFirstName = mn.trim() ? `${fn.trim()} ${mn.trim()}` : fn.trim();
+
       const payload = {
         employeeId: empId.trim(),
-        firstName: fn.trim(),
+        firstName: fullFirstName,
         lastName: ln.trim(),
         jobTitle: title.trim(),
         officeLocation: office,
@@ -122,7 +115,7 @@ export default function AddNewStaff() {
 
       await api.post('/users', payload);
 
-      setSuccessDetail(`${fn} ${ln} (${title}) added to the system with ID ${empId}. Pro-Rata: ${(prMonths / 12).toFixed(3)}.`);
+      setSuccessDetail(`${fullFirstName} ${ln} (${title}) added to the system with ID ${empId}. Pro-Rata: ${(prMonths / 12).toFixed(3)}.`);
       setSuccessModalOpen(true);
       clearForm();
       
@@ -138,7 +131,7 @@ export default function AddNewStaff() {
   };
 
   const clearForm = () => {
-    setFormData({ fn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '' });
+    setFormData({ fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '' });
   };
 
   return (
@@ -177,7 +170,8 @@ export default function AddNewStaff() {
           </div>
           
           <div className="p-[20px]">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[14px]">
+            {/* 🚨 UPGRADE: Made this grid 3 columns to fit the optional Middle Name */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-[12px] mb-[14px]">
               <div className="flex flex-col gap-[6px]">
                 <label className="text-[11px] font-[800] text-[#0D2B55]">First Name <span className="text-[#DC2626]">*</span></label>
                 <input
@@ -186,6 +180,19 @@ export default function AddNewStaff() {
                   className="px-[12px] py-[9px] border-[1.5px] border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
                   placeholder="e.g. Francis"
                   value={formData.fn}
+                  onChange={handleInputChange}
+                />
+              </div>
+              <div className="flex flex-col gap-[6px]">
+                <label className="text-[11px] font-[800] text-[#0D2B55] flex items-center justify-between">
+                  Middle Name <span className="text-[9px] text-[#6b7280] font-normal uppercase">Optional</span>
+                </label>
+                <input
+                  id="nmn"
+                  type="text"
+                  className="px-[12px] py-[9px] border-[1.5px] border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
+                  placeholder="e.g. James"
+                  value={formData.mn}
                   onChange={handleInputChange}
                 />
               </div>
@@ -205,7 +212,6 @@ export default function AddNewStaff() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-[12px] mb-[14px]">
               <div className="flex flex-col gap-[6px]">
                 <label className="text-[11px] font-[800] text-[#0D2B55]">Job Title <span className="text-[#DC2626]">*</span></label>
-                {/* 🚨 UPGRADED: Now a dynamic dropdown pulled from MongoDB */}
                 <select
                   id="ntitle"
                   value={formData.title}
@@ -261,9 +267,12 @@ export default function AddNewStaff() {
                   {managerList.map(m => {
                     const fName = m.personalDetails?.firstName || m.firstName || '';
                     const lName = m.personalDetails?.lastName || m.lastName || '';
+                    const isSecondary = !['MANAGER', 'HR_ADMIN', 'CEO'].includes(m.security?.role);
+                    const tag = isSecondary ? ` (${m.security?.role})` : '';
+                    
                     return (
                       <option key={m._id} value={m._id}>
-                         {`${fName} ${lName}`.trim()}
+                         {`${fName} ${lName}${tag}`.trim()}
                       </option>
                     );
                   })}

@@ -20,17 +20,30 @@ const userSchema = new mongoose.Schema({
     prorateValue: { type: Number, default: 12 },
     rawManagerName: { type: String }, // Temporary field for importing
     reportingTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    isActive: { type: Boolean, default: true } // 🚨 Account Status Field
+    isActive: { type: Boolean, default: true },
+    isDeleted: { type: Boolean, default: false }
+ // 🚨 Account Status Field
   },
 
-  security: {
-  role: { 
-    type: String, 
-    enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'], 
-    default: 'EMPLOYEE' 
-  },
-    isFirstLogin: { type: Boolean, default: true },
-    currentSessionId: { type: String, default: null }
+ security: {
+    role: {
+      type: String,
+      enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'],
+      default: 'EMPLOYEE'
+    },
+    // 🚨 ADD THIS EXACT BLOCK SO MONGODB STOPS DELETING YOUR MULTI-ROLES
+    secondaryRoles: [{
+      type: String,
+      enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN']
+    }],
+    isFirstLogin: {
+      type: Boolean,
+      default: true
+    },
+    currentSessionId: {
+      type: String,
+      default: null
+    }
   }
   
 }, { timestamps: true });

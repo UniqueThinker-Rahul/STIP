@@ -1,9 +1,18 @@
 const express = require('express');
 const router = express.Router();
+
+// Import both Database Models
 const SystemSettings = require('../models/SystemSettings');
+const AppConfig = require('../models/AppConfig'); 
+
 const { authGuard, roleGuard } = require('../middleware/auth');
+const { logAudit } = require('../utils/logger'); // Needed for Matrix Audit Logging
 
 router.use(authGuard);
+
+// ----------------------------------------------------
+// SECTION 1: SYSTEM SETTINGS (CP Factor & Overrides)
+// ----------------------------------------------------
 
 // POST /api/v1/settings/cp-factor (Strictly CEO Only)
 router.post('/cp-factor', roleGuard('CEO'), async (req, res) => {
@@ -26,6 +35,7 @@ router.post('/cp-factor', roleGuard('CEO'), async (req, res) => {
     res.status(500).json({ message: 'Failed to update CP Factor.' });
   }
 });
+
 // PATCH /api/v1/settings/toggle-override (HR Only)
 router.patch('/toggle-override', roleGuard('HR_ADMIN'), async (req, res) => {
   try {
@@ -41,6 +51,58 @@ router.patch('/toggle-override', roleGuard('HR_ADMIN'), async (req, res) => {
     res.json({ message: `System submissions for ${year} are now ${status}.`, data: settings });
   } catch (error) {
     res.status(500).json({ message: 'Failed to toggle system override.' });
+  }
+});
+
+// ----------------------------------------------------
+// SECTION 2: ICT ADMIN ROLE MATRIX CONTROL
+// ----------------------------------------------------
+
+// GET /api/v1/settings/roles-matrix
+// Fetches the live permission matrix from MongoDB
+router.get('/roles-matrix', async (req, res) => {
+  try {
+    let config = await AppConfig.findOne();
+    if (!config) config = await AppConfig.create({});
+    res.json({ data: config.rolesMatrix || {} });
+  } catch (error) {
+    console.error('Error fetching roles matrix:', error);
+    res.status(500).json({ message: 'Server error while fetching matrix.' });
+  }
+});
+
+// PUT /api/v1/settings/roles-matrix
+// Saves the updated permission matrix to MongoDB (Only ICT Admins allowed)
+router.put('/roles-matrix', roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
+  try {
+    const { matrix } = req.body;
+    
+    if (!matrix) {
+      return res.status(400).json({ message: 'Matrix data is required.' });
+    }
+
+    let config = await AppConfig.findOne();
+    if (!config) config = new AppConfig();
+
+    config.rolesMatrix = matrix;
+    config.markModified('rolesMatrix'); // Tells MongoDB the mixed object changed
+    await config.save();
+
+    // Log the security change to the Audit Trail
+    await logAudit({
+      user: req.user, 
+      role: req.user.role, 
+      action: 'MATRIX_UPDATED', 
+      category: 'SECURITY', 
+      severity: 'CRITICAL',
+      details: `ICT Admin globally updated the Role Access Permission Matrix.`, 
+      req
+    });
+
+    res.json({ message: 'Roles matrix saved successfully.', data: config.rolesMatrix });
+  } catch (error) {
+    console.error('Error saving roles matrix:', error);
+    res.status(500).json({ message: 'Server error while saving matrix.' });
   }
 });
 

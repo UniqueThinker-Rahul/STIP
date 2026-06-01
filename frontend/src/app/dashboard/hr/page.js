@@ -4,6 +4,16 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
 
+// Fallback colors for dynamically generated company badges
+const BADGE_COLORS = [
+  'bg-blue-900/50 text-blue-300 border-blue-800',
+  'bg-green-900/50 text-green-300 border-green-800',
+  'bg-amber-900/50 text-amber-300 border-amber-800',
+  'bg-purple-900/50 text-purple-300 border-purple-800',
+  'bg-pink-900/50 text-pink-300 border-pink-800',
+  'bg-teal-900/50 text-teal-300 border-teal-800'
+];
+
 export default function HRDashboard() {
   const router = useRouter();
   
@@ -11,21 +21,25 @@ export default function HRDashboard() {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // NEW: State for the Balanced Scorecard
+  // 🚨 UPGRADE: Dynamic Company Codes State
+  const [companyCodes, setCompanyCodes] = useState([]);
+
+  // State for the Balanced Scorecard
   const [metrics, setMetrics] = useState({
     financialResilience: 82, operationalEffectiveness: 91, humanCapital: 78,
     safetyEnvironment: 95, reputationalCapital: 88, cpPct: 13.01, bscRawScore: 86.75
   });
 
-  // UPGRADED: Added a flag to prevent the loading screen from flashing during background real-time updates
   const fetchDashboardData = async (isInitialLoad = true) => {
     try {
       if (isInitialLoad) setLoading(true);
       
-      const [appraisalsRes, staffRes, metricsRes] = await Promise.all([
+      const [appraisalsRes, staffRes, metricsRes, configRes] = await Promise.all([
         api.get('/appraisals').catch(() => ({ data: [] })), 
         api.get('/users').catch(() => ({ data: [] })),
-        api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }))
+        api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+        // 🚨 UPGRADE: Fetching the dynamic system configurations
+        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) 
       ]);
       
       setAppraisals(appraisalsRes.data?.data || appraisalsRes.data || []);
@@ -34,6 +48,15 @@ export default function HRDashboard() {
       if (metricsRes.data?.data) {
         setMetrics(metricsRes.data.data);
       }
+
+      // 🚨 UPGRADE: Set the dynamic company codes from the DB
+      if (configRes.data?.data?.companyCodes) {
+        setCompanyCodes(configRes.data.data.companyCodes);
+      } else {
+        // Fallback just in case the DB is empty
+        setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
+      }
+
     } catch (error) {
       console.error('Failed to load live data', error);
     } finally {
@@ -108,12 +131,17 @@ export default function HRDashboard() {
           <div className="text-3xl font-bold text-amber-200 my-2">{total190}</div>
           <div className="text-xs text-slate-400 mb-3">STIP-eligible employees</div>
           <div className="flex flex-wrap gap-2">
-            <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/50 text-blue-300 border border-blue-800">FSM {staff.filter(s=>s.companyCode==='FSM').length || 165}</span>
-            <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-green-900/50 text-green-300 border border-green-800">CDU {staff.filter(s=>s.companyCode==='CDU').length || 16}</span>
-            <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/50 text-amber-300 border border-amber-800">NAR {staff.filter(s=>s.companyCode==='NAR').length || 8}</span>
-            <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/50 text-purple-300 border border-purple-800">GUM {staff.filter(s=>s.companyCode==='GUM').length || 2}</span>
-
-              
+            {/* 🚨 UPGRADE: Dynamic Map for Company Code Badges */}
+            {companyCodes.map((code, index) => {
+              const count = staff.filter(s => s.companyCode === code).length || 0;
+              // Cycle through the predefined badge colors so each company gets a distinct look
+              const colorClass = BADGE_COLORS[index % BADGE_COLORS.length];
+              return (
+                <span key={code} className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${colorClass}`}>
+                  {code} {count}
+                </span>
+              );
+            })}
           </div>
         </div>
 

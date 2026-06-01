@@ -1,12 +1,36 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Shield, Search, Check, Save } from 'lucide-react';
 import api from '../../../../lib/api';
 
-export default function ICTUsers() {
+const ROLE_OPTIONS = [
+  { id: 'CEO', label: 'CEO' },
+  { id: 'HR_ADMIN', label: 'HR Admin' },
+  { id: 'MANAGER', label: 'Line Manager' },
+  { id: 'EMPLOYEE', label: 'Staff' },
+  { id: 'ICT_ADMIN', label: 'ICT Admin' }
+];
+
+const getInitials = (name) => {
+  if (!name) return 'U';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+export default function SystemAccessSetup() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [userModal, setUserModal] = useState({ open: false, id: null });
+  
+  // UI States
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  const [toast, setToast] = useState({ show: false, message: '' });
+  
+  // Track inline edits before saving
+  const [pendingChanges, setPendingChanges] = useState({});
+  const [savingId, setSavingId] = useState(null);
 
   useEffect(() => {
     fetchUsers();
@@ -24,160 +48,251 @@ export default function ICTUsers() {
     }
   };
 
-  const deactivateUser = async (id) => {
-    const isConfirmed = window.confirm("Are you sure you want to deactivate this user?");
-    if (!isConfirmed) return;
-
-    try {
-      // Assuming your backend has an endpoint for user status modification
-      // This maps to your backend's user update controller
-      await api.patch(`/users/${id}`, { isActive: false });
+  // --- INLINE EDIT HANDLERS ---
+  const handlePrimaryRoleChange = (userId, newRole) => {
+    setPendingChanges(prev => {
+      const currentSecondary = prev[userId]?.secondaryRoles || users.find(u => u._id === userId)?.security?.secondaryRoles || [];
+      // If the new primary role was in their secondary roles, remove it from secondary
+      const cleanSecondary = currentSecondary.filter(r => r !== newRole);
       
-      // Update UI optimistically
-      setUsers(users.map(u => u._id === id ? { ...u, isActive: false } : u));
-      alert("User has been deactivated.");
+      return {
+        ...prev,
+        [userId]: { ...prev[userId], role: newRole, secondaryRoles: cleanSecondary }
+      };
+    });
+  };
+
+  const handleSecondaryRoleToggle = (userId, roleId) => {
+    setPendingChanges(prev => {
+      const currentSecondary = prev[userId]?.secondaryRoles || users.find(u => u._id === userId)?.security?.secondaryRoles || [];
+      let newSecondary;
+      
+      if (currentSecondary.includes(roleId)) {
+        newSecondary = currentSecondary.filter(id => id !== roleId); // Remove
+      } else {
+        newSecondary = [...currentSecondary, roleId]; // Add
+      }
+      
+      return {
+        ...prev,
+        [userId]: { ...prev[userId], secondaryRoles: newSecondary }
+      };
+    });
+  };
+
+  // --- DATABASE SAVE ---
+  const handleSaveSetup = async (user) => {
+    setSavingId(user._id);
+    try {
+      const role = pendingChanges[user._id]?.role || user.security?.role || 'EMPLOYEE';
+      const secondaryRoles = pendingChanges[user._id]?.secondaryRoles || user.security?.secondaryRoles || [];
+      
+      await api.patch(`/users/${user._id}/hr-update`, {
+        role,
+        secondaryRoles
+      });
+      
+      // Update local state to reflect the save
+      setUsers(users.map(u => 
+        u._id === user._id ? { ...u, security: { ...u.security, role, secondaryRoles } } : u
+      ));
+      
+      // Clear pending changes for this row
+      setPendingChanges(prev => {
+        const newObj = { ...prev };
+        delete newObj[user._id];
+        return newObj;
+      });
+      
+      setToast({ show: true, message: `Access updated for ${user.personalDetails?.firstName}` });
+      setTimeout(() => setToast({ show: false, message: '' }), 3000);
+      
     } catch (error) {
-      console.error('Deactivation failed:', error);
-      alert("Failed to deactivate user. Endpoint might need configuration.");
+      console.error('Save failed:', error);
+      alert("Failed to update user access.");
+    } finally {
+      setSavingId(null);
     }
   };
 
-  const getPanelName = (role) => {
-    switch(role) {
-      case 'CEO': return 'CEO Panel';
-      case 'HR_ADMIN': return 'HR Panel';
-      case 'MANAGER': return 'Manager Panel';
-      case 'EMPLOYEE': return 'Staff Panel';
-      case 'ICT_ADMIN': return 'ICT Panel';
-      default: return 'No Access';
-    }
-  };
+  // --- FILTERING ---
+  const filteredUsers = users.filter(u => {
+    const s = search.toLowerCase();
+    const fn = u.personalDetails?.firstName?.toLowerCase() || '';
+    const ln = u.personalDetails?.lastName?.toLowerCase() || '';
+    const id = u.employeeId?.toLowerCase() || '';
+    
+    const matchesSearch = fn.includes(s) || ln.includes(s) || id.includes(s);
+    const matchesRole = roleFilter === 'ALL' || u.security?.role === roleFilter;
+    
+    return matchesSearch && matchesRole;
+  });
 
   if (loading) return <div className="p-10 text-center text-slate-500 font-[600] animate-pulse">Loading System Users...</div>;
 
   return (
-    <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
+    <div className="max-w-[1400px] mx-auto pb-[60px] font-sans relative">
       
-      {/* Header */}
-      <div className="mb-[20px] flex justify-between items-end">
-        <div>
-          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-            &#128101; User Management
-          </div>
-          <div className="text-[13px] text-[#6b7280]">
-            STIP portal role assignments — ICT Admin only
-          </div>
+      {/* Toast Notification */}
+      {toast.show && (
+        <div className="fixed top-4 right-4 z-[200] p-[12px_20px] rounded-[8px] font-[600] text-[13px] shadow-lg bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] flex items-center gap-[8px] animate-in fade-in slide-in-from-top-4">
+          <Check className="w-4 h-4" /> {toast.message}
         </div>
-        <button 
-          className="bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm"
-          onClick={() => setUserModal({ open: true, id: null })}
-        >
-          &#43; Add User
-        </button>
+      )}
+
+      {/* Header */}
+      <div className="mb-[24px]">
+        <div className="text-[24px] font-[800] text-[#0D2B55] mb-[4px] flex items-center gap-[10px]">
+          <Shield className="w-6 h-6" /> System Access Setup
+        </div>
+        <div className="text-[13px] text-[#6b7280]">
+          ICT Admin — Configure multi-role access and user portal configurations.
+        </div>
       </div>
 
-      <div className="bg-[#DBEAFE] border-[1.5px] border-[#BFDBFE] text-[#1E40AF] rounded-[10px] p-[12px_16px] text-[13px] mb-[20px] shadow-sm flex items-center gap-[10px]">
-        <span className="text-[18px] leading-none">&#8505;</span> 
-        <span className="leading-[1.5]">Role permissions are enforced at the application level. Each user can only access the panel assigned to their role.</span>
-      </div>
-
+      {/* Main Table Card */}
       <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
-        <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
-          <div className="flex items-center gap-[12px]">
-            <div className="w-[36px] h-[36px] rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[16px]">&#128101;</div>
-            <div>
-              <div className="text-[15px] font-[800] text-[#0D2B55]">System Users</div>
-              <div className="text-[12px] font-[500] text-[#6b7280]">All configured STIP portal accounts</div>
+        
+        {/* Filter Bar */}
+        <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex flex-col md:flex-row gap-[12px] w-full md:w-auto">
+            <div className="relative w-full md:w-[280px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search by name or ID..." 
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] focus:outline-none focus:border-[#0D2B55] shadow-sm"
+              />
             </div>
+            <select 
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="bg-white border border-[#E2DDD4] rounded-[8px] px-3 py-2 text-[13px] font-[600] text-[#0D2B55] focus:outline-none focus:border-[#0D2B55] shadow-sm"
+            >
+              <option value="ALL">Filter by Role: All</option>
+              {ROLE_OPTIONS.map(r => (
+                <option key={`filter-${r.id}`} value={r.id}>{r.label}</option>
+              ))}
+            </select>
           </div>
-          <span className="bg-[#EFF6FF] text-[#0369A1] border border-[#BFDBFE] px-[12px] py-[4px] rounded-full text-[11px] font-[800]">
-            {users.length} users
-          </span>
+          <div className="text-[13px] font-[600] text-[#6b7280]">
+            Showing <span className="text-[#0D2B55] font-[800]">{filteredUsers.length}</span> accounts
+          </div>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
-            <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.06em]">
+        {/* Table Area */}
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-left border-collapse min-w-[1100px]">
+            <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[11px] font-[800] text-[#6b7280] uppercase tracking-[.05em]">
               <tr>
-                <th className="p-[12px_16px]">User</th>
-                <th className="p-[12px_16px] text-[#C9A84C]">Role</th>
-                <th className="p-[12px_16px]">Email</th>
-                <th className="p-[12px_16px] text-center">Panel Access</th>
-                <th className="p-[12px_16px] text-center">Status</th>
-                <th className="p-[12px_16px] text-center">Last Login</th>
-                <th className="p-[12px_16px] text-center">Actions</th>
+                <th className="p-[16px_20px]">Employee Name</th>
+                <th className="p-[16px_20px]">Employee ID</th>
+                <th className="p-[16px_20px]">Primary Portal Role</th>
+                <th className="p-[16px_20px]">Additional Portal Access</th>
+                <th className="p-[16px_20px] text-center w-[160px]">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#E2DDD4] text-[13px]">
-              {users.length === 0 ? (
+            <tbody className="divide-y divide-[#E2DDD4]">
+              {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-[48px] text-center text-[#6b7280]">
-                    No users found in the system.
+                  <td colSpan="5" className="p-[48px] text-center text-[#6b7280]">
+                    No employees match your search filters.
                   </td>
                 </tr>
               ) : (
-                users.map((u, i) => {
-                  const fName = u.personalDetails?.firstName || u.firstName || '';
-                  const lName = u.personalDetails?.lastName || u.lastName || '';
+                filteredUsers.map((u) => {
+                  const fName = u.personalDetails?.firstName || '';
+                  const lName = u.personalDetails?.lastName || '';
                   const fullName = `${fName} ${lName}`.trim() || 'Unknown User';
-                  const init = fName ? fName[0].toUpperCase() : 'U';
-                  const isActive = u.isActive !== false; // Assume active unless explicitly false
+                  const title = u.employmentDetails?.jobTitle || 'No Title';
+                  const office = u.employmentDetails?.officeLocation || 'Unassigned';
+                  
+                  // Live state tracking
+                  const currentPrimaryRole = pendingChanges[u._id]?.role || u.security?.role || 'EMPLOYEE';
+                  const currentSecondaryRoles = pendingChanges[u._id]?.secondaryRoles || u.security?.secondaryRoles || [];
+                  const isDirty = !!pendingChanges[u._id]; // Has this row been edited?
                   
                   return (
-                    <tr key={u._id} className={`hover:bg-[#FAF8F4] transition-colors ${i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'}`}>
-                      <td className="p-[12px_16px] whitespace-nowrap">
-                        <div className="flex items-center gap-[9px]">
-                          <div className="w-[30px] h-[30px] rounded-full bg-gradient-to-br from-[#0D2B55] to-[#1E40AF] text-white font-[800] flex items-center justify-center text-[11px] shadow-sm shrink-0">
-                            {init}
+                    <tr key={u._id} className="hover:bg-[#FAF8F4]/50 transition-colors bg-white">
+                      
+                      {/* Employee Name */}
+                      <td className="p-[16px_20px]">
+                        <div className="flex items-center gap-[12px]">
+                          <div className="w-[36px] h-[36px] rounded-full bg-[#DBEAFE] text-[#1E40AF] font-[800] flex items-center justify-center text-[13px] shrink-0 border border-[#BFDBFE]">
+                            {getInitials(fullName)}
                           </div>
                           <div>
-                            <div className="font-[700] text-[#0D2B55]">{fullName}</div>
-                            <div className="text-[10px] text-[#6b7280]">{u.email}</div>
+                            <div className="font-[800] text-[14px] text-[#0f1923]">{fullName}</div>
+                            <div className="text-[11px] text-[#6b7280] font-[500] mt-[2px]">{title} &bull; {office}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="p-[12px_16px] whitespace-nowrap font-[700] text-[#0f1923]">
-                        {u.role ? u.role.replace('_', ' ') : 'EMPLOYEE'}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-[11px] text-[#6b7280]">
-                        {u.email}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <span className="bg-[#EFF6FF] text-[#0369A1] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#BFDBFE]">
-                          {getPanelName(u.role)}
+                      
+                      {/* Employee ID */}
+                      <td className="p-[16px_20px]">
+                        <span className="bg-[#F1F5F9] border border-[#E2E8F0] px-[8px] py-[4px] rounded-[6px] text-[12px] font-mono text-[#475569] font-[600]">
+                          {u.employeeId || 'N/A'}
                         </span>
                       </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        {isActive ? (
-                          <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#A7F3D0]">
-                            &#9679; Active
-                          </span>
-                        ) : (
-                          <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#FECACA]">
-                            &#9679; Inactive
-                          </span>
-                        )}
+                      
+                      {/* Primary Role */}
+                      <td className="p-[16px_20px]">
+                        <select 
+                          value={currentPrimaryRole}
+                          onChange={(e) => handlePrimaryRoleChange(u._id, e.target.value)}
+                          className={`w-[180px] bg-white border rounded-[8px] px-3 py-2 text-[13px] font-[600] outline-none shadow-sm transition-colors ${isDirty ? 'border-[#0D2B55] text-[#0D2B55]' : 'border-[#E2DDD4] text-[#4b5563] hover:border-[#0D2B55]/50'}`}
+                        >
+                          {ROLE_OPTIONS.map(r => (
+                            <option key={`prim-${u._id}-${r.id}`} value={r.id}>{r.label}</option>
+                          ))}
+                        </select>
                       </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center text-[11px] text-[#6b7280]">
-                        {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('en-GB') : 'Never'}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <div className="flex gap-[6px] justify-center">
-                          <button 
-                            className="bg-white hover:bg-[#FAF8F4] border border-[#E2DDD4] text-[#0f1923] px-[10px] py-[4px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
-                            onClick={() => setUserModal({ open: true, id: u._id })}
-                          >
-                            &#9998; Edit
-                          </button>
-                          <button 
-                            className="bg-[#FEF2F2] hover:bg-[#FECACA] border border-[#FECACA] text-[#991B1B] px-[10px] py-[4px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
-                            onClick={() => deactivateUser(u._id)}
-                            disabled={!isActive}
-                          >
-                            &#10007; {isActive ? 'Disable' : 'Disabled'}
-                          </button>
+                      
+                      {/* Additional Portal Access */}
+                      <td className="p-[16px_20px]">
+                        <div className="flex flex-wrap gap-[12px]">
+                          {ROLE_OPTIONS.filter(r => r.id !== currentPrimaryRole).map(role => {
+                            const isChecked = currentSecondaryRoles.includes(role.id);
+                            return (
+                              <label key={`sec-${u._id}-${role.id}`} className="flex items-center gap-[6px] cursor-pointer group">
+                                <input 
+                                  type="checkbox" 
+                                  checked={isChecked}
+                                  onChange={() => handleSecondaryRoleToggle(u._id, role.id)}
+                                  className="w-[14px] h-[14px] rounded border-[#E2DDD4] text-[#0D2B55] focus:ring-[#0D2B55] cursor-pointer"
+                                />
+                                <span className={`text-[12px] font-[600] transition-colors ${isChecked ? 'text-[#0D2B55]' : 'text-[#6b7280] group-hover:text-[#0f1923]'}`}>
+                                  {role.label}
+                                </span>
+                              </label>
+                            );
+                          })}
                         </div>
                       </td>
+                      
+                      {/* Action */}
+                      <td className="p-[16px_20px] text-center">
+                        <button 
+                          onClick={() => handleSaveSetup(u)}
+                          disabled={savingId === u._id}
+                          className={`px-[14px] py-[8px] rounded-[8px] text-[12px] font-[800] flex items-center justify-center gap-[6px] w-full transition-all shadow-sm ${
+                            isDirty 
+                              ? 'bg-[#0D2B55] hover:bg-[#1a3d6e] text-white' 
+                              : 'bg-white border border-[#E2DDD4] text-[#6b7280] hover:text-[#0D2B55] hover:border-[#0D2B55]'
+                          }`}
+                        >
+                          {savingId === u._id ? (
+                            'Saving...'
+                          ) : (
+                            <>
+                              <Check className="w-[14px] h-[14px] stroke-[3]" /> Save Setup
+                            </>
+                          )}
+                        </button>
+                      </td>
+                      
                     </tr>
                   );
                 })
@@ -186,34 +301,6 @@ export default function ICTUsers() {
           </table>
         </div>
       </div>
-
-      {/* Basic Edit User Modal Skeleton */}
-      {userModal.open && (
-        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
-            <div className="p-[16px_22px] bg-[#0D2B55] flex justify-between items-center text-white">
-              <h2 className="text-[15px] font-[800]">
-                {userModal.id ? 'Edit System User' : 'Add New User'}
-              </h2>
-              <button onClick={() => setUserModal({ open: false, id: null })} className="bg-white/10 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center hover:bg-white/20 transition-colors">&times;</button>
-            </div>
-            <div className="p-[24px]">
-              <p className="text-[13px] text-[#6b7280] mb-[20px] leading-[1.6]">
-                Editing role assignments directly impacts what pages a user can access. Please contact Database Admin if you require new fields here.
-              </p>
-              
-              <div className="flex justify-end">
-                <button 
-                  className="bg-[#C9A84C] hover:bg-[#b59540] text-[#0D2B55] px-[16px] py-[10px] rounded-[8px] text-[13px] font-[800] transition-colors shadow-md w-full"
-                  onClick={() => setUserModal({ open: false, id: null })}
-                >
-                  Close Window
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

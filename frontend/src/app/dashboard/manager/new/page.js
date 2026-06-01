@@ -128,34 +128,41 @@ function NewAppraisalForm() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [quarterConfig, setQuarterConfig] = useState({
-    activeQuarter: 'Q3',
-    allowedQuarters: ['Q1', 'Q2', 'Q3', 'Q4'],
-    lockedQuarters: ['Q1', 'Q2'] 
-  });
+  // 🚨 UPGRADED: Dynamic Quarter DB Sync State
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [activeQuarterId, setActiveQuarterId] = useState('');
 
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [formData, setFormData] = useState({ title: '', quarter: 'Q3', comments: '', epJustification: '' });
+  const [formData, setFormData] = useState({ title: '', quarter: '', comments: '', epJustification: '' });
   const [scores, setScores] = useState({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
   const [expandedCrit, setExpandedCrit] = useState('expectedResults'); 
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const [quarterStatuses, setQuarterStatuses] = useState({
-    Q1: 'pending', Q2: 'pending', Q3: 'now', Q4: 'upcoming'
-  });
+  // Keeps track of the employee's history matching DB Quarters
+  const [quarterStatuses, setQuarterStatuses] = useState({});
 
   useEffect(() => {
     const fetchFormContext = async () => {
       try {
-        const { data } = await api.get('/users/my-team');
-        const myTeam = data?.data || [];
+        const [teamRes, quarterRes] = await Promise.all([
+          api.get('/users/my-team'),
+          api.get('/quarters') // 🚨 Fetch actual quarters from DB
+        ]);
+        
+        const myTeam = teamRes.data?.data || [];
         setTeam(myTeam);
         
-        setQuarterConfig({
-          activeQuarter: 'Q3',
-          allowedQuarters: ['Q1', 'Q2', 'Q3', 'Q4'],
-          lockedQuarters: ['Q1', 'Q2'] 
-        });
+        const fetchedQuarters = quarterRes.data?.data || [];
+        setDbQuarters(fetchedQuarters);
+        
+        // Find the most appropriate default quarter (first one that isn't locked by date)
+        const currentDate = new Date();
+        const defaultQ = fetchedQuarters.find(q => new Date(q.endDate) >= currentDate && !q.isLocked) || fetchedQuarters[0];
+        
+        if (defaultQ) {
+          setActiveQuarterId(defaultQ._id);
+          setFormData(prev => ({ ...prev, quarter: defaultQ._id }));
+        }
 
         if (draftId) {
           const appRes = await api.get('/appraisals');
@@ -169,7 +176,7 @@ function NewAppraisalForm() {
             
             setFormData({
               title: emp?.employmentDetails?.jobTitle || '',
-              quarter: draftData.period?.quarter || 'Q3',
+              quarter: draftData.appraisalQuarter?._id || draftData.appraisalQuarter || (defaultQ?._id || ''),
               epJustification: draftData.narrative?.epJustification || '',
               comments: draftData.narrative?.generalComments || ''
             });
@@ -194,10 +201,7 @@ function NewAppraisalForm() {
   }, [draftId]);
 
   useEffect(() => {
-    if (!selectedStaffId || draftId) { 
-      setQuarterStatuses({ Q1: 'pending', Q2: 'pending', Q3: 'now', Q4: 'upcoming' });
-      return;
-    }
+    if (!selectedStaffId || draftId || dbQuarters.length === 0) return;
 
     const fetchAppraisalStatus = async () => {
       try {
@@ -205,19 +209,21 @@ function NewAppraisalForm() {
         const allApps = data?.data || [];
         const empHistory = allApps.filter(a => (a.employeeId?._id || a.employeeId) === selectedStaffId);
         
-        let newStatuses = { Q1: 'missing', Q2: 'missing', Q3: 'now', Q4: 'upcoming' };
+        // Build a dynamic status map based on DB quarters
+        let newStatuses = {};
+        dbQuarters.forEach(q => newStatuses[q._id] = 'missing');
         
         if (empHistory.length > 0) {
           empHistory.forEach(app => {
-            const q = app.period?.quarter;
-            if (q) {
+            const qId = app.appraisalQuarter?._id || app.appraisalQuarter;
+            if (qId) {
               if (app.workflow?.status === 'DRAFT') {
-                newStatuses[q] = 'draft';
+                newStatuses[qId] = 'draft';
               } else if (app.workflow?.status === 'NOT_APPROVED' || app.workflow?.status === 'REOPENED') {
-                newStatuses[q] = 'reopened'; 
+                newStatuses[qId] = 'reopened'; 
                 setRejectionReason(app.narrative?.ceoComments || app.narrative?.hrComments || app.narrative?.generalComments || 'Please revise your submission.');
               } else {
-                newStatuses[q] = 'submitted'; 
+                newStatuses[qId] = 'submitted'; 
               }
             }
           });
@@ -239,7 +245,7 @@ function NewAppraisalForm() {
       }
     };
     fetchAppraisalStatus();
-  }, [selectedStaffId, quarterConfig.activeQuarter, draftId, team]);
+  }, [selectedStaffId, draftId, team, dbQuarters]);
 
   const selectedStaff = team.find(s => s._id === selectedStaffId);
   const ratedCount = Object.values(scores).filter(v => v !== null).length;
@@ -258,9 +264,12 @@ function NewAppraisalForm() {
   }
 
   const requiresEPJustification = calculatedIPRF >= 1.3;
-  
   const isAlreadySubmitted = quarterStatuses[formData.quarter] === 'submitted';
-  const isCurrentQuarterLocked = quarterConfig.lockedQuarters.includes(formData.quarter) || isAlreadySubmitted;
+  
+  // 🚨 UPGRADED: Dynamic Lockout logic calculation
+  const currentQObj = dbQuarters.find(q => q._id === formData.quarter);
+  const isExpired = currentQObj ? new Date() > new Date(currentQObj.endDate) : false;
+  const isCurrentQuarterLocked = isAlreadySubmitted || (currentQObj && (currentQObj.isLocked || (isExpired && !currentQObj.forceUnlock)));
 
   let proRata = 1.0;
   let prMonths = 12;
@@ -286,7 +295,7 @@ function NewAppraisalForm() {
   const handleClear = () => {
     setSelectedStaffId('');
     setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
-    setFormData({ title: '', quarter: quarterConfig.activeQuarter, comments: '', epJustification: '' });
+    setFormData({ title: '', quarter: activeQuarterId, comments: '', epJustification: '' });
     setRejectionReason('');
     if (draftId) router.replace('/dashboard/manager/new'); 
   };
@@ -305,7 +314,7 @@ function NewAppraisalForm() {
 
   const handleSubmit = async (isDraft) => {
     if (!selectedStaffId) return alert("Please select an employee.");
-    if (isCurrentQuarterLocked) return alert("This appraisal is locked or has already been submitted to HR.");
+    if (isCurrentQuarterLocked) return alert("This appraisal timeline is locked or has already been submitted to HR.");
     if (!isDraft && ratedCount < 6) return alert("Please rate all 6 criteria before submitting.");
     if (!isDraft && requiresEPJustification && formData.epJustification.trim().length < 10) {
       return alert("A comprehensive EP Justification is mandatory.");
@@ -315,8 +324,12 @@ function NewAppraisalForm() {
     try {
       const payload = {
         employeeId: selectedStaffId,
-        reviewYear: 2026,
-        period: { quarter: formData.quarter },
+        reviewYear: currentQObj?.year || new Date().getFullYear(),
+        appraisalQuarter: formData.quarter, // 🚨 Now passing dynamic Quarter ID
+        period: { 
+          year: currentQObj?.year || new Date().getFullYear(), 
+          quarter: currentQObj?.name ? (currentQObj.name.substring(0, 2).toUpperCase() || 'Q1') : 'Q1' // Fallback formatting mapping
+        },
         scores: scores,
         calculatedResults: { finalIprfScore: calculatedIPRF },
         stipAward: parseFloat(stipAwardPct),
@@ -329,7 +342,6 @@ function NewAppraisalForm() {
 
       await api.post('/appraisals', payload);
       
-      // 🚨 UPGRADE: Capture exact system time
       const submissionDate = new Date().toLocaleDateString();
       const submissionTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -341,7 +353,7 @@ function NewAppraisalForm() {
         router.push('/dashboard/manager/submissions'); 
       }
     } catch (err) {
-      alert("An error occurred while saving.");
+      alert(err.response?.data?.message || "An error occurred while saving.");
     } finally {
       setIsSubmitting(false);
     }
@@ -504,6 +516,8 @@ function NewAppraisalForm() {
                       <label className="text-[11px] font-[600] text-[#0D2B55]">Pro-Rata Value <span className="text-[9px] font-[700] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-1 uppercase">Calculated</span></label>
                       <input readOnly value={`${proRata.toFixed(3)} (${prMonths} months)`} className="p-2 border border-dashed border-gray-200 rounded-lg text-xs font-bold text-[#0D2B55] bg-gray-50 cursor-default" />
                     </div>
+                    
+                    {/* 🚨 UPGRADED: Dynamic DB Quarter Selector */}
                     <div className="flex flex-col gap-1">
                       <label className="text-[11px] font-[600] text-[#0D2B55]">Appraisal Quarter <span className="text-red-500">*</span></label>
                       <select 
@@ -511,21 +525,28 @@ function NewAppraisalForm() {
                         onChange={e => setFormData({...formData, quarter: e.target.value})}
                         className={`p-2 border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
                       >
-                        {quarterConfig.allowedQuarters.map(q => (
-                           <option key={q} value={q}>
-                             {q} — {quarterConfig.lockedQuarters.includes(q) ? 'Locked' : q === quarterConfig.activeQuarter ? 'Active' : 'Forward'}
-                           </option>
-                        ))}
+                        {dbQuarters.length === 0 ? <option value="">No Quarters Configured</option> : dbQuarters.map(q => {
+                           const exp = new Date() > new Date(q.endDate);
+                           const lockStatus = (q.isLocked || (exp && !q.forceUnlock)) ? 'Locked' : q.forceUnlock ? 'Open (Override)' : 'Active';
+                           return (
+                             <option key={q._id} value={q._id}>
+                               {q.name} — {quarterStatuses[q._id] === 'submitted' ? 'Already Submitted' : lockStatus}
+                             </option>
+                           );
+                        })}
                       </select>
                     </div>
                   </div>
                   
+                  {/* 🚨 UPGRADED: Lock Warnings */}
                   {isCurrentQuarterLocked && (
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-700 font-bold mt-2">
-                      <Calendar className="w-3 h-3 shrink-0" /> 
-                      {isAlreadySubmitted 
-                        ? "LOCKED: An active appraisal for this quarter is already in the system. You cannot edit it." 
-                        : "LOCKED: Selected period is locked by HR Administration."}
+                    <div className="flex items-start gap-1.5 text-[10px] text-amber-700 font-bold mt-3 bg-amber-50/50 p-2 rounded border border-amber-100">
+                      <Calendar className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 
+                      <div>
+                        {isAlreadySubmitted 
+                          ? "LOCKED: An active appraisal for this quarter is already in the system. You cannot edit it." 
+                          : `LOCKED: Submissions for this tracking period closed on ${new Date(currentQObj?.endDate).toLocaleDateString()}. Please contact HR Administration if you need to request an ICT Late Override.`}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -798,54 +819,51 @@ function NewAppraisalForm() {
             </div>
           )}
 
-          {/* DYNAMIC REAL-TIME DEADLINES AND STATUS BOX */}
-          {selectedStaff && (
+          {/* 🚨 UPGRADED: DYNAMIC REAL-TIME DEADLINES AND STATUS BOX */}
+          {selectedStaff && dbQuarters.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-slate-50">
                 <div className="w-[30px] h-[30px] rounded-[7px] bg-[#FFF7ED] flex items-center justify-center text-[14px] shrink-0">&#128197;</div>
-                <div className="text-sm font-bold text-[#0D2B55]">CY2026 Deadlines</div>
+                <div className="text-sm font-bold text-[#0D2B55]">Submission Deadlines</div>
               </div>
               <div className="p-4 space-y-1">
-                {[
-                  { id: 'Q1', date: '31 Mar 2026' },
-                  { id: 'Q2', date: '30 Jun 2026' },
-                  { id: 'Q3', date: '30 Sep 2026' },
-                  { id: 'Q4', date: '15 Dec 2026' }
-                ].map(q => {
-                  const status = quarterStatuses[q.id];
+                {dbQuarters.map(q => {
+                  const status = quarterStatuses[q._id];
+                  const exp = new Date() > new Date(q.endDate);
+                  
                   if (status === 'submitted') {
                     return (
-                      <div key={q.id} className="flex justify-between items-center p-2 bg-green-50 rounded-md text-green-700">
-                        <span className="text-[11px] font-bold">{q.id}</span>
+                      <div key={q._id} className="flex justify-between items-center p-2 bg-green-50 rounded-md text-green-700">
+                        <span className="text-[11px] font-bold">{q.name}</span>
                         <span className="text-[10px] flex items-center"><Check className="w-3 h-3 mr-1"/> Submitted</span>
                       </div>
                     );
                   } else if (status === 'draft') {
                     return (
-                      <div key={q.id} className="flex justify-between items-center p-2 bg-blue-50 rounded-md text-blue-700 border border-blue-200">
-                        <span className="text-[11px] font-bold">{q.id}</span>
+                      <div key={q._id} className="flex justify-between items-center p-2 bg-blue-50 rounded-md text-blue-700 border border-blue-200">
+                        <span className="text-[11px] font-bold">{q.name}</span>
                         <span className="text-[10px] flex items-center">Draft Saved</span>
                       </div>
                     );
-                  } else if (status === 'missing') {
+                  } else if (status === 'missing' && (q.isLocked || (exp && !q.forceUnlock))) {
                     return (
-                      <div key={q.id} className="flex justify-between items-center p-2 bg-red-50 rounded-md text-red-700 border border-red-200">
-                        <span className="text-[11px] font-bold">{q.id}</span>
-                        <span className="text-[10px] flex items-center"><AlertTriangle className="w-3 h-3 mr-1"/> Missing</span>
+                      <div key={q._id} className="flex justify-between items-center p-2 bg-red-50 rounded-md text-red-700 border border-red-200">
+                        <span className="text-[11px] font-bold">{q.name}</span>
+                        <span className="text-[10px] flex items-center"><AlertTriangle className="w-3 h-3 mr-1"/> Locked</span>
                       </div>
                     );
-                  } else if (status === 'now') {
+                  } else if (q._id === activeQuarterId) {
                     return (
-                      <div key={q.id} className="flex justify-between items-center p-2 bg-yellow-50 rounded-md text-yellow-800 font-bold border border-yellow-300 shadow-sm">
-                        <span className="text-[11px]">{q.id} ← Active</span>
-                        <span className="text-[10px]">{q.date}</span>
+                      <div key={q._id} className="flex justify-between items-center p-2 bg-yellow-50 rounded-md text-yellow-800 font-bold border border-yellow-300 shadow-sm">
+                        <span className="text-[11px]">{q.name} ← Active</span>
+                        <span className="text-[10px]">{new Date(q.endDate).toLocaleDateString()}</span>
                       </div>
                     );
                   } else {
                     return (
-                      <div key={q.id} className="flex justify-between items-center p-2 text-gray-500">
-                        <span className="text-[11px]">{q.id}</span>
-                        <span className="text-[10px]">{q.date}</span>
+                      <div key={q._id} className="flex justify-between items-center p-2 text-gray-500">
+                        <span className="text-[11px]">{q.name}</span>
+                        <span className="text-[10px]">{new Date(q.endDate).toLocaleDateString()}</span>
                       </div>
                     );
                   }

@@ -83,12 +83,13 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         ]
       },
       {
-        // 🚨 UPGRADED: Added System Config to the HR Admin menu
         category: 'Staff',
         items: [
           { name: 'Staff Management', href: '/dashboard/hr/staff', icon: Users },
           { name: 'Add New Staff', href: '/dashboard/hr/add-staff', icon: UserPlus },
-          { name: 'System Config', href: '/dashboard/hr/system-config', icon: Settings }
+          { name: 'System Config', href: '/dashboard/hr/system-config', icon: Settings },
+          // 🚨 UPGRADED: Added Quarter Cycles to HR Menu
+          { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
         ]
       },
       {
@@ -100,7 +101,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Reports',
         items: [
-          { name: 'Reports', href: '/dashboard/hr/reports', icon: Calendar }
+          { name: 'Reports', href: '/dashboard/hr/reports', icon: BarChart }
         ]
       }
     ],
@@ -164,7 +165,9 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
           { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
            { name: 'Panel Permissions', href: '/dashboard/ict/users/roles', icon: Lock },
-          { name: 'System Status', href: '/dashboard/ict/system', icon: Database }
+          { name: 'System Status', href: '/dashboard/ict/system', icon: Database },
+          // 🚨 UPGRADED: Added Quarter Cycles to ICT Menu for override control
+          { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
         ]
       },
       {

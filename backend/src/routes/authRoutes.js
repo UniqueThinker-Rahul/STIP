@@ -2,20 +2,20 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto'); // Built into Node.js
+const crypto = require('crypto');
 const User = require('../models/User');
 
-// 🚨 THE FIX: Use your existing auth.js file and your authGuard function!
 const { authGuard } = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
 const { updatePassword } = require('../controllers/authController');
 
-// 🚨 THE FIX: Use authGuard instead of protect
+// 🚀 IMPORT THE AUDIT LOGGER
+const { logAudit } = require('../utils/logger');
+
 router.patch('/update-password', authGuard, updatePassword);
 
-// ⚡ UPGRADE: Increased max to 100 to prevent React Fast Refresh from locking you out
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000, 
   max: 100, 
   message: { message: 'Too many login attempts. Account temporarily locked.' },
   standardHeaders: true,
@@ -26,68 +26,82 @@ const loginLimiter = rateLimit({
 router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { username, password, requestedPortal } = req.body;
-    
     const safeUsername = username ? username.trim() : '';
 
     const user = await User.findOne({ username: safeUsername });
     
     if (!user) {
+      await logAudit({
+        user: null, role: 'SYSTEM', action: 'LOGIN_FAILED', category: 'SECURITY', severity: 'MEDIUM',
+        details: `Failed login attempt for unknown username: ${safeUsername}`, req
+      });
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     
     if (!isMatch) {
+      await logAudit({
+        user, role: user.security.role, action: 'LOGIN_FAILED', category: 'AUTH', severity: 'HIGH',
+        details: `Invalid password provided during login`, req
+      });
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
-    // ⚡ DYNAMIC PORTAL CLEARANCE CHECK ⚡
+    // ⚡ DYNAMIC PORTAL CLEARANCE CHECK (UPGRADED FOR MULTI-ROLE) ⚡
     const actualRole = user.security.role;
+    // Safely extract the secondary roles array (default to empty array if missing)
+    const secondaryRoles = user.security.secondaryRoles || [];
+    
+    // Combine the primary role and secondary roles into one master list of all allowed roles for this user
+    const allUserRoles = [actualRole, ...secondaryRoles];
+    
     let authorized = false;
 
-    if (requestedPortal === actualRole) {
-        // Direct Match: CEO logging into CEO, HR into HR
+    // Check if the requested portal exactly matches ANY of the user's assigned roles
+    if (requestedPortal && allUserRoles.includes(requestedPortal)) {
         authorized = true; 
-    } else if (requestedPortal === 'MANAGER' && ['CEO', 'HR_ADMIN', 'ICT_ADMIN'].includes(actualRole)) {
-        // Downward Access: Executives are allowed to log into the Line Manager portal
+    } 
+    // Special exception: CEOs, HR Admins, and ICT Admins automatically have Manager clearance
+    else if (requestedPortal === 'MANAGER' && allUserRoles.some(role => ['CEO', 'HR_ADMIN', 'ICT_ADMIN'].includes(role))) {
         authorized = true; 
     }
 
     if (!authorized && requestedPortal) {
-        return res.status(403).json({ message: `Access Denied: Your Job Role does not have clearance for the ${requestedPortal} portal.` });
+      await logAudit({
+        user, role: actualRole, action: 'UNAUTHORIZED_ACCESS', category: 'SECURITY', severity: 'CRITICAL',
+        details: `Attempted to access ${requestedPortal} portal without proper clearance.`, req
+      });
+      return res.status(403).json({ message: `Access Denied: Your Job Role does not have clearance for the ${requestedPortal} portal.` });
     }
 
     const sessionId = crypto.randomBytes(16).toString('hex');
     
-    // 🚨 SECURE FIX: Bypass full document validation (prevents missing jobTitle crashes)
     await User.updateOne(
       { _id: user._id },
       { $set: { 'security.currentSessionId': sessionId } }
     );
 
-    // ⚡ THE SANDBOX: Issue the token for the specific portal they requested!
+    // The token assumes the identity of the specific portal they requested to enter
     const tokenRole = requestedPortal || actualRole;
 
     const token = jwt.sign(
-      { 
-        id: user._id, 
-        role: tokenRole,
-        sessionId: sessionId 
-      },
+      { id: user._id, role: tokenRole, sessionId: sessionId },
       process.env.JWT_SECRET,
       { expiresIn: '30m' }
     );
 
+    await logAudit({
+      user, role: actualRole, action: 'LOGIN_SUCCESS', category: 'AUTH', severity: 'LOW',
+      details: `Successfully logged into the ${tokenRole} portal.`, req
+    });
+
     res.json({
       token,
       user: {
-        id: user._id,
-        employeeId: user.employeeId,
-        username: user.username,
-        firstName: user.personalDetails.firstName,
-        lastName: user.personalDetails.lastName,
-        role: tokenRole, // Send back the sandboxed role so the frontend routes correctly
-        isFirstLogin: user.security.isFirstLogin
+        id: user._id, employeeId: user.employeeId, username: user.username,
+        firstName: user.personalDetails.firstName, lastName: user.personalDetails.lastName,
+        role: tokenRole, isFirstLogin: user.security.isFirstLogin
       }
     });
 
@@ -101,50 +115,52 @@ router.post('/login', loginLimiter, async (req, res) => {
 router.post('/staff-login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
-    
     const safeUsername = username ? username.trim() : '';
 
     const user = await User.findOne({ username: safeUsername });
 
     if (!user) {
+      await logAudit({
+        user: null, role: 'SYSTEM', action: 'LOGIN_FAILED', category: 'SECURITY', severity: 'MEDIUM',
+        details: `Failed staff login attempt for unknown username: ${safeUsername}`, req
+      });
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
+      await logAudit({
+        user, role: user.security.role, action: 'LOGIN_FAILED', category: 'AUTH', severity: 'HIGH',
+        details: `Invalid password provided during staff login`, req
+      });
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
     const sessionId = crypto.randomBytes(16).toString('hex');
     
-    // 🚨 SECURE FIX: Bypass full document validation
     await User.updateOne(
       { _id: user._id },
       { $set: { 'security.currentSessionId': sessionId } }
     );
 
-    // THE CRITICAL TWIST: Force the token role to 'EMPLOYEE'
     const token = jwt.sign(
-      { 
-        id: user._id, 
-        role: 'EMPLOYEE', // <-- Forced Downgrade for sandbox viewing!
-        sessionId: sessionId 
-      },
+      { id: user._id, role: 'EMPLOYEE', sessionId: sessionId },
       process.env.JWT_SECRET,
       { expiresIn: '30m' }
     );
 
+    await logAudit({
+      user, role: user.security.role, action: 'LOGIN_SUCCESS', category: 'AUTH', severity: 'LOW',
+      details: `Successfully logged into the STAFF portal.`, req
+    });
+
     res.json({
       token,
       user: {
-        id: user._id,
-        employeeId: user.employeeId,
-        username: user.username,
-        firstName: user.personalDetails.firstName,
-        lastName: user.personalDetails.lastName,
-        role: 'EMPLOYEE', 
-        isFirstLogin: user.security.isFirstLogin 
+        id: user._id, employeeId: user.employeeId, username: user.username,
+        firstName: user.personalDetails.firstName, lastName: user.personalDetails.lastName,
+        role: 'EMPLOYEE', isFirstLogin: user.security.isFirstLogin 
       }
     });
 
@@ -154,21 +170,30 @@ router.post('/staff-login', loginLimiter, async (req, res) => {
   }
 });
 
-// POST /api/v1/auth/logout (Securely destroys the session)
+// POST /api/v1/auth/logout
 router.post('/logout', authGuard, async (req, res) => {
   try {
+    const fullUser = await User.findById(req.user.id);
+
     await User.updateOne(
       { _id: req.user.id },
       { $set: { 'security.currentSessionId': null } }
     );
     
+    await logAudit({
+      user: fullUser || { _id: req.user.id, personalDetails: { firstName: 'User', lastName: req.user.id } },
+      role: req.user.role, action: 'LOGOUT', category: 'AUTH', severity: 'LOW',
+      details: `User manually logged out and terminated session.`, req
+    });
+
     res.json({ message: 'Successfully logged out.' });
   } catch (error) {
+    console.error('Logout Route Error:', error);
     res.status(500).json({ message: 'Server error during logout.' });
   }
 });
 
-// PATCH /api/v1/auth/change-password (Forces password change and removes First Login flag)
+// PATCH /api/v1/auth/change-password
 router.patch('/change-password', authGuard, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -185,19 +210,18 @@ router.patch('/change-password', authGuard, async (req, res) => {
       return res.status(401).json({ message: 'Incorrect current password.' });
     }
 
-    // 🚨 SECURE FIX: Manually hash the new password, then updateOne to bypass strict schema validation
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
     
     await User.updateOne(
       { _id: user._id },
-      { 
-        $set: { 
-          password: hashedPassword,
-          'security.isFirstLogin': false 
-        } 
-      }
+      { $set: { password: hashedPassword, 'security.isFirstLogin': false } }
     );
+
+    await logAudit({
+      user, role: user.security.role, action: 'PASSWORD_UPDATE', category: 'SECURITY', severity: 'MEDIUM',
+      details: `User successfully updated their account password.`, req
+    });
 
     res.json({ message: 'Password successfully updated. Your account is secure.' });
   } catch (error) {

@@ -13,6 +13,10 @@ const companyMetricsRoutes = require('./routes/companyMetricsRoutes');
 const AppConfig = require('./models/AppConfig');
 const User = require('./models/User'); // Required for dependency checks
 const { authGuard, roleGuard } = require('./middleware/auth'); // Required for securing config routes
+const quarterRoutes = require('./routes/quarterRoutes');
+
+// 🚨 UPGRADE: Import the global API logger middleware
+const apiLogger = require('./middleware/apiLogger');
 
 const app = express();
 
@@ -29,6 +33,9 @@ app.use(cors({
 
 app.use(express.json());
 
+// 🚨 UPGRADE: Activate the global logger to watch all incoming requests
+app.use(apiLogger);
+
 // 2. Map the routes to the URL paths
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);          
@@ -36,6 +43,8 @@ app.use('/api/v1/appraisals', appraisalRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/company-metrics', companyMetricsRoutes);
+app.use('/api/v1/audit', require('./routes/auditRoutes'));
+app.use('/api/v1/quarters', quarterRoutes);
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

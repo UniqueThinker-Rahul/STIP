@@ -4,13 +4,27 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
 
+// Fallback colors for dynamically generated company badges
+const BADGE_COLORS = [
+  'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]', // Blue
+  'bg-[#D1FAE5] text-[#065F46] border-[#A7F3D0]', // Green
+  'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]', // Amber
+  'bg-[#EDE9FE] text-[#4C1D95] border-[#DDD6FE]', // Purple
+  'bg-[#FCE7F3] text-[#9D174D] border-[#FBCFE8]', // Pink
+  'bg-[#CCFBF1] text-[#115E59] border-[#99F6E4]'  // Teal
+];
+
 export default function CEODashboard() {
   const router = useRouter();
 
   // State
   const [appraisals, setAppraisals] = useState([]);
+  const [staff, setStaff] = useState([]); // Need raw staff array to calculate company specific counts
   const [totalStaff, setTotalStaff] = useState(0);
   const [loading, setLoading] = useState(true);
+  
+  // 🚨 UPGRADE: Dynamic Company Codes State
+  const [companyCodes, setCompanyCodes] = useState([]);
   
   // Real KPA actuals state (fetched from backend)
   const [kpaActuals, setKpaActuals] = useState([null, null, null, null, null]);
@@ -25,17 +39,29 @@ export default function CEODashboard() {
       try {
         setLoading(true);
         
-        // Fetch all appraisals to calculate stats
-        const appRes = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
+        // Fetch all data points concurrently
+        const [appRes, usersRes, metricsRes, configRes] = await Promise.all([
+           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+           api.get('/users').catch(() => ({ data: { data: [] } })),
+           api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) // 🚨 Fetch DB config
+        ]);
+
         const allApps = appRes.data?.data || [];
         setAppraisals(allApps);
 
-        // 🚨 UPGRADE: Fetch real users instead of hardcoding 190
-        const usersRes = await api.get('/users').catch(() => ({ data: { data: [] } }));
-        setTotalStaff(usersRes.data?.data?.length || 190);
+        const allUsers = usersRes.data?.data || [];
+        setStaff(allUsers);
+        setTotalStaff(allUsers.length || 190);
 
-        // Fetch Company Metrics for the current year
-        const metricsRes = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+        // 🚨 UPGRADE: Set the dynamic company codes from the DB
+        if (configRes.data?.data?.companyCodes) {
+          setCompanyCodes(configRes.data.data.companyCodes);
+        } else {
+          // Fallback just in case the DB is empty
+          setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
+        }
+
         const metricsData = metricsRes.data?.data;
 
         if (metricsData) {
@@ -107,15 +133,23 @@ export default function CEODashboard() {
         </div>
         
         {/* Total Staff Card */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm">
-          <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Total Staff Covered</div>
-          <div className="text-[32px] font-[800] text-[#0D2B55] leading-none mb-[8px]">{totalStaff}</div>
-          <div className="text-[12px] font-[600] text-[#6b7280]">STIP-eligible employees</div>
-          <div className="flex gap-[6px] mt-[12px] flex-wrap">
-            <span className="text-[10px] font-[800] bg-[#DBEAFE] text-[#1E40AF] px-[6px] py-[2px] rounded border border-[#BFDBFE]">FSM 165</span>
-            <span className="text-[10px] font-[800] bg-[#D1FAE5] text-[#065F46] px-[6px] py-[2px] rounded border border-[#A7F3D0]">CDU 16</span>
-            <span className="text-[10px] font-[800] bg-[#FEF3C7] text-[#92400E] px-[6px] py-[2px] rounded border border-[#FDE68A]">NAR 13</span>
-            <span className="text-[10px] font-[800] bg-[#EDE9FE] text-[#4C1D95] px-[6px] py-[2px] rounded border border-[#DDD6FE]">GUM 2</span>
+        <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Total Staff Covered</div>
+            <div className="text-[32px] font-[800] text-[#0D2B55] leading-none mb-[8px]">{totalStaff}</div>
+            <div className="text-[12px] font-[600] text-[#6b7280]">STIP-eligible employees</div>
+          </div>
+          {/* 🚨 UPGRADE: Dynamic Map for Company Code Badges with Auto-Scroll */}
+          <div className="flex gap-[6px] mt-[12px] overflow-x-auto pb-1 custom-scrollbar whitespace-nowrap">
+            {companyCodes.map((code, index) => {
+              const count = staff.filter(s => s.companyCode === code).length || 0;
+              const colorClass = BADGE_COLORS[index % BADGE_COLORS.length];
+              return (
+                <span key={code} className={`text-[10px] font-[800] px-[6px] py-[2px] rounded border ${colorClass} shrink-0`}>
+                  {code} {count}
+                </span>
+              );
+            })}
           </div>
         </div>
 

@@ -35,7 +35,7 @@ export default function UnifiedLogin() {
     setError('');
 
     try {
-      // 💡 REQUESTED PORTAL: We send the specific portal they clicked to the backend
+      // 💡 REQUESTED PORTAL: Sends the dynamically selected portal role to the backend
       const response = await api.post('/auth/login', { 
         username, 
         password,
@@ -50,15 +50,16 @@ export default function UnifiedLogin() {
       if (user.isFirstLogin) {
         router.push('/change-password');
       } else {
-        // Because the backend verified and sandboxed their role, we trust the response
-        if (user.role === 'HR_ADMIN') router.push('/dashboard/hr');
-        else if (user.role === 'CEO') router.push('/dashboard/ceo');
-        else if (user.role === 'ICT_ADMIN') router.push('/dashboard/ict');
+        // 🚨 UPGRADE: Dynamic routing based on the authorized token role returned by the backend
+        const activeRole = user.role;
+        if (activeRole === 'HR_ADMIN') router.push('/dashboard/hr');
+        else if (activeRole === 'CEO') router.push('/dashboard/ceo');
+        else if (activeRole === 'ICT_ADMIN') router.push('/dashboard/ict');
         else router.push('/dashboard/manager');
       }
     } catch (err) {
-      // Catches the 403 Forbidden Error if they try to access a portal they aren't allowed in!
-      setError(err.response?.data?.message || 'Invalid credentials. Please try again.');
+      // Accurately catches the 403 Forbidden Error if secondary role clearance fails
+      setError(err.response?.data?.message || 'Invalid credentials or missing clearance. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -102,12 +103,7 @@ export default function UnifiedLogin() {
           </span>
         </div>
         <div className="text-sm text-slate-500 mb-10 leading-relaxed">
-          FSM Petroleum Corporation — Short-Term Incentive Program<br/>
-<<<<<<< HEAD
-          {/* Unified Test Environment — All 5 Panels */}
-=======
-    
->>>>>>> 6f8c5c98755fe8962fd2abf023c3fa71b9691d5a
+          FSM Petroleum Corporation — Short-Term Incentive Program<br/>  
         </div>
 
         {view === 'role_select' && (
@@ -181,7 +177,7 @@ export default function UnifiedLogin() {
                   placeholder="••••••••"
                 />
               </div>
-              <button type="submit" disabled={loading} className="w-full bg-[#0D2B55] hover:bg-[#153b75] text-white font-bold py-3.5 rounded-xl transition-colors mt-2">
+              <button type="submit" disabled={loading} className="w-full bg-[#0D2B55] hover:bg-[#153b75] text-white font-bold py-3.5 rounded-xl transition-colors mt-2 shadow-md">
                 {loading ? 'Authenticating...' : 'Secure Login'}
               </button>
             </form>
@@ -215,7 +211,7 @@ export default function UnifiedLogin() {
                   placeholder="••••••••"
                 />
               </div>
-              <button type="submit" disabled={loading} className="w-full bg-[#C9A84C] hover:bg-[#b59540] text-[#0D2B55] font-bold py-3.5 rounded-xl transition-colors mt-2">
+              <button type="submit" disabled={loading} className="w-full bg-[#C9A84C] hover:bg-[#b59540] text-[#0D2B55] font-bold py-3.5 rounded-xl transition-colors mt-2 shadow-md">
                 {loading ? 'Verifying...' : 'Access My Record'}
               </button>
             </form>
