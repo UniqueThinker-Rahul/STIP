@@ -13,6 +13,15 @@ export default function Header({ setIsOpen, user }) {
   
   // Real-time Metrics State
   const [metrics, setMetrics] = useState({ cpPct: null, locked: false });
+  
+  // Dynamic Quarter State
+  const [activeQuarterData, setActiveQuarterData] = useState({
+    name: 'Loading...',
+    deadline: '...'
+  });
+
+  // Dynamic Year Extraction
+  const currentYear = new Date().getFullYear();
 
   const handleLogout = async () => {
     try {
@@ -37,25 +46,54 @@ export default function Header({ setIsOpen, user }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch real-time company metrics for the header strip
+  // Fetch real-time company metrics AND Dynamic Quarter Data for the header strip
   useEffect(() => {
-    const fetchHeaderMetrics = async () => {
+    const fetchHeaderData = async () => {
       try {
-        const res = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
-        if (res.data?.data) {
+        // Dynamically requests metrics based on current year tracker
+        const [metricsRes, quartersRes] = await Promise.all([
+          api.get(`/company-metrics/${currentYear}`).catch(() => ({ data: { data: null } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
+        ]);
+
+        if (metricsRes.data?.data) {
           setMetrics({
-            cpPct: res.data.data.cpPct,
-            locked: res.data.data.locked
+            cpPct: metricsRes.data.data.cpPct,
+            locked: metricsRes.data.data.locked
           });
         }
+
+        // Calculate current active quarter
+        const dbQuarters = quartersRes.data?.data || [];
+        const now = new Date();
+        
+        const activeQ = dbQuarters.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return now >= start && now <= end && !q.isLocked;
+        });
+
+        if (activeQ) {
+          setActiveQuarterData({
+            name: `${activeQ.name} Deadline:`,
+            deadline: new Date(activeQ.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          });
+        } else {
+          setActiveQuarterData({
+            name: 'Status:',
+            deadline: 'No Active Quarters'
+          });
+        }
+
       } catch (error) {
-        console.error('Failed to load header metrics', error);
+        console.error('Failed to load header data', error);
       }
     };
-    fetchHeaderMetrics();
-  }, []);
+    fetchHeaderData();
+    // 🚨 FIX: Reverted to empty array to satisfy React's strict Hook size rules
+  }, []); 
 
-  // 🚨 BULLETPROOF NAME EXTRACTION
+  // BULLETPROOF NAME EXTRACTION
   const fName = user?.personalDetails?.firstName || user?.firstName || '';
   const lName = user?.personalDetails?.lastName || user?.lastName || '';
   const email = user?.email || '';
@@ -90,7 +128,7 @@ export default function Header({ setIsOpen, user }) {
         </h1>
       </div>
 
-      {/* 🚨 NEW: Real-Time Central Information Strip */}
+      {/* Real-Time Central Information Strip */}
       <div className="hidden lg:flex items-center bg-[#FAF8F4] border border-[#E2DDD4] rounded-full px-[16px] py-[6px] shadow-sm">
         
         {/* CP Score */}
@@ -102,11 +140,11 @@ export default function Header({ setIsOpen, user }) {
           </span>
         </div>
 
-        {/* Q3 Deadline */}
+        {/* Dynamic Quarter Deadline */}
         <div className="flex items-center gap-[6px] px-[14px] border-r border-[#E2DDD4]">
           <Clock size={14} className="text-[#92400E]" />
-          <span className="text-[11px] font-[700] text-[#6b7280] uppercase tracking-wider">Q3 Deadline:</span>
-          <span className="text-[12px] font-[800] text-[#92400E]">30 Sep 2026</span>
+          <span className="text-[11px] font-[700] text-[#6b7280] uppercase tracking-wider">{activeQuarterData.name}</span>
+          <span className="text-[12px] font-[800] text-[#92400E]">{activeQuarterData.deadline}</span>
         </div>
 
         {/* Conditional Scorecard Lock Status (CEO & HR Only) */}
@@ -129,7 +167,7 @@ export default function Header({ setIsOpen, user }) {
         {/* Fill space if lock status is hidden to maintain layout balance */}
         {!showLockStatus && (
           <div className="pl-[14px] text-[11px] font-[700] text-[#6b7280] uppercase tracking-wider">
-            CY2026 Active
+            CY{currentYear} Active
           </div>
         )}
 

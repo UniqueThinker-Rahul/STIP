@@ -230,4 +230,22 @@ router.patch('/change-password', authGuard, async (req, res) => {
   }
 });
 
+// GET /api/v1/auth/me
+// Returns the currently authenticated user's profile based on their JWT
+router.get('/me', authGuard, async (req, res) => {
+  try {
+    // req.user.id is populated by your authGuard middleware
+    const user = await User.findById(req.user.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User profile not found.' });
+    }
+
+    res.json({ data: user });
+  } catch (error) {
+    console.error("Error fetching current user:", error);
+    res.status(500).json({ message: 'Server error fetching user profile.' });
+  }
+});
+
 module.exports = router;

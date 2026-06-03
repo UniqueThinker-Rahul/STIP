@@ -16,8 +16,12 @@ export default function AllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // 🚨 UPGRADE: Dynamic state for filters
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [companyCodes, setCompanyCodes] = useState([]);
+
   const [search, setSearch] = useState('');
-  const [qtr, setQtr] = useState('Q3');
+  const [qtr, setQtr] = useState(''); // Default to empty (All) instead of hardcoded 'Q3'
   const [statusFilter, setStatusFilter] = useState('');
   const [co, setCo] = useState('');
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
@@ -26,11 +30,27 @@ export default function AllAppraisals() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
-        const allData = response.data?.data || [];
-        setAppraisals(allData);
+        // 🚨 UPGRADE: Fetch Appraisals AND dynamic configurations
+        const [appRes, qtrRes, configRes] = await Promise.all([
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } })),
+          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } }))
+        ]);
+        
+        setAppraisals(appRes.data?.data || []);
+        
+        const fetchedQuarters = qtrRes.data?.data || [];
+        setDbQuarters(fetchedQuarters);
+        
+        // Find an active quarter to default the filter to, if none, leave blank
+        const activeQ = fetchedQuarters.find(q => new Date(q.endDate) >= new Date() && !q.isLocked);
+        if (activeQ) setQtr(activeQ._id);
+
+        const configData = configRes.data?.data || {};
+        setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']); // Safe fallback
+
       } catch (error) {
-        console.error('Failed to fetch appraisals:', error);
+        console.error('Failed to fetch data:', error);
       } finally {
         setLoading(false);
       }
@@ -58,13 +78,23 @@ export default function AllAppraisals() {
     const empName = `${emp?.firstName || ''} ${emp?.lastName || ''}`.toLowerCase();
     const empIdStr = (a.employeeId?.employeeId || '').toLowerCase();
     
+    // 🚨 UPGRADE: Filter matching based on DB Quarter ID instead of string 'Q3'
+    const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+
     const matchesSearch = search === '' || empName.includes(search.toLowerCase()) || empIdStr.includes(search.toLowerCase());
-    const matchesQtr = qtr === '' || a.period?.quarter === qtr;
+    const matchesQtr = qtr === '' || appQuarterId === qtr;
     const matchesStatus = statusFilter === '' || a.workflow?.status === statusFilter;
     const matchesCo = co === '' || a.employeeId?.companyCode === co;
     
     return matchesSearch && matchesQtr && matchesStatus && matchesCo;
   });
+
+  // Helper to display Quarter name in table
+  const getQuarterName = (qId) => {
+    if (!qId) return 'N/A';
+    const match = dbQuarters.find(q => q._id === qId);
+    return match ? match.name : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
+  };
 
   return (
     <div className="max-w-6xl mx-auto pb-[60px] font-sans">
@@ -86,13 +116,15 @@ export default function AllAppraisals() {
           />
           <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
         </div>
-        <select value={qtr} onChange={e => setQtr(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
+        
+        {/* 🚨 UPGRADED: Dynamic Quarter Filter */}
+        <select value={qtr} onChange={e => setQtr(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
           <option value="">All Quarters</option>
-          <option value="Q1">Q1</option>
-          <option value="Q2">Q2</option>
-          <option value="Q3">Q3</option>
-          <option value="Q4">Q4</option>
+          {dbQuarters.map(q => (
+             <option key={q._id} value={q._id}>{q.name} ({q.year})</option>
+          ))}
         </select>
+
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
           <option value="">All Statuses</option>
           <option value="SUBMITTED">At HR</option>
@@ -101,11 +133,13 @@ export default function AllAppraisals() {
           <option value="APPROVED">CEO Approved</option>
           <option value="DRAFT">Drafts</option>
         </select>
+        
+        {/* 🚨 UPGRADED: Dynamic Company Filter */}
         <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[140px]">
           <option value="">All Companies</option>
-          <option value="FSM">FSM</option>
-          <option value="CDU">CDU</option>
-          <option value="NAR">NAR</option>
+          {companyCodes.map(code => (
+             <option key={`co-${code}`} value={code}>{code}</option>
+          ))}
         </select>
       </div>
 
@@ -133,12 +167,12 @@ export default function AllAppraisals() {
                   const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`;
                   const mgrName = `${a.managerId?.personalDetails?.firstName || ''} ${a.managerId?.personalDetails?.lastName || ''}`;
                   const coCode = a.employeeId?.companyCode || 'FSM';
+                  const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
                   
                   return (
                     <tr key={a._id} className="hover:bg-[#FAF8F4] transition-colors">
                       <td className="p-[12px_16px]">
                         <div className="font-[700] text-[#0D2B55]">{empName}</div>
-                        {/* 🚨 UPGRADED: Added exact Timestamp info directly below the job title */}
                         <div className="text-[11px] text-[#6b7280]">{a.employeeId?.employmentDetails?.jobTitle} &middot; {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                       </td>
                       <td className="p-[12px_16px] text-[#0f1923] text-[12px]">{mgrName || 'Unknown'}</td>
@@ -151,7 +185,7 @@ export default function AllAppraisals() {
                           {coCode}
                         </span>
                       </td>
-                      <td className="p-[12px_16px] text-center font-[600] text-[#0f1923]">{a.period?.quarter || 'Q3'}</td>
+                      <td className="p-[12px_16px] text-center font-[600] text-[#0f1923]">{getQuarterName(appQuarterId)}</td>
                       <td className="p-[12px_16px] text-center">
                         <span className="font-[800] text-[#1E40AF] bg-[#DBEAFE] px-[8px] py-[3px] rounded-[6px] border border-[#BFDBFE]">
                           {a.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0'}
@@ -191,7 +225,6 @@ export default function AllAppraisals() {
                   <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
                     {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
                   </h3>
-                  {/* 🚨 UPGRADED: Added exact Timestamp info to Audit Modal Header */}
                   <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
                     {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Last updated {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
@@ -209,7 +242,7 @@ export default function AllAppraisals() {
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>
-                  <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.period?.quarter || 'Q3'}</div>
+                  <div className="text-[18px] font-[800] text-[#0f1923] truncate">{getQuarterName(selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter)}</div>
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Company</div>
@@ -222,13 +255,13 @@ export default function AllAppraisals() {
                 <table className="w-full text-left text-[13px]">
                   <tbody className="divide-y divide-[#E2DDD4]">
                     {Object.entries(CRIT_NAMES).map(([key, name]) => {
-                      const rating = selectedAppraisal.scores?.[key]?.rating;
+                      const rating = selectedAppraisal.scores?.[key]?.rating ?? selectedAppraisal.scores?.[key];
                       const color = rating === 0.0 ? 'text-[#991B1B]' : rating === 0.7 ? 'text-[#92400E]' : rating === 1.0 ? 'text-[#065F46]' : rating === 1.3 ? 'text-[#1E40AF]' : 'text-[#6b7280]';
                       return (
                         <tr key={key}>
                           <td className="p-[10px_16px] font-[500] text-[#0f1923]">{name}</td>
                           <td className="p-[10px_16px] text-right">
-                            <span className={`font-[800] ${color}`}>{rating !== undefined ? rating.toFixed(1) : '—'}</span>
+                            <span className={`font-[800] ${color}`}>{rating !== undefined && rating !== null ? Number(rating).toFixed(1) : '—'}</span>
                           </td>
                         </tr>
                       );
@@ -243,7 +276,7 @@ export default function AllAppraisals() {
                     <div className="text-[11px] font-[800] text-[#92400E] uppercase tracking-[.06em] mb-[6px] flex items-center gap-[6px]">
                       <span>⭐</span> EP Justification
                     </div>
-                    <div className="text-[13px] text-[#92400E] leading-relaxed font-[500]">
+                    <div className="text-[13px] text-[#92400E] leading-relaxed font-[500] whitespace-pre-wrap">
                       {selectedAppraisal.narrative.epJustification}
                     </div>
                   </div>
@@ -252,7 +285,7 @@ export default function AllAppraisals() {
                 {selectedAppraisal.narrative?.generalComments && (
                   <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px]">
                     <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
-                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic">
+                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
                       "{selectedAppraisal.narrative.generalComments}"
                     </div>
                   </div>
@@ -261,7 +294,7 @@ export default function AllAppraisals() {
                 {selectedAppraisal.narrative?.hrComments && (
                   <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
                     <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
-                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic">
+                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
                       "{selectedAppraisal.narrative.hrComments}"
                     </div>
                   </div>

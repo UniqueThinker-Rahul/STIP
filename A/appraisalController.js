@@ -6,28 +6,50 @@ const AppraisalQuarter = require('../models/AppraisalQuarter');
 const { sendAppraisalEmail } = require('../utils/emailService');
 
 // --- HELPER FUNCTION: Trigger Dual Notification ---
-// Update the arguments to include targetRoleContext
-const dispatchNotification = async ({ senderId, recipientRole, recipientId, targetRoleContext, title, message, type, comment, actionUrl }) => {
+const dispatchNotification = async ({ senderId, recipientRole, recipientId, title, message, type, comment, actionUrl }) => {
   try {
     let recipients = [];
+    
+    // 1. Resolve exact recipients securely
     if (recipientId) {
       const user = await User.findById(recipientId);
       if (user) recipients.push(user);
     } else if (recipientRole) {
-      recipients = await User.find({ 
+      const foundUsers = await User.find({ 
         'employmentDetails.isDeleted': { $ne: true },
         'employmentDetails.isActive': true,
-        $or: [{ 'security.role': recipientRole }, { 'security.secondaryRoles': recipientRole }]
+        $or: [
+          { 'security.role': recipientRole },
+          { 'security.secondaryRoles': recipientRole }
+        ]
       });
+      if (foundUsers && foundUsers.length > 0) {
+        recipients = foundUsers;
+      }
     }
 
-    for (const recipient of recipients) {
-      await Notification.create({ recipient: recipient._id, sender: senderId, title, message, type, actionUrl });
+    if (recipients.length === 0) {
+      console.log(`⚠️ No active users found to notify for role: ${recipientRole} or ID: ${recipientId}`);
+      return;
+    }
 
-      // Pass the specific targetRoleContext to the mailer!
+    // 2. Dispatch internal alert AND external email for each valid recipient
+    for (const recipient of recipients) {
+      if (!recipient || !recipient._id) continue;
+
+      // Internal Portal Alert
+      await Notification.create({
+        recipient: recipient._id,
+        sender: senderId,
+        title,
+        message,
+        type,
+        actionUrl
+      });
+
+      // External Email Workflow (Mailer handles its own safety checks)
       await sendAppraisalEmail({
         targetUserId: recipient._id,
-        targetRoleContext: targetRoleContext, // 🚨 NEW
         subject: `STIP Alert: ${title}`,
         title: title,
         bodyText: message,
@@ -35,7 +57,9 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
         actionUrl: actionUrl || `${process.env.FRONTEND_URL}/dashboard`
       });
     }
-  } catch (error) { console.error("Notification Error:", error); }
+  } catch (error) {
+    console.error("Notification Dispatch Error:", error);
+  }
 };
 
 // 1. Create a new appraisal (Draft or Submitted)

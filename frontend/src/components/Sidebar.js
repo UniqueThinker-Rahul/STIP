@@ -44,7 +44,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Scorecard',
         items: [
-          { name: 'KPA Scorecard', href: '/dashboard/ceo/kpa', icon: Activity }
+          { name: 'KPA Scorecard', href: '/dashboard/ceo/kpa', icon: Activity },
+           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
         ]
       },
       {
@@ -164,7 +165,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'Scorecard Lock', href: '/dashboard/ict/scorecard', icon: Lock },
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
           { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
-           { name: 'Panel Permissions', href: '/dashboard/ict/users/roles', icon: Lock },
+          //  { name: 'Panel Permissions', href: '/dashboard/ict/users/roles', icon: Lock },
           { name: 'System Status', href: '/dashboard/ict/system', icon: Database },
           // 🚨 UPGRADED: Added Quarter Cycles to ICT Menu for override control
           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
@@ -173,7 +174,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Information',
         items: [
-          { name: 'Staff Data', href: '/dashboard/ict/staff', icon: Users }
+          { name: 'Staff Data', href: '/dashboard/ict/staff', icon: Users },
+          { name: 'Reports', href: '/dashboard/ict/reports', icon: BarChart }
         ]
       }
     ]

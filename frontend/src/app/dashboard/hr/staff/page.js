@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Edit2, Shield, Trash2, Check, Download, DollarSign, Calendar as CalIcon, RotateCcw, Trash, Users } from "lucide-react";
+import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users } from "lucide-react";
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -53,7 +53,11 @@ export default function StaffManagement() {
   const [successMsg, setSuccessMsg] = useState('');
   const [isRecycleBinView, setIsRecycleBinView] = useState(false); 
 
-  // Fetch Live Data from MongoDB (Including Configs)
+  // 🚨 Custom Searchable Dropdown States for Edit Modal
+  const [openDropdown, setOpenDropdown] = useState(null);
+  const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '' });
+  const dropdownRef = useRef(null);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -69,7 +73,7 @@ export default function StaffManagement() {
       setDbManagers(resMgrs.data?.data || []);
       
       const configData = configRes.data?.data || {};
-      setCompanyCodes(configData.companyCodes || []);
+      setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
       setOfficeLocations(configData.officeLocations || []);
       setJobTitles(configData.jobTitles || []);
       
@@ -82,7 +86,17 @@ export default function StaffManagement() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // Real-time filtering logic
+  // Close custom dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setOpenDropdown(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const sourceData = isRecycleBinView ? dbRecycleBin : dbStaff;
   let data = [...sourceData];
   
@@ -105,7 +119,6 @@ export default function StaffManagement() {
     }
   }
 
-  // Database Actions
   const handleSaveEdit = async () => {
     if (!editingStaff) return;
     try {
@@ -124,6 +137,7 @@ export default function StaffManagement() {
       
       setSuccessMsg(`${editingStaff.personalDetails.firstName}'s profile updated successfully.`);
       setEditingStaff(null);
+      setOpenDropdown(null); // Ensure dropdowns close
       fetchData();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (e) { alert("Failed to update to database."); }
@@ -149,7 +163,6 @@ export default function StaffManagement() {
     } catch (e) { alert("Failed to restore user."); }
   };
 
-  // 🚨 UPGRADE: Permanent Delete Action
   const handlePermanentDelete = async (userId) => {
     if (!window.confirm("WARNING: This will permanently erase the employee from the database. This action cannot be undone. Are you sure?")) return;
     try {
@@ -215,6 +228,110 @@ export default function StaffManagement() {
         secondaryRoles: newSecondaryRoles
       }
     });
+  };
+
+  // 🚨 UPGRADE: Searchable Dropdown Helper specifically tailored for the Edit Modal
+  const renderSearchableDropdown = (fieldKey, dbFieldObj, dbFieldProp, options, placeholder, displayKey, valueKey = null) => {
+    const isOpen = openDropdown === fieldKey;
+    const query = searchQueries[fieldKey] || '';
+    
+    const filteredOptions = options.filter(opt => {
+      const rawText = typeof opt === 'string' ? opt : (displayKey ? displayKey(opt) : '');
+      const text = String(rawText || ''); 
+      return text.toLowerCase().includes(query.toLowerCase());
+    });
+
+    // Extract current value from the complex editingStaff object structure
+    const currentValue = dbFieldProp 
+        ? editingStaff[dbFieldObj]?.[dbFieldProp] 
+        : editingStaff[dbFieldObj];
+        
+    // Specifically handle the manager object vs ID string discrepancy
+    const safeCurrentValue = (fieldKey === 'mgr' && typeof currentValue === 'object' && currentValue !== null) 
+        ? currentValue._id 
+        : currentValue;
+
+    const selectedText = safeCurrentValue 
+      ? (typeof options[0] === 'string' 
+          ? safeCurrentValue 
+          : displayKey(options.find(o => (valueKey ? o[valueKey] : o._id) === safeCurrentValue)) || placeholder)
+      : placeholder;
+
+    const handleSelect = (val) => {
+        // Deep update the editingStaff state
+        setEditingStaff(prev => {
+            const newState = { ...prev };
+            if (dbFieldProp) {
+                newState[dbFieldObj] = { ...newState[dbFieldObj], [dbFieldProp]: val };
+            } else {
+                newState[dbFieldObj] = val;
+            }
+            return newState;
+        });
+        setOpenDropdown(null);
+        setSearchQueries(prev => ({ ...prev, [fieldKey]: '' }));
+    };
+
+    return (
+      <div className="relative w-full" ref={isOpen ? dropdownRef : null}>
+        <div 
+          onClick={() => setOpenDropdown(isOpen ? null : fieldKey)}
+          className={`w-full px-[12px] py-[10px] border rounded-[8px] text-[13px] bg-white transition-colors cursor-pointer flex justify-between items-center shadow-sm ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-slate-300'}`}
+        >
+          <span className={safeCurrentValue ? "text-[#0f1923]" : "text-gray-400 truncate"}>{selectedText}</span>
+          <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform shrink-0 ml-2 ${isOpen ? 'rotate-180' : ''}`} />
+        </div>
+
+        {isOpen && (
+          <div className="absolute z-[100] mt-1 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+            <div className="p-2 border-b border-gray-100 bg-slate-50 sticky top-0">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Search..."
+                  value={searchQueries[fieldKey] || ''}
+                  onChange={(e) => setSearchQueries(prev => ({ ...prev, [fieldKey]: e.target.value }))}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md outline-none focus:border-[#0D2B55]"
+                />
+              </div>
+            </div>
+            
+            <div className="max-h-[180px] overflow-y-auto overflow-x-hidden custom-scrollbar">
+              {/* Added an Unassigned option explicitly for Managers */}
+              {fieldKey === 'mgr' && !query && (
+                <div 
+                    onClick={() => handleSelect(null)}
+                    className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#0D2B55] hover:text-white transition-colors truncate ${!safeCurrentValue ? 'bg-blue-50 font-bold text-[#0D2B55]' : 'text-slate-500 italic'}`}
+                >
+                    -- Unassigned / CEO --
+                </div>
+              )}
+              {filteredOptions.length === 0 ? (
+                <div className="p-3 text-xs text-center text-gray-500">No results found</div>
+              ) : (
+                filteredOptions.map((opt, idx) => {
+                  const val = typeof opt === 'string' ? opt : (valueKey ? opt[valueKey] : opt._id);
+                  const display = typeof opt === 'string' ? opt : displayKey(opt);
+                  const isSelected = safeCurrentValue === val;
+                  
+                  return (
+                    <div
+                      key={val || idx}
+                      onClick={() => handleSelect(val)}
+                      className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#0D2B55] hover:text-white transition-colors truncate ${isSelected ? 'bg-blue-50 font-bold text-[#0D2B55]' : 'text-[#0f1923]'}`}
+                    >
+                      {display}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -353,7 +470,6 @@ export default function StaffManagement() {
                   </td>
                   <td className="px-6 py-3 text-[11px] font-medium text-slate-600">{mgrName}</td>
                   <td className="px-6 py-3 text-center">
-                    {/* 🚨 UPGRADED: Added Permanent Delete Button in Recycle Bin */}
                     {isRecycleBinView ? (
                       <div className="flex items-center justify-center gap-2">
                         <button onClick={() => handleRestore(e._id)} className="px-3 py-1.5 text-xs font-bold border border-green-200 text-green-700 hover:bg-green-50 rounded-md flex items-center gap-1.5 transition-colors bg-white shadow-sm">
@@ -389,7 +505,7 @@ export default function StaffManagement() {
                   <div className="text-xs text-gray-500 font-mono">ID: {editingStaff.employeeId}</div>
                 </div>
               </div>
-              <button onClick={() => setEditingStaff(null)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
+              <button onClick={() => { setEditingStaff(null); setOpenDropdown(null); }} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
             </div>
             
             <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar bg-[#FAF8F4]">
@@ -405,27 +521,19 @@ export default function StaffManagement() {
                 </div>
               </div>
               
+              {/* 🚨 UPGRADE: Searchable Dropdowns for Edit Modal */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Job Title</label>
-                  <select className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none shadow-sm focus:border-[#0D2B55] bg-white" value={editingStaff.employmentDetails?.jobTitle || ''} onChange={e => setEditingStaff({...editingStaff, employmentDetails: {...editingStaff.employmentDetails, jobTitle: e.target.value}})}>
-                    <option value="" disabled>Select Job Title</option>
-                    {jobTitles.map((t, i) => <option key={`edit-jt-${i}`} value={t}>{t}</option>)}
-                  </select>
+                  {renderSearchableDropdown('title', 'employmentDetails', 'jobTitle', jobTitles, 'Search Title...', null)}
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Office Location</label>
-                  <select className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none shadow-sm focus:border-[#0D2B55] bg-white" value={editingStaff.employmentDetails?.officeLocation || ''} onChange={e => setEditingStaff({...editingStaff, employmentDetails: {...editingStaff.employmentDetails, officeLocation: e.target.value}})}>
-                    <option value="" disabled>Select Office</option>
-                    {officeLocations.map((o, i) => <option key={`edit-ol-${i}`} value={o}>{o}</option>)}
-                  </select>
+                  {renderSearchableDropdown('office', 'employmentDetails', 'officeLocation', officeLocations, 'Search Office...', null)}
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Company</label>
-                  <select className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none shadow-sm focus:border-[#0D2B55] bg-white" value={editingStaff.companyCode || ''} onChange={e => setEditingStaff({...editingStaff, companyCode: e.target.value})}>
-                    <option value="" disabled>Select Company</option>
-                    {companyCodes.map((c, i) => <option key={`edit-co-${i}`} value={c}>{c}</option>)}
-                  </select>
+                  {renderSearchableDropdown('co', 'companyCode', null, companyCodes, 'Select Company...', null)}
                 </div>
               </div>
 
@@ -445,10 +553,9 @@ export default function StaffManagement() {
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Date of Hire</label>
                   <div className="relative">
-                    <CalIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input 
                       type="date" 
-                      className="w-full border rounded-lg pl-9 pr-3 py-2.5 text-sm outline-none focus:border-[#0D2B55] bg-slate-50" 
+                      className="w-full border rounded-lg pl-3 pr-3 py-2.5 text-sm outline-none focus:border-[#0D2B55] bg-slate-50" 
                       value={editingStaff.employmentDetails?.dateOfHire ? new Date(editingStaff.employmentDetails.dateOfHire).toISOString().split('T')[0] : ''} 
                       onChange={e => setEditingStaff({...editingStaff, employmentDetails: {...editingStaff.employmentDetails, dateOfHire: e.target.value}})} 
                     />
@@ -471,12 +578,13 @@ export default function StaffManagement() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Direct Manager</label>
-                    <select className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-white shadow-sm" value={editingStaff.employmentDetails?.reportingTo?._id || editingStaff.employmentDetails?.reportingTo || ''} onChange={e => setEditingStaff({...editingStaff, employmentDetails: {...editingStaff.employmentDetails, reportingTo: e.target.value}})}>
-                      <option value="">-- Unassigned / CEO --</option>
-                      {dbManagers.map(mgr => (
-                        <option key={mgr._id} value={mgr._id}>{mgr.personalDetails?.firstName} {mgr.personalDetails?.lastName} (ID: {mgr.employeeId})</option>
-                      ))}
-                    </select>
+                    {renderSearchableDropdown('mgr', 'employmentDetails', 'reportingTo', dbManagers, 'Search for Manager...', (m) => {
+                       if (!m) return '';
+                       const fName = m.personalDetails?.firstName || m.firstName || '';
+                       const lName = m.personalDetails?.lastName || m.lastName || '';
+                       const isSecondary = !['MANAGER', 'HR_ADMIN', 'CEO'].includes(m.security?.role);
+                       return `${fName} ${lName}${isSecondary ? ` (${m.security?.role})` : ''}`.trim();
+                    })}
                   </div>
                 </div>
 
@@ -508,7 +616,7 @@ export default function StaffManagement() {
             <div className="p-4 border-t border-gray-200 bg-white flex items-center justify-between shrink-0 rounded-b-xl">
               <button onClick={handleDelete} className="flex items-center gap-1.5 text-xs font-bold text-red-600 hover:text-red-800 hover:bg-red-50 p-2 rounded-lg transition-colors uppercase tracking-wider"><Trash2 className="w-4 h-4" /> Move to Recycle Bin</button>
               <div className="flex gap-3">
-                <button onClick={() => setEditingStaff(null)} className="px-5 py-2.5 text-sm font-bold text-slate-600 border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors shadow-sm">Cancel</button>
+                <button onClick={() => { setEditingStaff(null); setOpenDropdown(null); }} className="px-5 py-2.5 text-sm font-bold text-slate-600 border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors shadow-sm">Cancel</button>
                 <button onClick={handleSaveEdit} className="px-6 py-2.5 text-sm font-bold text-white bg-[#0D2B55] hover:bg-[#1a3d6e] rounded-lg flex items-center gap-2 shadow-md transition-all"><Check className="w-4 h-4" /> Save Changes</button>
               </div>
             </div>

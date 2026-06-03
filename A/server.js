@@ -20,22 +20,15 @@ const apiLogger = require('./middleware/apiLogger');
 
 const app = express();
 
-// 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
+// 🚨 UPDATED CORS CONFIGURATION
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman or mobile apps)
-    if (!origin) return callback(null, true);
-    
-    // Dynamically allow any Vercel domain, local dev, or Railway
-    if (origin.includes('localhost') || origin.includes('vercel.app') || origin.includes('railway.app')) {
-      return callback(null, true);
-    } else {
-      return callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true, // Required for cookies/sessions to cross domains
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: [
+    'http://localhost:3000',
+    'https://stipdash.vercel.app', 
+    'https://stipdash-mkidimz0m-cyber-trunks-projects.vercel.app',
+    'https://stip-production.up.railway.app' 
+  ],
+  credentials: true
 }));
 
 app.use(express.json());

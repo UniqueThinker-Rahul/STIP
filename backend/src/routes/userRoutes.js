@@ -31,6 +31,46 @@ router.get('/', async (req, res) => {
   }
 });
 
+// 🚨 UPGRADED: Save Email by Role Context
+router.patch('/notification-email', async (req, res) => {
+  try {
+    const { roleContext, notificationEmail } = req.body;
+    
+    if (!roleContext) return res.status(400).json({ success: false, message: 'Role context is required.' });
+
+    if (notificationEmail && !/^\S+@\S+\.\S+$/.test(notificationEmail)) {
+       return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
+    }
+
+    const updateQuery = {};
+    if (notificationEmail) {
+      // Set the email for this specific role
+      updateQuery.$set = { [`personalDetails.notificationEmails.${roleContext}`]: notificationEmail };
+    } else {
+      // If removing, unset the specific role key
+      updateQuery.$unset = { [`personalDetails.notificationEmails.${roleContext}`]: 1 };
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.id,
+      updateQuery,
+      { returnDocument: 'after' }
+    ).select('-password');
+
+    const { logAudit } = require('../utils/logger');
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'UPDATED_NOTIFICATION_PREF', 
+      category: 'USER_MANAGEMENT', severity: 'LOW',
+      details: `User updated notification email for role ${roleContext} to: ${notificationEmail || 'Removed'}`, req
+    });
+
+    res.json({ success: true, message: `Preferences updated for ${roleContext.replace('_', ' ')}.`, data: updatedUser });
+  } catch (error) {
+    console.error("Error updating email:", error);
+    res.status(500).json({ success: false, message: 'Server error updating profile.' });
+  }
+});
+
 // 3b. GET /api/v1/users/recycle-bin (The Soft Deleted Users)
 router.get('/recycle-bin', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
@@ -108,7 +148,7 @@ router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN
         officeLocation: officeLocation || 'Unassigned', 
         salary: salary || 0, 
         dateOfHire, 
-        prorateValue: prorateValue || 12,               
+        prorateValue: prorateValue || 12,              
         reportingTo: reportingTo || null,
         isActive: isActive !== undefined ? isActive : true,
         isDeleted: false 
@@ -124,7 +164,7 @@ router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN
   }
 });
 
-// 8. PATCH /api/v1/users/:id/hr-update (Edit Profile)
+// 8. 🚨 UPGRADED: PATCH /api/v1/users/:id/hr-update (Edit Profile)
 router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
   try {
     const { 
@@ -146,8 +186,9 @@ router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', '
 
     if (role) user.security.role = role;
 
+    // Securely handle Array assignment for Secondary Roles
     if (secondaryRoles !== undefined) {
-      user.security.secondaryRoles = secondaryRoles;
+      user.security.secondaryRoles = Array.isArray(secondaryRoles) ? secondaryRoles : [secondaryRoles];
     }
 
     await user.save();
@@ -231,7 +272,7 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', '
   }
 });
 
-// 10. 🚨 UPGRADE: DELETE /api/v1/users/:id/permanent (Wipe completely)
+// 10. DELETE /api/v1/users/:id/permanent (Wipe completely)
 router.delete('/:id/permanent', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);

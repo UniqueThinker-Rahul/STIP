@@ -17,6 +17,9 @@ export default function UnifiedLogin() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
+  // 🚨 UPGRADED: Dynamic Current Year Calculation
+  const currentYear = new Date().getFullYear();
+
   const selectRole = (roleId, roleName) => {
     setError('');
     setUsername('');
@@ -99,7 +102,8 @@ export default function UnifiedLogin() {
         </div>
         <div className="mb-6">
           <span className="inline-block bg-[#FEF3C7] text-[#92400E] text-[11px] font-bold px-4 py-1 rounded-full tracking-widest uppercase">
-            CY2026 • Q3 Active
+            {/* 🚨 UPGRADED: Renders 'CY2026', 'CY2027', etc dynamically */}
+            CY{currentYear} Active
           </span>
         </div>
         <div className="text-sm text-slate-500 mb-10 leading-relaxed">

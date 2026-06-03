@@ -9,7 +9,13 @@ const userSchema = new mongoose.Schema({
   
   personalDetails: {
     firstName: { type: String, required: true },
-    lastName: { type: String, required: true }
+    lastName: { type: String, required: true },
+    // 🚨 REPLACE the old notificationEmail string with this MAP:
+    notificationEmails: { 
+      type: Map, 
+      of: String, 
+      default: {} 
+    } 
   },
   
   employmentDetails: {
@@ -21,11 +27,10 @@ const userSchema = new mongoose.Schema({
     rawManagerName: { type: String }, // Temporary field for importing
     reportingTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     isActive: { type: Boolean, default: true },
-    isDeleted: { type: Boolean, default: false }
- // 🚨 Account Status Field
+    isDeleted: { type: Boolean, default: false } // 🚨 Account Status Field
   },
 
- security: {
+  security: {
     role: {
       type: String,
       enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'],

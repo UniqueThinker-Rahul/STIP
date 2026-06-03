@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator } from 'lucide-react';
+import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator, Search } from 'lucide-react';
 import api from '../../../../lib/api'; 
 
 const CRITERIA = [
@@ -128,7 +128,6 @@ function NewAppraisalForm() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 🚨 UPGRADED: Dynamic Quarter DB Sync State
   const [dbQuarters, setDbQuarters] = useState([]);
   const [activeQuarterId, setActiveQuarterId] = useState('');
 
@@ -138,15 +137,19 @@ function NewAppraisalForm() {
   const [expandedCrit, setExpandedCrit] = useState('expectedResults'); 
   const [rejectionReason, setRejectionReason] = useState('');
 
-  // Keeps track of the employee's history matching DB Quarters
   const [quarterStatuses, setQuarterStatuses] = useState({});
+
+  // 🚨 Custom Dropdown UI States
+  const [openDropdown, setOpenDropdown] = useState(null);
+  const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     const fetchFormContext = async () => {
       try {
         const [teamRes, quarterRes] = await Promise.all([
           api.get('/users/my-team'),
-          api.get('/quarters') // 🚨 Fetch actual quarters from DB
+          api.get('/quarters') 
         ]);
         
         const myTeam = teamRes.data?.data || [];
@@ -155,7 +158,6 @@ function NewAppraisalForm() {
         const fetchedQuarters = quarterRes.data?.data || [];
         setDbQuarters(fetchedQuarters);
         
-        // Find the most appropriate default quarter (first one that isn't locked by date)
         const currentDate = new Date();
         const defaultQ = fetchedQuarters.find(q => new Date(q.endDate) >= currentDate && !q.isLocked) || fetchedQuarters[0];
         
@@ -209,7 +211,6 @@ function NewAppraisalForm() {
         const allApps = data?.data || [];
         const empHistory = allApps.filter(a => (a.employeeId?._id || a.employeeId) === selectedStaffId);
         
-        // Build a dynamic status map based on DB quarters
         let newStatuses = {};
         dbQuarters.forEach(q => newStatuses[q._id] = 'missing');
         
@@ -247,6 +248,17 @@ function NewAppraisalForm() {
     fetchAppraisalStatus();
   }, [selectedStaffId, draftId, team, dbQuarters]);
 
+  // Click outside listener for custom dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setOpenDropdown(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const selectedStaff = team.find(s => s._id === selectedStaffId);
   const ratedCount = Object.values(scores).filter(v => v !== null).length;
   
@@ -266,7 +278,6 @@ function NewAppraisalForm() {
   const requiresEPJustification = calculatedIPRF >= 1.3;
   const isAlreadySubmitted = quarterStatuses[formData.quarter] === 'submitted';
   
-  // 🚨 UPGRADED: Dynamic Lockout logic calculation
   const currentQObj = dbQuarters.find(q => q._id === formData.quarter);
   const isExpired = currentQObj ? new Date() > new Date(currentQObj.endDate) : false;
   const isCurrentQuarterLocked = isAlreadySubmitted || (currentQObj && (currentQObj.isLocked || (isExpired && !currentQObj.forceUnlock)));
@@ -310,6 +321,14 @@ function NewAppraisalForm() {
         title: emp.employmentDetails?.jobTitle || ''
       }));
     }
+    setOpenDropdown(null);
+    setSearchQueries(prev => ({ ...prev, emp: '' }));
+  };
+
+  const handleTitleSelect = (title) => {
+    setFormData(prev => ({ ...prev, title }));
+    setOpenDropdown(null);
+    setSearchQueries(prev => ({ ...prev, title: '' }));
   };
 
   const handleSubmit = async (isDraft) => {
@@ -325,10 +344,10 @@ function NewAppraisalForm() {
       const payload = {
         employeeId: selectedStaffId,
         reviewYear: currentQObj?.year || new Date().getFullYear(),
-        appraisalQuarter: formData.quarter, // 🚨 Now passing dynamic Quarter ID
+        appraisalQuarter: formData.quarter, 
         period: { 
           year: currentQObj?.year || new Date().getFullYear(), 
-          quarter: currentQObj?.name ? (currentQObj.name.substring(0, 2).toUpperCase() || 'Q1') : 'Q1' // Fallback formatting mapping
+          quarter: currentQObj?.name ? (currentQObj.name.substring(0, 2).toUpperCase() || 'Q1') : 'Q1' 
         },
         scores: scores,
         calculatedResults: { finalIprfScore: calculatedIPRF },
@@ -359,6 +378,80 @@ function NewAppraisalForm() {
     }
   };
 
+  // 🚨 UPGRADE: Searchable Dropdown Helper Function
+  const renderSearchableDropdown = (fieldKey, options, currentValue, onSelect, placeholder, displayKey) => {
+    const isOpen = openDropdown === fieldKey;
+    const query = searchQueries[fieldKey] || '';
+    
+    const filteredOptions = options.filter(opt => {
+      const rawText = typeof opt === 'string' ? opt : (displayKey ? displayKey(opt) : '');
+      const text = String(rawText || ''); 
+      return text.toLowerCase().includes(query.toLowerCase());
+    });
+
+    const selectedText = currentValue 
+      ? (typeof options[0] === 'string' ? currentValue : displayKey(options.find(o => o._id === currentValue)) || placeholder)
+      : placeholder;
+
+    return (
+      <div className="relative w-full" ref={isOpen ? dropdownRef : null}>
+        <div 
+          onClick={() => {
+             if (draftId && fieldKey === 'emp') return; // Lock employee select if editing a draft
+             if (isCurrentQuarterLocked && fieldKey === 'title') return; // Lock title edit if locked
+             setOpenDropdown(isOpen ? null : fieldKey);
+          }}
+          className={`w-full px-[12px] py-[9px] border-[1.5px] rounded-[8px] text-[13px] bg-white transition-colors flex justify-between items-center ${
+             (draftId && fieldKey === 'emp') || (isCurrentQuarterLocked && fieldKey === 'title') 
+                 ? 'border-gray-200 bg-gray-50 opacity-80 cursor-not-allowed' 
+                 : isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10 cursor-pointer' : 'border-[#E2DDD4] cursor-pointer'
+          }`}
+        >
+          <span className={currentValue ? "text-[#0f1923] truncate" : "text-gray-400 truncate"}>{selectedText}</span>
+          <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform shrink-0 ml-2 ${isOpen ? 'rotate-180' : ''}`} />
+        </div>
+
+        {isOpen && (
+          <div className="absolute z-[100] mt-1 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+            <div className="p-2 border-b border-gray-100 bg-slate-50 sticky top-0">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="text" autoFocus placeholder="Search..."
+                  value={searchQueries[fieldKey] || ''}
+                  onChange={(e) => setSearchQueries(prev => ({ ...prev, [fieldKey]: e.target.value }))}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md outline-none focus:border-[#0D2B55]"
+                />
+              </div>
+            </div>
+            
+            <div className="max-h-[180px] overflow-y-auto overflow-x-hidden custom-scrollbar">
+              {filteredOptions.length === 0 ? (
+                <div className="p-3 text-xs text-center text-gray-500">No results found</div>
+              ) : (
+                filteredOptions.map((opt, idx) => {
+                  const val = typeof opt === 'string' ? opt : opt._id;
+                  const display = typeof opt === 'string' ? opt : displayKey(opt);
+                  const isSelected = currentValue === val;
+                  
+                  return (
+                    <div
+                      key={val || idx}
+                      onClick={() => onSelect(val)}
+                      className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#0D2B55] hover:text-white transition-colors truncate ${isSelected ? 'bg-blue-50 font-bold text-[#0D2B55]' : 'text-[#0f1923]'}`}
+                    >
+                      {display}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-[#0D2B55] w-10 h-10" /></div>;
 
   return (
@@ -387,23 +480,20 @@ function NewAppraisalForm() {
             <div className="flex flex-col sm:flex-row gap-3 items-end">
               <div className="flex-1 w-full">
                 <label className="block text-white/90 text-xs font-bold mb-1">Search & select employee <span className="text-red-400">*</span></label>
-                <select 
-                  className="w-full p-2.5 rounded-lg bg-white border border-white/30 text-[#0D2B55] font-semibold text-sm outline-none disabled:opacity-80"
-                  value={selectedStaffId}
-                  onChange={(e) => handleEmpSelect(e.target.value)}
-                  disabled={!!draftId} 
-                >
-                  <option value="">-- Select a staff member --</option>
-                  {team.map(staff => {
-                     const name = `${staff.personalDetails?.firstName} ${staff.personalDetails?.lastName}`;
-                     return (
-                        <option key={staff._id} value={staff._id}>{name} — {staff.employmentDetails?.jobTitle}</option>
-                     );
-                  })}
-                </select>
+                
+                {/* 🚨 UPGRADED: Employee Select Dropdown */}
+                {renderSearchableDropdown(
+                  'emp', 
+                  team, 
+                  selectedStaffId, 
+                  handleEmpSelect, 
+                  '-- Select a staff member --', 
+                  (staff) => `${staff.personalDetails?.firstName} ${staff.personalDetails?.lastName} — ${staff.employmentDetails?.jobTitle}`
+                )}
+
               </div>
               {selectedStaffId && (
-                <button onClick={handleClear} className="bg-white/10 border border-white/20 text-white/80 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-white/20 transition-all h-[42px]">
+                <button onClick={handleClear} className="bg-white/10 border border-white/20 text-white/80 px-4 py-2 rounded-lg text-xs font-bold hover:bg-white/20 transition-all h-[38px] shrink-0">
                   ✕ Clear
                 </button>
               )}
@@ -486,18 +576,11 @@ function NewAppraisalForm() {
                           className="p-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-500 bg-gray-50 cursor-default" 
                         />
                       ) : (
-                        <select 
-                          value={formData.title} 
-                          onChange={e => setFormData({...formData, title: e.target.value})}
-                          disabled={isCurrentQuarterLocked}
-                          className="p-2 border border-gray-300 rounded-lg text-xs text-gray-900 bg-white outline-none cursor-pointer disabled:bg-gray-100 disabled:opacity-70"
-                        >
-                          <option value="">-- Select Job Title --</option>
-                          {JOB_TITLES.map(title => <option key={title} value={title}>{title}</option>)}
-                        </select>
+                        /* 🚨 UPGRADED: Job Title Select Dropdown */
+                        renderSearchableDropdown('title', JOB_TITLES, formData.title, handleTitleSelect, '-- Select Job Title --', null)
                       )}
                     </div>
-                  <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-1">
                       <label className="text-[11px] font-[600] text-[#0D2B55]">Reporting Manager <span className="text-[9px] font-[700] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-1 uppercase">Auto</span></label>
                       <input 
                         readOnly 
@@ -517,13 +600,12 @@ function NewAppraisalForm() {
                       <input readOnly value={`${proRata.toFixed(3)} (${prMonths} months)`} className="p-2 border border-dashed border-gray-200 rounded-lg text-xs font-bold text-[#0D2B55] bg-gray-50 cursor-default" />
                     </div>
                     
-                    {/* 🚨 UPGRADED: Dynamic DB Quarter Selector */}
                     <div className="flex flex-col gap-1">
                       <label className="text-[11px] font-[600] text-[#0D2B55]">Appraisal Quarter <span className="text-red-500">*</span></label>
                       <select 
                         value={formData.quarter} 
                         onChange={e => setFormData({...formData, quarter: e.target.value})}
-                        className={`p-2 border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
+                        className={`p-[10px] border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
                       >
                         {dbQuarters.length === 0 ? <option value="">No Quarters Configured</option> : dbQuarters.map(q => {
                            const exp = new Date() > new Date(q.endDate);
@@ -538,7 +620,6 @@ function NewAppraisalForm() {
                     </div>
                   </div>
                   
-                  {/* 🚨 UPGRADED: Lock Warnings */}
                   {isCurrentQuarterLocked && (
                     <div className="flex items-start gap-1.5 text-[10px] text-amber-700 font-bold mt-3 bg-amber-50/50 p-2 rounded border border-amber-100">
                       <Calendar className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 
@@ -640,7 +721,6 @@ function NewAppraisalForm() {
                               ))}
                             </div>
 
-                            {/* EXACT COPIED REFERENCE SPREADSHEET MATRIX DATA SECTION */}
                             <div className="mt-2 border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50">
                               <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 text-[10px] font-bold text-[#0D2B55] uppercase tracking-wider">
                                 System Assessment Guide Reference Matrix
@@ -819,7 +899,6 @@ function NewAppraisalForm() {
             </div>
           )}
 
-          {/* 🚨 UPGRADED: DYNAMIC REAL-TIME DEADLINES AND STATUS BOX */}
           {selectedStaff && dbQuarters.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-slate-50">
@@ -872,7 +951,6 @@ function NewAppraisalForm() {
             </div>
           )}
 
-          {/* 🧮 IPRF BREAKDOWN CARD */}
           {selectedStaff && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden animate-fade-in">
               <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-slate-50">

@@ -1,308 +1,344 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Shield, RefreshCw, Search, Download, AlertTriangle, Key, Settings, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Search, Filter, AlertTriangle, ShieldCheck, FileText, ChevronLeft, ChevronRight, Loader2, Clock, User, Activity, Download, Calendar } from 'lucide-react';
 import api from '../../../../lib/api';
 
-export default function AuditTrail() {
+export default function SystemAuditTrail() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [exporting, setExporting] = useState(false);
   
-  // Filter States
-  const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [severityFilter, setSeverityFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState('30'); // Default to last 30 days
+  // Pagination & Filtering State
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalLogs, setTotalLogs] = useState(0);
+  
+  // Calculate 6 Months Ago for Date Limits
+  const today = new Date();
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(today.getMonth() - 6);
+  
+  const formatDateForInput = (date) => date.toISOString().split('T')[0];
+
+  const [filters, setFilters] = useState({
+    category: 'ALL',
+    severity: 'ALL',
+    search: '',
+    startDate: formatDateForInput(sixMonthsAgo),
+    endDate: formatDateForInput(today)
+  });
 
   const fetchLogs = async () => {
-    setLoading(true);
-    setErrorMsg('');
-    
     try {
-      // 🚀 100% LIVE DATA: Fetching directly from MongoDB
-      const response = await api.get('/audit');
-      const fetchedLogs = response.data?.data || [];
-      
-      // Sort newest first
-      fetchedLogs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      setLogs(fetchedLogs);
+      setLoading(true);
+      const queryParams = new URLSearchParams({
+        page,
+        limit: 50,
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        ...(filters.category !== 'ALL' && { category: filters.category }),
+        ...(filters.severity !== 'ALL' && { severity: filters.severity }),
+        ...(filters.search && { search: filters.search }),
+      });
+
+      const response = await api.get(`/audit?${queryParams}`);
+      setLogs(response.data?.data || []);
+      setTotalPages(response.data?.pagination?.pages || 1);
+      setTotalLogs(response.data?.pagination?.total || 0);
     } catch (error) {
-      console.error("Failed to load audit logs:", error);
-      // Catch the 403 Forbidden Error explicitly
-      if (error.response?.status === 403) {
-        setErrorMsg("Access Denied: Your role does not have permission to view the system audit trail.");
-      } else {
-        setErrorMsg("Failed to connect to the database to retrieve logs.");
-      }
-      setLogs([]);
+      console.error('Failed to fetch audit logs:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchLogs();
-  }, []);
+    const delayDebounceFn = setTimeout(() => { fetchLogs(); }, 400);
+    return () => clearTimeout(delayDebounceFn);
+  }, [page, filters.category, filters.severity, filters.search, filters.startDate, filters.endDate]);
 
-  // Advanced Filtering Logic
-  const filteredLogs = logs.filter(log => {
-    // Search text
-    const matchesSearch = search === '' || 
-      (log.userStr || '').toLowerCase().includes(search.toLowerCase()) || 
-      (log.action || '').toLowerCase().includes(search.toLowerCase()) ||
-      (log.details || '').toLowerCase().includes(search.toLowerCase());
-      
-    // Dropdowns
-    const matchesCategory = categoryFilter === '' || log.category === categoryFilter;
-    const matchesSeverity = severityFilter === '' || log.severity === severityFilter;
-    
-    // Date Filtering Logic
-    let matchesDate = true;
-    if (dateFilter !== 'ALL' && log.createdAt) {
-      const logDate = new Date(log.createdAt);
-      const now = new Date();
-      const diffTime = Math.abs(now - logDate);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (dateFilter === '1') matchesDate = diffDays <= 1;
-      else if (dateFilter === '7') matchesDate = diffDays <= 7;
-      else if (dateFilter === '30') matchesDate = diffDays <= 30;
+  // 🚨 UPGRADED: Log Exporter
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const queryParams = new URLSearchParams({
+        export: 'true',
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        ...(filters.category !== 'ALL' && { category: filters.category }),
+        ...(filters.severity !== 'ALL' && { severity: filters.severity }),
+        ...(filters.search && { search: filters.search }),
+      });
+
+      const response = await api.get(`/audit?${queryParams}`);
+      const exportData = response.data?.data || [];
+
+      if (exportData.length === 0) return alert('No logs found to export in this range.');
+
+      const headers = ['Timestamp', 'Actor ID', 'Actor Name', 'Role', 'Event Type', 'Category', 'Severity', 'Details', 'IP Address'];
+      const csvRows = [headers.join(',')];
+
+      exportData.forEach(log => {
+        const date = new Date(log.createdAt || log.timestamp).toLocaleString();
+        const empId = log.user?.employeeId || 'System';
+        const fName = log.user?.personalDetails?.firstName || '';
+        const lName = log.user?.personalDetails?.lastName || '';
+        const actorName = fName || lName ? `${fName} ${lName}` : (log.user?.username || 'System Execution');
+        
+        csvRows.push([
+          `"${date}"`,
+          `"${empId}"`,
+          `"${actorName}"`,
+          log.role || 'SYSTEM',
+          log.action,
+          log.category,
+          log.severity,
+          `"${log.details?.replace(/"/g, '""') || ''}"`,
+          log.ipAddress || 'Unknown'
+        ].join(','));
+      });
+
+      const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `ICT_Security_Audit_${filters.startDate}_to_${filters.endDate}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      alert('Error generating export file.');
+    } finally {
+      setExporting(false);
     }
-
-    return matchesSearch && matchesCategory && matchesSeverity && matchesDate;
-  });
-
-  // KPI Stats Calculations
-  const totalLogs = filteredLogs.length;
-  const criticalActions = filteredLogs.filter(l => l.severity === 'HIGH' || l.severity === 'CRITICAL').length;
-  const accessOverrides = filteredLogs.filter(l => l.category === 'ACCESS').length;
-  const systemConfigs = filteredLogs.filter(l => l.category === 'SYSTEM').length;
-
-  // Real-time CSV Export
-  const handleExportCSV = () => {
-    if (filteredLogs.length === 0) return alert("No logs to export.");
-    
-    const headers = ['Timestamp', 'User', 'Role', 'Action', 'Category', 'Severity', 'Details'];
-    const csvRows = [headers.join(',')];
-    
-    filteredLogs.forEach(log => {
-      const row = [
-        `"${new Date(log.createdAt).toLocaleString('en-GB')}"`,
-        `"${log.userStr || 'Unknown'}"`,
-        `"${log.role || 'SYSTEM'}"`,
-        `"${log.action || ''}"`,
-        `"${log.category || ''}"`,
-        `"${log.severity || ''}"`,
-        `"${(log.details || '').replace(/"/g, '""')}"`
-      ];
-      csvRows.push(row.join(','));
-    });
-    
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.setAttribute('hidden', '');
-    a.setAttribute('href', url);
-    a.setAttribute('download', `fsmpc_audit_log_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   };
 
+  // UI Helpers
   const getSeverityBadge = (severity) => {
-    switch(severity) {
-      case 'CRITICAL': return <span className="bg-red-600 text-white border border-red-800 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider animate-pulse">CRITICAL</span>;
-      case 'HIGH': return <span className="bg-red-50 text-red-700 border border-red-200 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider">HIGH</span>;
-      case 'MEDIUM': return <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider">MEDIUM</span>;
-      case 'LOW': return <span className="bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider">LOW</span>;
-      default: return <span className="bg-gray-50 text-gray-700 border border-gray-200 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider">{severity || 'INFO'}</span>;
+    switch (severity?.toUpperCase()) {
+      case 'HIGH':
+      case 'CRITICAL':
+        return <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">HIGH</span>;
+      case 'MEDIUM':
+      case 'WARNING':
+        return <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">MEDIUM</span>;
+      default:
+        return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">LOW</span>;
     }
+  };
+
+  const getCategoryBadge = (category) => {
+    const catStr = category?.replace(/_/g, ' ') || 'SYSTEM';
+    return <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">{catStr}</span>;
   };
 
   return (
-    <div className="max-w-[1400px] mx-auto pb-16 font-sans space-y-6">
+    <div className="max-w-[1400px] mx-auto pb-20 font-sans text-[#0F172A] px-4 xl:px-0">
       
-      {/* Header Area */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+      {/* Header */}
+      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <div className="text-[24px] font-[800] text-[#0D2B55] mb-1 flex items-center gap-2">
-            <FileText className="w-6 h-6" /> System Audit Trail
+          <div className="flex items-center gap-2 mb-1 text-[#0D2B55]">
+            <Shield className="w-7 h-7" strokeWidth={1.5} />
+            <h1 className="text-2xl font-bold tracking-tight">System Audit Trail</h1>
           </div>
-          <div className="text-[13px] text-[#6b7280]">Global security log for configuration changes, access overrides, and critical actions.</div>
+          <p className="text-sm text-gray-500 font-medium">
+            Immutable security log. System auto-deletes records older than 180 days.
+          </p>
         </div>
-        <button 
-          onClick={fetchLogs} 
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-[#E2DDD4] text-[#0D2B55] text-[13px] font-[700] rounded-lg hover:bg-slate-50 transition-colors shadow-sm disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh Log
-        </button>
-      </div>
-
-      {/* Dynamic Error State */}
-      {errorMsg && (
-        <div className="bg-[#FEF2F2] border-[1.5px] border-[#FECACA] rounded-[10px] p-[16px] flex items-center gap-3">
-          <AlertTriangle className="w-6 h-6 text-[#DC2626]" />
-          <div>
-            <h3 className="text-[14px] font-[800] text-[#991B1B]">Error Retrieving Logs</h3>
-            <p className="text-[13px] text-[#DC2626]">{errorMsg}</p>
+        
+        {/* KPI Badges */}
+        <div className="flex items-center gap-3">
+          <div className="bg-white px-4 py-2 border border-gray-200 rounded-lg shadow-sm flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center"><Activity className="w-4 h-4 text-blue-600"/></div>
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Current View Records</div>
+              <div className="text-sm font-black text-[#0D2B55] leading-none">{totalLogs.toLocaleString()}</div>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* KPI Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-[#E2DDD4] rounded-xl p-5 shadow-sm">
-          <div className="flex items-center gap-2 text-[11px] font-[800] text-[#6b7280] uppercase tracking-widest mb-2">
-            <FileText className="w-4 h-4" /> Total Logs
-          </div>
-          <div className="text-[32px] font-[900] text-[#0D2B55] leading-none">{totalLogs}</div>
-        </div>
-        <div className="bg-white border border-[#E2DDD4] rounded-xl p-5 shadow-sm">
-          <div className="flex items-center gap-2 text-[11px] font-[800] text-red-600 uppercase tracking-widest mb-2">
-            <AlertTriangle className="w-4 h-4" /> Critical Actions
-          </div>
-          <div className="text-[32px] font-[900] text-red-600 leading-none">{criticalActions}</div>
-        </div>
-        <div className="bg-white border border-[#E2DDD4] rounded-xl p-5 shadow-sm">
-          <div className="flex items-center gap-2 text-[11px] font-[800] text-amber-600 uppercase tracking-widest mb-2">
-            <Key className="w-4 h-4" /> Access Logs
-          </div>
-          <div className="text-[32px] font-[900] text-amber-600 leading-none">{accessOverrides}</div>
-        </div>
-        <div className="bg-white border border-[#E2DDD4] rounded-xl p-5 shadow-sm">
-          <div className="flex items-center gap-2 text-[11px] font-[800] text-blue-600 uppercase tracking-widest mb-2">
-            <Settings className="w-4 h-4" /> System Configs
-          </div>
-          <div className="text-[32px] font-[900] text-blue-600 leading-none">{systemConfigs}</div>
+          <button 
+            onClick={handleExport}
+            disabled={exporting || totalLogs === 0}
+            className="flex items-center gap-2 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-4 py-3 rounded-lg shadow-sm font-bold text-xs transition-colors disabled:opacity-50"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Export CSV
+          </button>
         </div>
       </div>
 
-      {/* Filters & Action Bar */}
-      <div className="bg-white border border-[#E2DDD4] rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
-        <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto flex-1">
-          <div className="relative w-full md:max-w-[300px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search by user, action, or details..." 
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-[#E2DDD4] rounded-lg text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
-            />
-          </div>
-          <select 
-            value={categoryFilter} 
-            onChange={e => setCategoryFilter(e.target.value)}
-            className="w-full md:w-auto px-3 py-2 bg-white border border-[#E2DDD4] rounded-lg text-[13px] outline-none focus:border-[#0D2B55] cursor-pointer"
-          >
-            <option value="">All Categories</option>
-            <option value="SYSTEM">System</option>
-            <option value="SECURITY">Security</option>
-            <option value="ACCESS">Access</option>
-            <option value="WORKFLOW">Workflow</option>
-            <option value="API">API/External</option>
-          </select>
-          <select 
-            value={severityFilter} 
-            onChange={e => setSeverityFilter(e.target.value)}
-            className="w-full md:w-auto px-3 py-2 bg-white border border-[#E2DDD4] rounded-lg text-[13px] outline-none focus:border-[#0D2B55] cursor-pointer"
-          >
-            <option value="">All Severities</option>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="LOW">Low</option>
-          </select>
-          <select 
-            value={dateFilter} 
-            onChange={e => setDateFilter(e.target.value)}
-            className="w-full md:w-auto px-3 py-2 bg-white border border-[#E2DDD4] rounded-lg text-[13px] outline-none focus:border-[#0D2B55] cursor-pointer"
-          >
-            <option value="30">Last 30 Days</option>
-            <option value="7">Last 7 Days</option>
-            <option value="1">Today</option>
-            <option value="ALL">All Time</option>
-          </select>
+      {/* Control Panel (Filters & Search) */}
+      <div className="bg-white border border-gray-200 rounded-t-xl shadow-sm p-4 flex flex-col xl:flex-row items-center gap-4">
+        
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input 
+            type="text" placeholder="Search action or details..." 
+            value={filters.search} onChange={(e) => { setFilters({...filters, search: e.target.value}); setPage(1); }}
+            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-[#0D2B55] transition-colors"
+          />
         </div>
-        <button 
-          onClick={handleExportCSV}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 text-[#0D2B55] text-[13px] font-[800] rounded-lg hover:bg-slate-200 transition-colors w-full md:w-auto shrink-0"
-        >
-          <Download className="w-4 h-4" /> Export Log (CSV)
-        </button>
+
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+          
+          {/* Date Range Restrictors */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
+            <Calendar className="w-3.5 h-3.5 text-gray-500 ml-1" />
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                min={formatDateForInput(sixMonthsAgo)} 
+                max={formatDateForInput(today)}
+                value={filters.startDate} 
+                onChange={(e) => { setFilters({...filters, startDate: e.target.value}); setPage(1); }}
+                className="bg-transparent text-xs font-bold text-gray-700 outline-none w-[110px]"
+              />
+              <span className="text-gray-400 text-xs">to</span>
+              <input 
+                type="date" 
+                min={filters.startDate} 
+                max={formatDateForInput(today)}
+                value={filters.endDate} 
+                onChange={(e) => { setFilters({...filters, endDate: e.target.value}); setPage(1); }}
+                className="bg-transparent text-xs font-bold text-gray-700 outline-none w-[110px]"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2">
+            <Filter className="w-3 h-3 text-gray-400 ml-1" />
+            <select 
+              value={filters.severity} 
+              onChange={(e) => { setFilters({...filters, severity: e.target.value}); setPage(1); }}
+              className="py-2 bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer border-none focus:ring-0"
+            >
+              <option value="ALL">All Severities</option>
+              <option value="HIGH">High Risk</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="LOW">Low / Info</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2">
+            <FileText className="w-3 h-3 text-gray-400 ml-1" />
+            <select 
+              value={filters.category} 
+              onChange={(e) => { setFilters({...filters, category: e.target.value}); setPage(1); }}
+              className="py-2 bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer border-none focus:ring-0 w-[140px]"
+            >
+              <option value="ALL">All Categories</option>
+              <option value="AUTH">Authentication</option>
+              <option value="ADMIN_ACTION">Admin Actions</option>
+              <option value="APPRAISAL_WORKFLOW">Appraisals</option>
+              <option value="SECURITY">Security</option>
+              <option value="USER_MANAGEMENT">User Mgmt</option>
+            </select>
+          </div>
+        </div>
       </div>
 
-      {/* Main Audit Table */}
-      {!errorMsg && (
-        <div className="bg-white border border-[#E2DDD4] rounded-xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[900px]">
-              <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest">
-                <tr>
-                  <th className="p-[16px_20px]">Timestamp</th>
-                  <th className="p-[16px_20px]">User</th>
-                  <th className="p-[16px_20px]">Action</th>
-                  <th className="p-[16px_20px]">Category</th>
-                  <th className="p-[16px_20px]">Severity</th>
-                  <th className="p-[16px_20px]">Details</th>
+      {/* Audit Log Table */}
+      <div className="bg-white border-x border-b border-gray-200 rounded-b-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto min-h-[400px]">
+          {loading && logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[300px] text-slate-400">
+              <Loader2 className="w-8 h-8 animate-spin mb-3 text-[#0D2B55]" />
+              <span className="text-sm font-bold">Decrypting system logs...</span>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[300px] text-slate-400">
+              <ShieldCheck className="w-12 h-12 mb-3 text-slate-200" />
+              <span className="text-sm font-bold">No audit records found matching your filters.</span>
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse whitespace-nowrap">
+              <thead>
+                <tr className="bg-[#FAF8F4] border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  <th className="p-4 w-[180px]">Timestamp</th>
+                  <th className="p-4 w-[200px]">Actor / User</th>
+                  <th className="p-4 w-[140px]">Event Type</th>
+                  <th className="p-4">Action Details</th>
+                  <th className="p-4 text-center w-[100px]">Severity</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#E2DDD4]">
-                {loading ? (
-                  <tr>
-                    <td colSpan="6" className="p-[40px] text-center text-[#6b7280] font-[600] animate-pulse">
-                      Loading security logs from database...
-                    </td>
-                  </tr>
-                ) : filteredLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="p-[40px] text-center text-[#6b7280]">
-                      <Shield className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <div className="font-[600] text-[14px]">No audit logs found</div>
-                      <div className="text-[12px] mt-1">The system log is currently empty or no logs match your filters.</div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredLogs.map(log => {
-                    const dateObj = new Date(log.createdAt);
-                    const dateStr = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                    const timeStr = dateObj.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    
-                    return (
-                      <tr key={log._id} className="hover:bg-slate-50 transition-colors group">
-                        <td className="p-[16px_20px] whitespace-nowrap">
-                          <div className="text-[13px] font-[700] text-[#0D2B55]">{dateStr}</div>
-                          <div className="text-[11px] text-[#6b7280] font-mono mt-0.5">{timeStr}</div>
-                        </td>
-                        <td className="p-[16px_20px] whitespace-nowrap">
-                          <div className="text-[13px] font-[700] text-[#0f1923]">{log.userStr || 'System Automated'}</div>
-                          <div className="text-[10px] text-[#6b7280] font-[600] uppercase tracking-wider mt-0.5">{(log.role || 'SYSTEM').replace('_', ' ')}</div>
-                        </td>
-                        <td className="p-[16px_20px] whitespace-nowrap">
-                          <span className="text-[11px] font-[700] text-[#0D2B55] bg-slate-100 px-2 py-1 rounded-md border border-slate-200">
-                            {log.action}
-                          </span>
-                        </td>
-                        <td className="p-[16px_20px] whitespace-nowrap text-[12px] font-[600] text-[#6b7280]">
-                          {log.category}
-                        </td>
-                        <td className="p-[16px_20px] whitespace-nowrap">
-                          {getSeverityBadge(log.severity)}
-                        </td>
-                        <td className="p-[16px_20px] text-[13px] text-[#4b5563] leading-relaxed max-w-[400px] truncate group-hover:whitespace-normal group-hover:bg-slate-50 relative z-10 transition-all">
+              <tbody className="divide-y divide-gray-100 text-xs">
+                {logs.map((log) => {
+                  const date = new Date(log.createdAt || log.timestamp);
+                  const fName = log.user?.personalDetails?.firstName || '';
+                  const lName = log.user?.personalDetails?.lastName || '';
+                  const actorName = fName || lName ? `${fName} ${lName}` : (log.user?.username || 'System Execution');
+                  const role = log.role?.replace(/_/g, ' ') || 'SYSTEM';
+
+                  return (
+                    <tr key={log._id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 font-mono text-[11px] text-gray-500">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3 h-3" />
+                          {date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          <span className="ml-1 text-gray-400">{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                            <User className="w-3 h-3" />
+                          </div>
+                          <div className="overflow-hidden">
+                            <div className="font-bold text-[#0D2B55] truncate">{actorName}</div>
+                            <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest truncate">{role}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <div className="font-bold text-gray-700 text-[11px] uppercase tracking-wide">{log.action}</div>
+                          {getCategoryBadge(log.category)}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="text-gray-600 truncate max-w-[400px] whitespace-normal line-clamp-2" title={log.details}>
                           {log.details}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                        </div>
+                        {log.ipAddress && (
+                          <div className="text-[9px] text-gray-400 font-mono mt-1">IP: {log.ipAddress}</div>
+                        )}
+                      </td>
+                      <td className="p-4 text-center">
+                        {getSeverityBadge(log.severity)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Pagination Footer */}
+        <div className="px-4 py-3 border-t border-gray-100 bg-[#FAF8F4] flex items-center justify-between">
+          <div className="text-[11px] font-bold text-gray-500">
+            Showing Page {page} of {totalPages || 1}
+          </div>
+          <div className="flex gap-1">
+            <button 
+              onClick={() => setPage(p => Math.max(1, p - 1))} 
+              disabled={page === 1 || loading}
+              className="p-1.5 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+              disabled={page === totalPages || totalPages === 0 || loading}
+              className="p-1.5 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
-      )}
+      </div>
+
     </div>
   );
 }
