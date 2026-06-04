@@ -7,6 +7,9 @@ export default function AllStaff() {
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // 🚨 UPGRADE: Dynamic Company Codes state
+  const [companyCodes, setCompanyCodes] = useState([]);
+  
   // Filters
   const [search, setSearch] = useState('');
   const [co, setCo] = useState('');
@@ -19,11 +22,18 @@ export default function AllStaff() {
     const fetchStaff = async () => {
       try {
         setLoading(true);
-        const res = await api.get('/users').catch(() => ({ data: { data: [] } }));
-        const allUsers = res.data?.data || [];
+        // 🚨 UPGRADE: Fetch staff AND the config concurrently
+        const [resUsers, configRes] = await Promise.all([
+           api.get('/users').catch(() => ({ data: { data: [] } })),
+           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } }))
+        ]);
         
-        // Exclude system accounts like ICT Admin if needed, or show everyone.
+        const allUsers = resUsers.data?.data || [];
         setStaffList(allUsers);
+
+        const configData = configRes.data?.data || {};
+        setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']); // Safe fallback
+
       } catch (error) {
         console.error('Failed to load staff data', error);
       } finally {
@@ -131,12 +141,13 @@ export default function AllStaff() {
           />
           <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
         </div>
+        
+        {/* 🚨 UPGRADED: Dynamic Company Code Dropdown */}
         <select value={co} onChange={e => setCo(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm min-w-[160px]">
           <option value="">All Companies</option>
-          <option value="FSM">FSM</option>
-          <option value="CDU">CDU</option>
-          <option value="NAR">NAR</option>
-          <option value="GUM">GUM</option>
+          {companyCodes.map(code => (
+             <option key={`filter-co-${code}`} value={code}>{code}</option>
+          ))}
         </select>
       </div>
 

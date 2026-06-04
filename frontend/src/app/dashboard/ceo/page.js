@@ -19,12 +19,15 @@ export default function CEODashboard() {
 
   // State
   const [appraisals, setAppraisals] = useState([]);
-  const [staff, setStaff] = useState([]); // Need raw staff array to calculate company specific counts
+  const [staff, setStaff] = useState([]); 
   const [totalStaff, setTotalStaff] = useState(0);
   const [loading, setLoading] = useState(true);
   
-  // 🚨 UPGRADE: Dynamic Company Codes State
   const [companyCodes, setCompanyCodes] = useState([]);
+  
+  // 🚨 UPGRADE: Dynamic Quarters State
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [activeQuarter, setActiveQuarter] = useState(null);
   
   // Real KPA actuals state (fetched from backend)
   const [kpaActuals, setKpaActuals] = useState([null, null, null, null, null]);
@@ -39,12 +42,13 @@ export default function CEODashboard() {
       try {
         setLoading(true);
         
-        // Fetch all data points concurrently
-        const [appRes, usersRes, metricsRes, configRes] = await Promise.all([
+        // 🚨 UPGRADE: Fetch quarters alongside other data
+        const [appRes, usersRes, metricsRes, configRes, qtrRes] = await Promise.all([
            api.get('/appraisals').catch(() => ({ data: { data: [] } })),
            api.get('/users').catch(() => ({ data: { data: [] } })),
            api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
-           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) // 🚨 Fetch DB config
+           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })), 
+           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
         const allApps = appRes.data?.data || [];
@@ -54,13 +58,20 @@ export default function CEODashboard() {
         setStaff(allUsers);
         setTotalStaff(allUsers.length || 190);
 
-        // 🚨 UPGRADE: Set the dynamic company codes from the DB
         if (configRes.data?.data?.companyCodes) {
           setCompanyCodes(configRes.data.data.companyCodes);
         } else {
-          // Fallback just in case the DB is empty
           setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
         }
+
+        // 🚨 UPGRADE: Configure Dynamic Quarters
+        const fetchedQuarters = qtrRes.data?.data || [];
+        fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        setDbQuarters(fetchedQuarters);
+
+        const now = new Date();
+        const active = fetchedQuarters.find(q => new Date(q.startDate) <= now && new Date(q.endDate) >= now && !q.isLocked);
+        setActiveQuarter(active || null);
 
         const metricsData = metricsRes.data?.data;
 
@@ -89,7 +100,6 @@ export default function CEODashboard() {
     fetchDashboardData();
   }, []);
 
-  // Dynamically calculate counts from the DB
   const epCount = appraisals.filter(a => a.calculatedResults?.finalIprfScore >= 1.3).length;
   const pendingCount = appraisals.filter(a => a.workflow?.status === 'WITH_CEO').length;
   const approvedCount = appraisals.filter(a => a.workflow?.status === 'APPROVED').length;
@@ -100,6 +110,16 @@ export default function CEODashboard() {
   const awEPf = cpPct ? `CP% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
 
   const anyKpaEntered = kpaActuals.some(v => v !== null);
+
+  // 🚨 UPGRADE: Calculate days remaining dynamically
+  let daysRemainingText = "No active deadlines";
+  if (activeQuarter) {
+    const end = new Date(activeQuarter.endDate);
+    const now = new Date();
+    const diffTime = Math.abs(end - now);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    daysRemainingText = `${diffDays} days remaining`;
+  }
 
   if (loading) {
     return <div className="p-10 text-center text-slate-500 font-medium animate-pulse">Loading Executive Dashboard...</div>;
@@ -139,7 +159,6 @@ export default function CEODashboard() {
             <div className="text-[32px] font-[800] text-[#0D2B55] leading-none mb-[8px]">{totalStaff}</div>
             <div className="text-[12px] font-[600] text-[#6b7280]">STIP-eligible employees</div>
           </div>
-          {/* 🚨 UPGRADE: Dynamic Map for Company Code Badges with Auto-Scroll */}
           <div className="flex gap-[6px] mt-[12px] overflow-x-auto pb-1 custom-scrollbar whitespace-nowrap">
             {companyCodes.map((code, index) => {
               const count = staff.filter(s => s.companyCode === code).length || 0;
@@ -300,50 +319,59 @@ export default function CEODashboard() {
       {/* Row 3 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
         
-        {/* Deadlines */}
+        {/* 🚨 UPGRADED: Dynamic DB Deadlines */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
           <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
             <div className="w-[30px] h-[30px] rounded-[8px] bg-[#FFF7ED] flex items-center justify-center text-[14px]">&#128197;</div>
-            <div className="text-[14px] font-[800] text-[#0D2B55]">2026 Appraisal Deadlines</div>
+            <div className="text-[14px] font-[800] text-[#0D2B55]">Live Appraisal Deadlines</div>
           </div>
           <div className="p-[20px] flex-1 flex flex-col justify-between">
             <div className="w-full text-left border-collapse text-[13px] mb-[16px]">
               <div className="grid grid-cols-[1fr_2fr_2fr_1fr] font-[800] text-[10px] text-[#6b7280] uppercase tracking-widest border-b border-[#E2DDD4] pb-[8px] mb-[8px]">
                 <div>Quarter</div>
-                <div>Period</div>
+                <div>Year</div>
                 <div>Deadline</div>
                 <div className="text-right">Status</div>
               </div>
               
-              <div className="grid grid-cols-[1fr_2fr_2fr_1fr] items-center py-[8px] border-b border-[#E2DDD4]">
-                <strong className="text-[#059669]">Q1</strong>
-                <span className="text-[#0f1923] font-[500]">Jan &mdash; Mar 2026</span>
-                <span className="font-[700] text-[#059669]">31 Mar 2026</span>
-                <span className="text-right"><span className="text-[10px] font-[800] bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-[6px] py-[2px] rounded">✓ Done</span></span>
-              </div>
-              <div className="grid grid-cols-[1fr_2fr_2fr_1fr] items-center py-[8px] border-b border-[#E2DDD4]">
-                <strong className="text-[#059669]">Q2</strong>
-                <span className="text-[#0f1923] font-[500]">Apr &mdash; Jun 2026</span>
-                <span className="font-[700] text-[#059669]">30 Jun 2026</span>
-                <span className="text-right"><span className="text-[10px] font-[800] bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-[6px] py-[2px] rounded">✓ Done</span></span>
-              </div>
-              <div className="grid grid-cols-[1fr_2fr_2fr_1fr] items-center py-[8px] border-b border-[#E2DDD4] bg-[#FFFBEB] -mx-[8px] px-[8px] rounded-[6px]">
-                <strong className="text-[#92400E]">Q3</strong>
-                <span className="text-[#0f1923] font-[600]">Jul &mdash; Sep 2026</span>
-                <span className="font-[800] text-[#92400E]">30 Sep 2026</span>
-                <span className="text-right"><span className="text-[10px] font-[800] bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-[6px] py-[2px] rounded">⏳ Active</span></span>
-              </div>
-              <div className="grid grid-cols-[1fr_2fr_2fr_1fr] items-center py-[8px]">
-                <strong className="text-[#6b7280]">Q4</strong>
-                <span className="text-[#6b7280] font-[500]">Oct &mdash; Dec 2026</span>
-                <span className="text-[#6b7280]">15 Dec 2026</span>
-                <span className="text-right"><span className="text-[10px] font-[700] bg-[#FAF8F4] text-[#6b7280] border border-[#E2DDD4] px-[6px] py-[2px] rounded">Upcoming</span></span>
-              </div>
+              {dbQuarters.length === 0 ? (
+                <div className="text-center p-4 text-gray-500">No timeline data available.</div>
+              ) : (
+                dbQuarters.map(q => {
+                  const now = new Date();
+                  const exp = now > new Date(q.endDate);
+                  const isActive = q._id === activeQuarter?._id;
+                  const isLocked = q.isLocked || (exp && !q.forceUnlock);
+                  
+                  let bgRow = '';
+                  let textClass = 'text-[#6b7280]';
+                  let statusBadge = <span className="text-[10px] font-[700] bg-[#FAF8F4] text-[#6b7280] border border-[#E2DDD4] px-[6px] py-[2px] rounded whitespace-nowrap">Upcoming</span>;
+                  
+                  if (isLocked) {
+                    bgRow = 'bg-[#F0FDF4]';
+                    textClass = 'text-[#065F46]';
+                    statusBadge = <span className="text-[10px] font-[800] bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-[6px] py-[2px] rounded whitespace-nowrap">✓ Locked</span>;
+                  } else if (isActive || q.forceUnlock) {
+                    bgRow = 'bg-[#FFFBEB] outline outline-[1.5px] outline-[#FDE68A] outline-offset-[-1px] rounded-[6px]';
+                    textClass = 'text-[#92400E]';
+                    statusBadge = <span className="text-[10px] font-[800] bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-[6px] py-[2px] rounded whitespace-nowrap">⏳ {q.forceUnlock && exp ? 'Override' : 'Active'}</span>;
+                  }
+
+                  return (
+                    <div key={q._id} className={`grid grid-cols-[1fr_2fr_2fr_1fr] items-center py-[8px] border-b border-[#E2DDD4] ${bgRow}`}>
+                      <strong className={`${textClass} rounded-l-[6px] px-2`}>{q.name}</strong>
+                      <span className="text-[#0f1923] font-[500]">{q.year}</span>
+                      <span className={`font-[700] ${textClass}`}>{new Date(q.endDate).toLocaleDateString()}</span>
+                      <span className="text-right px-2">{statusBadge}</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
             
             <div className="bg-[#0D2B55] rounded-[10px] p-[12px_16px] flex justify-between items-center mt-auto">
-              <span className="text-[12px] font-[600] text-white/60">Q3 closes in</span>
-              <span className="text-[14px] font-[800] text-[#e8c96a]">136 days remaining</span>
+              <span className="text-[12px] font-[600] text-white/60">{activeQuarter ? `${activeQuarter.name} closes in` : 'System Status'}</span>
+              <span className="text-[14px] font-[800] text-[#e8c96a]">{daysRemainingText}</span>
             </div>
           </div>
         </div>

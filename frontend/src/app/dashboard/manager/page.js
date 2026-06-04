@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import api from '../../../lib/api';
+import api from '../../../../lib/api';
 
 export default function ManagerDashboard() {
   const router = useRouter();
@@ -12,6 +12,10 @@ export default function ManagerDashboard() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // 🚨 UPGRADE: Dynamic Quarters State
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [activeQuarter, setActiveQuarter] = useState(null);
+
   const [metrics, setMetrics] = useState({
     financialResilience: 82, operationalEffectiveness: 91, humanCapital: 78,
     safetyEnvironment: 95, reputationalCapital: 88, cpPct: 13.01, bscRawScore: 86.75
@@ -22,24 +26,35 @@ export default function ManagerDashboard() {
       try {
         setLoading(true);
         
-        // 1. Fetch live Company Metrics for 2026
-        const metricsRes = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+        // Fetch live metrics, team data, appraisals, AND the dynamic Quarters schedule
+        const [metricsRes, teamRes, appRes, qtrRes] = await Promise.all([
+          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+          api.get('/users/my-team').catch(() => ({ data: { data: [] } })),
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
+        ]);
+
         if (metricsRes.data?.data) {
           setMetrics(metricsRes.data.data);
         }
 
-        // 2. Fetch exactly this manager's team (No more 500 error!)
-        const teamRes = await api.get('/users/my-team').catch(() => ({ data: { data: [] } }));
         const myTeam = teamRes.data?.data || [];
         setTeam(myTeam);
 
-        // 3. Fetch appraisals (The backend ALREADY filters these for the logged-in manager)
-        const appRes = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
         const myAppraisals = appRes.data?.data || [];
-        
-        // FIX: Map to the new complex schema (workflow.status)
         setDrafts(myAppraisals.filter(a => a.workflow?.status === 'DRAFT'));
         setSubmissions(myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT'));
+
+        // 🚨 UPGRADE: Configure Dynamic Quarters
+        const fetchedQuarters = qtrRes.data?.data || [];
+        // Sort quarters by start date so they display chronologically
+        fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        setDbQuarters(fetchedQuarters);
+
+        // Find the currently active quarter
+        const now = new Date();
+        const active = fetchedQuarters.find(q => new Date(q.startDate) <= now && new Date(q.endDate) >= now && !q.isLocked);
+        setActiveQuarter(active || null);
 
       } catch (error) {
         console.error('Failed to load manager data', error);
@@ -50,7 +65,6 @@ export default function ManagerDashboard() {
     fetchManagerData();
   }, []);
 
-  // FIX: Map to the new complex schema
   const pendingHr = submissions.filter(a => a.workflow?.status === 'SUBMITTED').length;
   const approved = submissions.filter(a => a.workflow?.status === 'APPROVED' || a.workflow?.status === 'APPROVED_BY_HR').length; 
   const epRated = submissions.filter(a => a.calculatedResults?.finalIprfScore >= 1.3).length;
@@ -69,13 +83,23 @@ export default function ManagerDashboard() {
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
     .slice(0, 3);
 
+  // Calculate days remaining dynamically
+  let daysRemainingText = "No active deadlines";
+  if (activeQuarter) {
+    const end = new Date(activeQuarter.endDate);
+    const now = new Date();
+    const diffTime = Math.abs(end - now);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    daysRemainingText = `${diffDays} days remaining`;
+  }
+
   if (loading) return <div className="text-center p-20 text-[#6b7280]">Loading real-time manager dashboard...</div>;
 
   return (
     <div className="w-full max-w-full pb-10">
       <div className="mb-[22px]">
         <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">Dashboard</div>
-        <div className="text-[13px] text-[#6b7280]">Real-time STIP program overview &mdash; CY2026</div>
+        <div className="text-[13px] text-[#6b7280]">Real-time STIP program overview</div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[12px] mb-[16px]">
@@ -141,7 +165,7 @@ export default function ManagerDashboard() {
       {/* Middle Grid: KPA Progress & Award Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[14px] mb-[16px]">
         
-        {/* Balanced Scorecard (LIVE DATABASE) */}
+        {/* Balanced Scorecard */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
           <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
             <div className="w-[28px] h-[28px] rounded-[7px] bg-[#EFF6FF] flex items-center justify-center text-[13px] shrink-0">&#128200;</div>
@@ -282,12 +306,12 @@ export default function ManagerDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[14px]">
         
-        {/* Deadlines */}
+        {/* 🚨 UPGRADE: Dynamic DB Deadlines */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
           <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
             <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFF7ED] flex items-center justify-center text-[13px] shrink-0">&#128197;</div>
             <div>
-              <div className="text-[13px] font-[700] text-[#0D2B55]">2026 Appraisal Deadlines</div>
+              <div className="text-[13px] font-[700] text-[#0D2B55]">Live Appraisal Deadlines</div>
               <div className="text-[11px] text-[#6b7280]">All quarters &middot; Submit before deadline date</div>
             </div>
           </div>
@@ -296,49 +320,50 @@ export default function ManagerDashboard() {
               <thead>
                 <tr>
                   <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Quarter</th>
-                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Period</th>
+                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Year</th>
                   <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Deadline</th>
                   <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Status</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="bg-[#F0FDF4]">
-                  <td className="p-[9px_8px] font-[700] text-[#065F46] rounded-l-[6px]">Q1</td>
-                  <td className="p-[9px_8px] text-[#0f1923]">Jan &mdash; Mar 2026</td>
-                  <td className="p-[9px_8px] text-center font-[600] text-[#065F46]">31 Mar 2026</td>
-                  <td className="p-[9px_8px] text-center rounded-r-[6px]">
-                    <span className="bg-[#D1FAE5] text-[#065F46] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#10003; Done</span>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="p-[9px_8px] font-[700] text-[#065F46]">Q2</td>
-                  <td className="p-[9px_8px] text-[#0f1923]">Apr &mdash; Jun 2026</td>
-                  <td className="p-[9px_8px] text-center font-[600] text-[#065F46]">30 Jun 2026</td>
-                  <td className="p-[9px_8px] text-center">
-                    <span className="bg-[#D1FAE5] text-[#065F46] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#10003; Done</span>
-                  </td>
-                </tr>
-                <tr className="bg-[#FFFBEB] outline outline-[1.5px] outline-[#FDE68A] outline-offset-[-1px] rounded-[6px]">
-                  <td className="p-[9px_8px] font-[700] text-[#92400E]">Q3</td>
-                  <td className="p-[9px_8px] text-[#0f1923]">Jul &mdash; Sep 2026</td>
-                  <td className="p-[9px_8px] text-center font-[700] text-[#92400E]">30 Sep 2026</td>
-                  <td className="p-[9px_8px] text-center">
-                    <span className="bg-[#FEF3C7] text-[#92400E] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#9200; Active</span>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="p-[9px_8px] font-[700] text-[#6b7280]">Q4</td>
-                  <td className="p-[9px_8px] text-[#0f1923]">Oct &mdash; Dec 2026</td>
-                  <td className="p-[9px_8px] text-center font-[600] text-[#6b7280]">15 Dec 2026</td>
-                  <td className="p-[9px_8px] text-center">
-                    <span className="bg-[#E2DDD4] text-[#6b7280] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">Upcoming</span>
-                  </td>
-                </tr>
+                {dbQuarters.length === 0 ? (
+                  <tr><td colSpan="4" className="text-center p-4 text-gray-500">No timeline data available.</td></tr>
+                ) : (
+                  dbQuarters.map(q => {
+                    const now = new Date();
+                    const exp = now > new Date(q.endDate);
+                    const isActive = q._id === activeQuarter?._id;
+                    const isLocked = q.isLocked || (exp && !q.forceUnlock);
+                    
+                    let bgRow = '';
+                    let textClass = 'text-[#6b7280]';
+                    let statusBadge = <span className="bg-[#E2DDD4] text-[#6b7280] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">Upcoming</span>;
+                    
+                    if (isLocked) {
+                      bgRow = 'bg-[#F0FDF4]';
+                      textClass = 'text-[#065F46]';
+                      statusBadge = <span className="bg-[#D1FAE5] text-[#065F46] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#10003; Locked</span>;
+                    } else if (isActive || q.forceUnlock) {
+                      bgRow = 'bg-[#FFFBEB] outline outline-[1.5px] outline-[#FDE68A] outline-offset-[-1px] rounded-[6px]';
+                      textClass = 'text-[#92400E]';
+                      statusBadge = <span className="bg-[#FEF3C7] text-[#92400E] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#9200; {q.forceUnlock && exp ? 'Override' : 'Active'}</span>;
+                    }
+
+                    return (
+                      <tr key={q._id} className={bgRow}>
+                        <td className={`p-[9px_8px] font-[700] ${textClass} rounded-l-[6px]`}>{q.name}</td>
+                        <td className="p-[9px_8px] text-[#0f1923]">{q.year}</td>
+                        <td className={`p-[9px_8px] text-center font-[700] ${textClass}`}>{new Date(q.endDate).toLocaleDateString()}</td>
+                        <td className="p-[9px_8px] text-center rounded-r-[6px]">{statusBadge}</td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
             <div className="mt-[12px] bg-[#0D2B55] rounded-[9px] p-[10px_14px] flex items-center justify-between">
-              <span className="text-[12px] text-white/60">Q3 closes in</span>
-              <span className="text-[14px] font-[700] text-[#e8c96a]">132 days remaining</span>
+              <span className="text-[12px] text-white/60">{activeQuarter ? `${activeQuarter.name} closes in` : 'System Status'}</span>
+              <span className="text-[14px] font-[700] text-[#e8c96a]">{daysRemainingText}</span>
             </div>
           </div>
         </div>
@@ -387,13 +412,11 @@ export default function ManagerDashboard() {
                 recentActivity.map((a, i) => (
                   <div key={i} className="flex justify-between items-center p-[8px_12px] bg-[#FAF8F4] rounded-[8px] border border-[#E2DDD4]/50">
                     <div>
-                      {/* FIX: Dynamically read names from populated DB References! */}
                       <div className="text-[12px] font-[600] text-[#0f1923]">
                         {a.employeeId?.personalDetails?.firstName} {a.employeeId?.personalDetails?.lastName}
                       </div>
                       <div className="text-[10px] text-[#6b7280] mt-[1px]">Updated {new Date(a.updatedAt || a.createdAt).toLocaleDateString()}</div>
                     </div>
-                    {/* FIX: Read status from complex schema */}
                     <span className="text-[10px] font-[600] bg-[#E2DDD4]/40 text-[#0f1923] px-[6px] py-[2px] rounded-md border border-[#E2DDD4]">
                       {a.workflow?.status?.replace(/_/g, ' ') || 'UNKNOWN'}
                     </span>

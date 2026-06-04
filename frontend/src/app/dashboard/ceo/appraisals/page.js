@@ -17,6 +17,10 @@ export default function CEOAllAppraisals() {
   const [loading, setLoading] = useState(true);
   const [cpPct, setCpPct] = useState(null);
   
+  // 🚨 UPGRADE: Dynamic state for filters
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [companyCodes, setCompanyCodes] = useState([]);
+  
   // Filters
   const [search, setSearch] = useState('');
   const [qtr, setQtr] = useState('');
@@ -30,16 +34,25 @@ export default function CEOAllAppraisals() {
     try {
       setLoading(true);
       
-      // Fetch CP% for accurate award previews
-      const metricsRes = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+      // 🚨 UPGRADE: Fetch dynamic Quarters and Company Config concurrently
+      const [metricsRes, appRes, qtrRes, configRes] = await Promise.all([
+        api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+        api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+        api.get('/quarters').catch(() => ({ data: { data: [] } })),
+        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } }))
+      ]);
+
       if (metricsRes.data?.data?.cpPct) {
         setCpPct(metricsRes.data.data.cpPct);
       }
 
-      // Fetch all appraisals
-      const response = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
-      const allData = response.data?.data || [];
-      
+      const fetchedQuarters = qtrRes.data?.data || [];
+      setDbQuarters(fetchedQuarters);
+
+      const configData = configRes.data?.data || {};
+      setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
+
+      const allData = appRes.data?.data || [];
       // Sort newest first
       allData.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
       
@@ -61,8 +74,11 @@ export default function CEOAllAppraisals() {
     const jobTitle = (a.employeeId?.employmentDetails?.jobTitle || '').toLowerCase();
     const searchString = search.toLowerCase();
     
+    // 🚨 UPGRADE: Use dynamic Quarter ID for filtering
+    const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+    
     if (search && !empName.includes(searchString) && !jobTitle.includes(searchString)) return false;
-    if (qtr && a.period?.quarter !== qtr) return false;
+    if (qtr && appQuarterId !== qtr) return false;
     if (co && a.employeeId?.companyCode !== co) return false;
     
     const wfStatus = a.workflow?.status;
@@ -72,6 +88,13 @@ export default function CEOAllAppraisals() {
     
     return true;
   });
+
+  // 🚨 UPGRADE: Helper to resolve quarter ID to Name
+  const getQuarterName = (qId) => {
+    if (!qId) return 'N/A';
+    const match = dbQuarters.find(q => q._id === qId);
+    return match ? match.name : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
+  };
 
   const iprfStyle = (f) => {
     if (f >= 1.3) return 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]';
@@ -129,20 +152,23 @@ export default function CEOAllAppraisals() {
           onChange={e => setSearch(e.target.value)}
           className="flex-1 min-w-[250px] p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none focus:border-[#0D2B55] transition-colors shadow-sm"
         />
+        
+        {/* 🚨 UPGRADED: Dynamic Quarter Dropdown */}
         <select value={qtr} onChange={e => setQtr(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm">
           <option value="">All Quarters</option>
-          <option value="Q1">Q1</option>
-          <option value="Q2">Q2</option>
-          <option value="Q3">Q3</option>
-          <option value="Q4">Q4</option>
+          {dbQuarters.map(q => (
+             <option key={q._id} value={q._id}>{q.name} ({q.year})</option>
+          ))}
         </select>
+        
+        {/* 🚨 UPGRADED: Dynamic Company Code Dropdown */}
         <select value={co} onChange={e => setCo(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm">
           <option value="">All Companies</option>
-          <option value="FSM">FSM</option>
-          <option value="CDU">CDU</option>
-          <option value="NAR">NAR</option>
-          <option value="GUM">GUM</option>
+          {companyCodes.map(code => (
+             <option key={`co-${code}`} value={code}>{code}</option>
+          ))}
         </select>
+        
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm">
           <option value="">All Statuses</option>
           <option value="approved">CEO Approved</option>
@@ -191,6 +217,7 @@ export default function CEOAllAppraisals() {
                   const coCode = a.employeeId?.companyCode || 'FSM';
                   const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
                   
+                  const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
                   const iprf = a.calculatedResults?.finalIprfScore || 0;
                   const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
                   const proRataValue = prMonths / 12;
@@ -223,7 +250,7 @@ export default function CEOAllAppraisals() {
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
                         <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#FDE68A]">
-                          {a.period?.quarter || 'Q3'}
+                          {getQuarterName(appQuarterId)}
                         </span>
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
@@ -303,7 +330,9 @@ export default function CEOAllAppraisals() {
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>
-                  <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.period?.quarter || 'Q3'}</div>
+                  <div className="text-[18px] font-[800] text-[#0f1923] truncate">
+                    {getQuarterName(selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter)}
+                  </div>
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Company</div>
@@ -337,7 +366,7 @@ export default function CEOAllAppraisals() {
                     <div className="text-[11px] font-[800] text-[#92400E] uppercase tracking-[.06em] mb-[6px] flex items-center gap-[6px]">
                       <span>⭐</span> EP Justification
                     </div>
-                    <div className="text-[13px] text-[#92400E] leading-relaxed font-[500]">
+                    <div className="text-[13px] text-[#92400E] leading-relaxed font-[500] whitespace-pre-wrap">
                       {selectedAppraisal.narrative.epJustification}
                     </div>
                   </div>
@@ -346,7 +375,7 @@ export default function CEOAllAppraisals() {
                 {selectedAppraisal.narrative?.generalComments && (
                   <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px]">
                     <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
-                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic">
+                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
                       "{selectedAppraisal.narrative.generalComments}"
                     </div>
                   </div>
@@ -355,7 +384,7 @@ export default function CEOAllAppraisals() {
                 {selectedAppraisal.narrative?.hrComments && (
                   <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
                     <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
-                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic">
+                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
                       "{selectedAppraisal.narrative.hrComments}"
                     </div>
                   </div>
