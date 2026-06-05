@@ -138,8 +138,9 @@ function NewAppraisalForm() {
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [quarterStatuses, setQuarterStatuses] = useState({});
+  // 🚨 UPGRADE: Added a new state map to track ALL team submissions by quarter
+  const [teamSubmissionsMap, setTeamSubmissionsMap] = useState({});
 
-  // 🚨 Custom Dropdown UI States
   const [openDropdown, setOpenDropdown] = useState(null);
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
@@ -147,9 +148,10 @@ function NewAppraisalForm() {
   useEffect(() => {
     const fetchFormContext = async () => {
       try {
-        const [teamRes, quarterRes] = await Promise.all([
+        const [teamRes, quarterRes, appRes] = await Promise.all([
           api.get('/users/my-team'),
-          api.get('/quarters') 
+          api.get('/quarters'),
+          api.get('/appraisals') // Fetch all appraisals to build the map
         ]);
         
         const myTeam = teamRes.data?.data || [];
@@ -157,6 +159,23 @@ function NewAppraisalForm() {
         
         const fetchedQuarters = quarterRes.data?.data || [];
         setDbQuarters(fetchedQuarters);
+
+        const allApps = appRes.data?.data || [];
+        
+        // 🚨 UPGRADE: Build a master map of which employees have submitted appraisals for which quarters
+        const subMap = {};
+        allApps.forEach(app => {
+          const empId = app.employeeId?._id || app.employeeId;
+          const qId = app.appraisalQuarter?._id || app.appraisalQuarter;
+          const status = app.workflow?.status;
+          
+          if (!subMap[empId]) subMap[empId] = {};
+          
+          if (status === 'DRAFT') subMap[empId][qId] = 'draft';
+          else if (status === 'NOT_APPROVED' || status === 'REOPENED') subMap[empId][qId] = 'reopened';
+          else subMap[empId][qId] = 'submitted';
+        });
+        setTeamSubmissionsMap(subMap);
         
         const currentDate = new Date();
         const defaultQ = fetchedQuarters.find(q => new Date(q.endDate) >= currentDate && !q.isLocked) || fetchedQuarters[0];
@@ -167,8 +186,6 @@ function NewAppraisalForm() {
         }
 
         if (draftId) {
-          const appRes = await api.get('/appraisals');
-          const allApps = appRes.data?.data || [];
           const draftData = allApps.find(a => a._id === draftId);
           
           if (draftData) {
@@ -205,50 +222,43 @@ function NewAppraisalForm() {
   useEffect(() => {
     if (!selectedStaffId || draftId || dbQuarters.length === 0) return;
 
-    const fetchAppraisalStatus = async () => {
-      try {
-        const { data } = await api.get(`/appraisals`);
-        const allApps = data?.data || [];
-        const empHistory = allApps.filter(a => (a.employeeId?._id || a.employeeId) === selectedStaffId);
-        
-        let newStatuses = {};
-        dbQuarters.forEach(q => newStatuses[q._id] = 'missing');
-        
-        if (empHistory.length > 0) {
-          empHistory.forEach(app => {
-            const qId = app.appraisalQuarter?._id || app.appraisalQuarter;
-            if (qId) {
-              if (app.workflow?.status === 'DRAFT') {
-                newStatuses[qId] = 'draft';
-              } else if (app.workflow?.status === 'NOT_APPROVED' || app.workflow?.status === 'REOPENED') {
-                newStatuses[qId] = 'reopened'; 
-                setRejectionReason(app.narrative?.ceoComments || app.narrative?.hrComments || app.narrative?.generalComments || 'Please revise your submission.');
-              } else {
-                newStatuses[qId] = 'submitted'; 
-              }
-            }
-          });
-          
-          setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
-          const emp = team.find(s => s._id === selectedStaffId);
-          setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
-          setRejectionReason('');
-        } else {
-           setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
-           const emp = team.find(s => s._id === selectedStaffId);
-           setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
-           setRejectionReason('');
+    // Use the existing map rather than fetching from the API again
+    const empHistory = teamSubmissionsMap[selectedStaffId] || {};
+    
+    let newStatuses = {};
+    dbQuarters.forEach(q => {
+      newStatuses[q._id] = empHistory[q._id] || 'missing';
+    });
+    
+    // Fetch specifically for Rejection reasons if needed
+    if (Object.values(newStatuses).includes('reopened')) {
+      api.get(`/appraisals`).then(({ data }) => {
+        const apps = data?.data || [];
+        const rejectedApp = apps.find(a => 
+          (a.employeeId?._id || a.employeeId) === selectedStaffId && 
+          (a.workflow?.status === 'NOT_APPROVED' || a.workflow?.status === 'REOPENED')
+        );
+        if (rejectedApp) {
+          setRejectionReason(rejectedApp.narrative?.ceoComments || rejectedApp.narrative?.hrComments || rejectedApp.narrative?.generalComments || 'Please revise your submission.');
         }
+      }).catch(e => console.error("Error fetching rejection reason", e));
+    } else {
+      setRejectionReason('');
+    }
 
-        setQuarterStatuses(newStatuses);
-      } catch (e) {
-        console.error("Failed to load historical appraisals:", e);
-      }
-    };
-    fetchAppraisalStatus();
-  }, [selectedStaffId, draftId, team, dbQuarters]);
+    if (Object.keys(empHistory).length > 0) {
+      setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
+      const emp = team.find(s => s._id === selectedStaffId);
+      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
+    } else {
+      setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
+      const emp = team.find(s => s._id === selectedStaffId);
+      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
+    }
 
-  // Click outside listener for custom dropdowns
+    setQuarterStatuses(newStatuses);
+  }, [selectedStaffId, draftId, team, dbQuarters, teamSubmissionsMap, formData.quarter]);
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -276,7 +286,13 @@ function NewAppraisalForm() {
   }
 
   const requiresEPJustification = calculatedIPRF >= 1.3;
-  const isAlreadySubmitted = quarterStatuses[formData.quarter] === 'submitted';
+  
+  // 🚨 UPGRADED: Check status of current selected quarter from map or status object
+  const currentQtrStatus = draftId 
+      ? 'draft' 
+      : quarterStatuses[formData.quarter] || (teamSubmissionsMap[selectedStaffId] && teamSubmissionsMap[selectedStaffId][formData.quarter]) || 'missing';
+      
+  const isAlreadySubmitted = currentQtrStatus === 'submitted';
   
   const currentQObj = dbQuarters.find(q => q._id === formData.quarter);
   const isExpired = currentQObj ? new Date() > new Date(currentQObj.endDate) : false;
@@ -378,7 +394,7 @@ function NewAppraisalForm() {
     }
   };
 
-  // 🚨 UPGRADE: Searchable Dropdown Helper Function
+  // 🚨 UPGRADE: Searchable Dropdown Helper Function with Dynamic Status injection
   const renderSearchableDropdown = (fieldKey, options, currentValue, onSelect, placeholder, displayKey) => {
     const isOpen = openDropdown === fieldKey;
     const query = searchQueries[fieldKey] || '';
@@ -397,8 +413,8 @@ function NewAppraisalForm() {
       <div className="relative w-full" ref={isOpen ? dropdownRef : null}>
         <div 
           onClick={() => {
-             if (draftId && fieldKey === 'emp') return; // Lock employee select if editing a draft
-             if (isCurrentQuarterLocked && fieldKey === 'title') return; // Lock title edit if locked
+             if (draftId && fieldKey === 'emp') return; 
+             if (isCurrentQuarterLocked && fieldKey === 'title') return; 
              setOpenDropdown(isOpen ? null : fieldKey);
           }}
           className={`w-full px-[12px] py-[9px] border-[1.5px] rounded-[8px] text-[13px] bg-white transition-colors flex justify-between items-center ${
@@ -434,13 +450,29 @@ function NewAppraisalForm() {
                   const display = typeof opt === 'string' ? opt : displayKey(opt);
                   const isSelected = currentValue === val;
                   
+                  // 🚨 UPGRADE: Inject dynamic status tag for Employee Selection Dropdown
+                  let statusTag = null;
+                  if (fieldKey === 'emp') {
+                    const status = teamSubmissionsMap[val]?.[formData.quarter] || 'missing';
+                    if (status === 'submitted') {
+                      statusTag = <span className="bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Submitted</span>;
+                    } else if (status === 'reopened') {
+                      statusTag = <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Revision Req</span>;
+                    } else if (status === 'draft') {
+                      statusTag = <span className="bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Draft</span>;
+                    } else {
+                      statusTag = <span className="bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Pending</span>;
+                    }
+                  }
+
                   return (
                     <div
                       key={val || idx}
                       onClick={() => onSelect(val)}
-                      className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#0D2B55] hover:text-white transition-colors truncate ${isSelected ? 'bg-blue-50 font-bold text-[#0D2B55]' : 'text-[#0f1923]'}`}
+                      className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#0D2B55] hover:text-white transition-colors flex justify-between items-center ${isSelected ? 'bg-blue-50 font-bold text-[#0D2B55]' : 'text-[#0f1923]'}`}
                     >
-                      {display}
+                      <span className="truncate">{display}</span>
+                      {statusTag}
                     </div>
                   );
                 })
@@ -479,9 +511,12 @@ function NewAppraisalForm() {
             <div className="text-[10px] font-bold text-white/50 uppercase tracking-widest mb-3">Step 1 — Select Staff Member</div>
             <div className="flex flex-col sm:flex-row gap-3 items-end">
               <div className="flex-1 w-full">
-                <label className="block text-white/90 text-xs font-bold mb-1">Search & select employee <span className="text-red-400">*</span></label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-white/90 text-xs font-bold">Search & select employee <span className="text-red-400">*</span></label>
+                  <span className="text-[10px] text-[#e8c96a] font-bold bg-[#C9A84C]/20 px-2 py-0.5 rounded">Showing status for {currentQObj?.name || 'Quarter'}</span>
+                </div>
                 
-                {/* 🚨 UPGRADED: Employee Select Dropdown */}
+                {/* 🚨 UPGRADED: Employee Select Dropdown with Status tags */}
                 {renderSearchableDropdown(
                   'emp', 
                   team, 
@@ -576,7 +611,7 @@ function NewAppraisalForm() {
                           className="p-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-500 bg-gray-50 cursor-default" 
                         />
                       ) : (
-                        /* 🚨 UPGRADED: Job Title Select Dropdown */
+                        /* Job Title Select Dropdown */
                         renderSearchableDropdown('title', JOB_TITLES, formData.title, handleTitleSelect, '-- Select Job Title --', null)
                       )}
                     </div>
@@ -997,8 +1032,10 @@ function NewAppraisalForm() {
       </div>
     </div>
   );
-};
+}
+// ... [rest of your code above] ...
 
+// Ensure this is exactly at the bottom of the file!
 export default function NewAppraisal() {
   return (
     <Suspense fallback={<div className="p-10 text-center text-slate-500">Loading form...</div>}>

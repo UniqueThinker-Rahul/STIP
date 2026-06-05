@@ -59,7 +59,7 @@ export default function CEOApproveAppraisals() {
   const handleApprove = async () => {
     try {
       setIsProcessing(true);
-      // Call the dedicated CEO approval route
+      // 🚨 FIX: Call the dedicated CEO approval route!
       await api.patch(`/appraisals/${actionModal.id}/ceo-approve`, { 
         notes: 'Final Approval by CEO'
       });
@@ -67,8 +67,7 @@ export default function CEOApproveAppraisals() {
       setSuccessMsg('Appraisal has been successfully approved.');
       setTimeout(() => {
         setActionModal({ show: false, type: '', id: null, name: '' });
-        // 🚨 UPGRADE: Hard refresh the page to completely reset the view
-        window.location.reload(); 
+        fetchData();
       }, 2000);
       
     } catch (error) {
@@ -93,8 +92,7 @@ export default function CEOApproveAppraisals() {
       setSuccessMsg('Appraisal rejected and returned to the Manager.');
       setTimeout(() => {
         setActionModal({ show: false, type: '', id: null, name: '' });
-        // 🚨 UPGRADE: Hard refresh the page to completely reset the view
-        window.location.reload(); 
+        fetchData();
       }, 2000);
       
     } catch (error) {
@@ -111,10 +109,10 @@ export default function CEOApproveAppraisals() {
   };
 
   const iprfLabel = (f) => {
-    if (f >= 1.3) return 'E'; 
+    if (f >= 1.3) return 'E'; // Based on screenshot UI, 'E' is showing for 1.3, though usually it's EP
     if (f >= 1.0) return 'E';
-    if (f >= 0.7) return 'N'; 
-    return 'L'; 
+    if (f >= 0.7) return 'N'; // NI
+    return 'L'; // LS
   };
 
   return (

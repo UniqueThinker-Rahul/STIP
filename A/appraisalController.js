@@ -6,7 +6,8 @@ const AppraisalQuarter = require('../models/AppraisalQuarter');
 const { sendAppraisalEmail } = require('../utils/emailService');
 
 // --- HELPER FUNCTION: Trigger Dual Notification ---
-const dispatchNotification = async ({ senderId, recipientRole, recipientId, targetRoleContext, title, message, type, comments, actionUrl }) => {
+// Update the arguments to include targetRoleContext
+const dispatchNotification = async ({ senderId, recipientRole, recipientId, targetRoleContext, title, message, type, comment, actionUrl }) => {
   try {
     let recipients = [];
     if (recipientId) {
@@ -21,24 +22,20 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
     }
 
     for (const recipient of recipients) {
-      // Create the in-app notification immediately
       await Notification.create({ recipient: recipient._id, sender: senderId, title, message, type, actionUrl });
 
-      // 🚨 CRITICAL FIX: The 'await' keyword has been REMOVED from sendAppraisalEmail.
-      // This is true "Fire and Forget". The system will no longer wait for SMTP timeouts!
-      sendAppraisalEmail({
+      // Pass the specific targetRoleContext to the mailer!
+      await sendAppraisalEmail({
         targetUserId: recipient._id,
-        targetRoleContext: targetRoleContext, 
+        targetRoleContext: targetRoleContext, // 🚨 NEW
         subject: `STIP Alert: ${title}`,
         title: title,
         bodyText: message,
-        comments: comments || null, 
+        comment: comment || null,
         actionUrl: actionUrl || `${process.env.FRONTEND_URL}/dashboard`
-      }).catch(err => console.error("Background Email Error:", err));
+      });
     }
-  } catch (error) { 
-    console.error("Notification Error:", error); 
-  }
+  } catch (error) { console.error("Notification Error:", error); }
 };
 
 // 1. Create a new appraisal (Draft or Submitted)
@@ -115,22 +112,16 @@ exports.createAppraisal = async (req, res) => {
       await appraisal.save();
     }
 
-    // 🚨 TRUE FIRE AND FORGET: Hand off notifications to the background
+    // WORKFLOW INTERCEPT: LM Submits to HR (Triggers email if HR opted in)
     if (req.body.status === 'SUBMITTED' || req.body.status === 'UNDER_HR_REVIEW') {
-      setImmediate(() => {
-        dispatchNotification({
-          senderId: req.user.id,
-          recipientRole: 'HR_ADMIN',
-          targetRoleContext: 'HR_ADMIN', 
-          title: 'Appraisal Submitted for HR Review',
-          message: `The Line Manager has submitted the ${quarter.name} appraisal for ${employeeName}. It is now awaiting your review.`,
-          type: 'APPRAISAL_SUBMITTED',
-          comments: { 
-            epJustification: req.body.narrative?.epJustification || null,
-            manager: req.body.narrative?.generalComments || null
-          }, 
-          actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
-        }).catch(err => console.error("Background Dispatch Error:", err));
+      await dispatchNotification({
+        senderId: req.user.id,
+        recipientRole: 'HR_ADMIN',
+        title: 'Appraisal Submitted for HR Review',
+        message: `The Line Manager has submitted the ${quarter.name} appraisal for ${employeeName}. It is now awaiting your review.`,
+        type: 'APPRAISAL_SUBMITTED',
+        comment: req.body.narrative?.epJustification || null, 
+        actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
       });
     }
 
@@ -170,25 +161,17 @@ exports.forwardToCEO = async (req, res) => {
     const employeeName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     const quarterName = appraisal.appraisalQuarter?.name || `CY${appraisal.period.year}`;
 
-    // 🚨 TRUE FIRE AND FORGET: Hand off notifications to the background
-    setImmediate(() => {
-      dispatchNotification({
-        senderId: req.user.id,
-        recipientRole: 'CEO',
-        targetRoleContext: 'CEO',
-        title: 'Appraisal Ready for Final Approval',
-        message: `HR has validated and forwarded the ${quarterName} appraisal for ${employeeName}. It requires your final approval.`,
-        type: 'APPRAISAL_FORWARDED',
-        comments: { 
-          hr: req.body.hrComment || appraisal.narrative?.hrComments || null,
-          manager: appraisal.narrative?.generalComments || null,
-          epJustification: appraisal.narrative?.epJustification || null
-        },
-        actionUrl: `${process.env.FRONTEND_URL}/dashboard/ceo/approve`
-      }).catch(err => console.error("Background Dispatch Error:", err));
+    await dispatchNotification({
+      senderId: req.user.id,
+      recipientRole: 'CEO',
+      title: 'Appraisal Ready for Final Approval',
+      message: `HR has validated and forwarded the ${quarterName} appraisal for ${employeeName}. It requires your final approval.`,
+      type: 'APPRAISAL_FORWARDED',
+      comment: req.body.hrComment || appraisal.narrative.hrComments || null,
+      actionUrl: `${process.env.FRONTEND_URL}/dashboard/ceo/approve`
     });
 
-    res.status(200).json({ success: true, data: appraisal }); 
+    res.status(200).json({ success: true, data: appraisal });
   } catch (error) {
     console.error("Forward to CEO Error:", error);
     res.status(500).json({ success: false, message: 'Server Error forwarding appraisal.' });
@@ -221,13 +204,6 @@ exports.approveRejectAppraisal = async (req, res) => {
     const isApproved = status === 'APPROVED';
     const quarterName = appraisal.appraisalQuarter?.name || `CY${appraisal.period.year}`;
 
-    const commentsPayload = {
-      ceo: comments || appraisal.narrative?.ceoComments,
-      hr: appraisal.narrative?.hrComments,
-      manager: appraisal.narrative?.generalComments,
-      epJustification: appraisal.narrative?.epJustification
-    };
-
     const notificationConfig = {
       senderId: req.user.id,
       title: isApproved ? 'Appraisal Approved' : 'Appraisal Not Approved',
@@ -235,28 +211,23 @@ exports.approveRejectAppraisal = async (req, res) => {
         ? `The ${quarterName} appraisal for ${employeeName} has been officially approved.`
         : `The ${quarterName} appraisal for ${employeeName} was returned. Please review the comments and adjust accordingly.`,
       type: isApproved ? 'APPRAISAL_APPROVED' : 'APPRAISAL_REJECTED',
-      comments: commentsPayload, 
+      comment: comments || null,
       actionUrl: `${process.env.FRONTEND_URL}/dashboard`
     };
 
-    // 🚨 TRUE FIRE AND FORGET: Hand off notifications to the background
-    setImmediate(() => {
-      if (appraisal.managerId) {
-        dispatchNotification({
-          ...notificationConfig,
-          recipientId: appraisal.managerId._id,
-          targetRoleContext: 'MANAGER'
-        }).catch(err => console.error("Background Dispatch Error:", err)); 
-      }
-
-      dispatchNotification({
+    if (appraisal.managerId) {
+      await dispatchNotification({
         ...notificationConfig,
-        recipientRole: 'HR_ADMIN',
-        targetRoleContext: 'HR_ADMIN'
-      }).catch(err => console.error("Background Dispatch Error:", err)); 
+        recipientId: appraisal.managerId._id,
+      });
+    }
+
+    await dispatchNotification({
+      ...notificationConfig,
+      recipientRole: 'HR_ADMIN',
     });
 
-    res.status(200).json({ success: true, data: appraisal }); 
+    res.status(200).json({ success: true, data: appraisal });
   } catch (error) {
     console.error("Approve/Reject Error:", error);
     res.status(500).json({ success: false, message: 'Server Error updating appraisal status.' });
