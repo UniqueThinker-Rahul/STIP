@@ -11,31 +11,25 @@ export default function CEOApproveAppraisals() {
   const [loading, setLoading] = useState(true);
   const [cpPct, setCpPct] = useState(null);
   
-  // Modals
   const [actionModal, setActionModal] = useState({ show: false, type: '', id: null, name: '' });
   const [ceoComment, setCeoComment] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Fetch Live Data
   const fetchData = async () => {
     try {
       setLoading(true);
       
-      // Fetch CP% for award preview calculations
       const metricsRes = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
       if (metricsRes.data?.data?.cpPct) {
         setCpPct(metricsRes.data.data.cpPct);
       }
 
-      // Fetch pending appraisals for CEO
       const appRes = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
       const allApps = appRes.data?.data || [];
       
-      // Filter ONLY appraisals forwarded to the CEO
       const pendingCeo = allApps.filter(a => a.workflow?.status === 'WITH_CEO');
       
-      // Sort newest first
       pendingCeo.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
       
       setAppraisals(pendingCeo);
@@ -59,7 +53,6 @@ export default function CEOApproveAppraisals() {
   const handleApprove = async () => {
     try {
       setIsProcessing(true);
-      // Call the dedicated CEO approval route
       await api.patch(`/appraisals/${actionModal.id}/ceo-approve`, { 
         notes: 'Final Approval by CEO'
       });
@@ -67,7 +60,6 @@ export default function CEOApproveAppraisals() {
       setSuccessMsg('Appraisal has been successfully approved.');
       setTimeout(() => {
         setActionModal({ show: false, type: '', id: null, name: '' });
-        // 🚨 UPGRADE: Hard refresh the page to completely reset the view
         window.location.reload(); 
       }, 2000);
       
@@ -85,7 +77,6 @@ export default function CEOApproveAppraisals() {
     
     try {
       setIsProcessing(true);
-      // Use the reopen route to send it back
       await api.patch(`/appraisals/${actionModal.id}/reopen`, { 
         hrNotes: ceoComment 
       });
@@ -93,7 +84,6 @@ export default function CEOApproveAppraisals() {
       setSuccessMsg('Appraisal rejected and returned to the Manager.');
       setTimeout(() => {
         setActionModal({ show: false, type: '', id: null, name: '' });
-        // 🚨 UPGRADE: Hard refresh the page to completely reset the view
         window.location.reload(); 
       }, 2000);
       
@@ -171,7 +161,6 @@ export default function CEOApproveAppraisals() {
                   const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
                   const proRataValue = prMonths / 12;
                   
-                  // Calculate dynamic Award % if CP% is available
                   let awardDisplay = '—';
                   if (cpPct !== null) {
                     const finalAw = (cpPct * iprf) * proRataValue;
@@ -248,12 +237,10 @@ export default function CEOApproveAppraisals() {
         &#8505; <strong>How it works:</strong> HR Manager submits appraisals to CEO &rarr; They appear here &rarr; CEO clicks Approve or Not Approve &rarr; If Not Approved, mandatory comment required &rarr; HR notified by email with CEO comments
       </div>
 
-      {/* Action Modal (Approve / Reject) */}
       {actionModal.show && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[460px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
             
-            {/* Header */}
             <div className={`p-[16px_22px] flex justify-between items-center ${actionModal.type === 'approve' ? 'bg-[#059669]' : 'bg-[#DC2626]'}`}>
               <div className="text-[15px] font-[800] text-white flex items-center gap-[8px]">
                 {actionModal.type === 'approve' ? '&#10003; Confirm Approval' : '&#10007; Reject Appraisal'}
@@ -267,9 +254,7 @@ export default function CEOApproveAppraisals() {
               </button>
             </div>
 
-            {/* Body */}
             <div className="p-[24px]">
-              
               {successMsg ? (
                 <div className="text-center py-[20px]">
                   <div className="text-[48px] mb-[12px] leading-none">{actionModal.type === 'approve' ? '✅' : '📤'}</div>

@@ -5,7 +5,7 @@ import api from '../../../../lib/api';
 
 export default function HRAllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
-  const [staff, setStaff] = useState([]); // 🚨 UPGRADE: Required to track missing appraisals
+  const [staff, setStaff] = useState([]); 
   const [loading, setLoading] = useState(true);
   
   const [dbQuarters, setDbQuarters] = useState([]);
@@ -24,7 +24,6 @@ export default function HRAllAppraisals() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        // 🚨 UPGRADE: Fetch Appraisals AND Users concurrently
         const [appRes, qtrRes, configRes, usersRes] = await Promise.all([
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
           api.get('/quarters').catch(() => ({ data: { data: [] } })),
@@ -38,10 +37,8 @@ export default function HRAllAppraisals() {
         const allUsers = usersRes.data?.data || [];
         setStaff(allUsers);
         
-        // 🚨 UPGRADE: Extract Unique Managers from Appraisals AND Users
         const uniqueManagers = new Map();
         
-        // 1. From existing appraisals
         allApps.forEach(a => {
           if (a.managerId) {
             const mId = a.managerId._id || a.managerId;
@@ -51,7 +48,6 @@ export default function HRAllAppraisals() {
           }
         });
 
-        // 2. From staff directory (to catch managers who haven't submitted anything yet)
         allUsers.forEach(u => {
           const mgr = u.employmentDetails?.reportingTo;
           if (mgr) {
@@ -59,7 +55,6 @@ export default function HRAllAppraisals() {
             if (mgr.personalDetails) {
               uniqueManagers.set(mId, `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim());
             } else {
-              // Lookup the manager's name from the staff list if only an ID was provided
               const foundMgr = allUsers.find(staffMember => staffMember._id === mId);
               if (foundMgr) {
                 uniqueManagers.set(mId, `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim());
@@ -106,7 +101,6 @@ export default function HRAllAppraisals() {
     }
   };
 
-  // Helper to extract clean manager data whether it's an object or string
   const getManagerInfo = (mgrRaw) => {
     if (!mgrRaw) return { id: null, name: 'Unassigned' };
     if (mgrRaw._id && mgrRaw.personalDetails) {
@@ -120,7 +114,6 @@ export default function HRAllAppraisals() {
     return { id: mId, name: 'Unknown Manager' };
   };
 
-  // 🚨 UPGRADE: Dynamic Data Merge - Inject "Missing" Appraisals when a Quarter is selected
   let dataToFilter = [...appraisals];
 
   if (qtr) {
@@ -131,12 +124,11 @@ export default function HRAllAppraisals() {
     
     const submittedEmpIds = new Set(qtrAppraisals.map(a => a.employeeId?._id || a.employeeId));
 
-    // Find staff who do NOT have an appraisal for this quarter
     staff.forEach(emp => {
       if (!submittedEmpIds.has(emp._id)) {
         dataToFilter.push({
           _id: `missing-${emp._id}-${qtr}`,
-          isMissing: true, // Flag to identify phantom rows
+          isMissing: true,
           employeeId: emp,
           managerId: emp.employmentDetails?.reportingTo,
           appraisalQuarter: qtr,
@@ -221,7 +213,6 @@ export default function HRAllAppraisals() {
           <option value="APPROVED_BY_HR">Approved by HR</option>
           <option value="WITH_CEO">With CEO</option>
           <option value="APPROVED">CEO Approved</option>
-          {/* 🚨 UPGRADE: Added "Not Submitted" tracking option */}
           <option value="NOT_SUBMITTED" className="font-bold text-red-700">Not Submitted (Missing)</option>
         </select>
         
