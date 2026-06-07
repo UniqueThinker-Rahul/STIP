@@ -1,3 +1,8 @@
+// 🚨 GLOBAL NETWORK FIX: Forces Node.js to use IPv4 for all outbound connections.
+// This permanently prevents the Railway ENETUNREACH IPv6 timeout error.
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -21,6 +26,8 @@ const apiLogger = require('./middleware/apiLogger');
 const app = express();
 
 // 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
+app.set('trust proxy', 1);
+
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like Postman or mobile apps)

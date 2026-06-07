@@ -1,5 +1,6 @@
 // backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
+const dns = require('dns'); // 🚨 Added to intercept the internal socket
 const User = require('../models/User');
 
 // Configure the SMTP Transporter using Environment Variables
@@ -11,7 +12,13 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  family: 4, // Retained as an extra layer of instruction
+  // 🚨 BULLETPROOF NETWORK FIX: Intercept the socket's DNS resolver 
+  // and manually force it to ONLY return IPv4 addresses, completely bypassing Railway's IPv6 routing.
+  lookup: (hostname, options, callback) => {
+    dns.lookup(hostname, { family: 4 }, (err, address, family) => {
+      callback(err, address, family);
+    });
+  },
   tls: {
     rejectUnauthorized: false
   }
@@ -36,7 +43,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       return false;
     }
 
-    // 3. Construct HTML (Matching your Image Design exactly)
+    // 3. Construct HTML
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
@@ -73,7 +80,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       </div>
     `;
 
-    // 4. Send the Email using the FROM address in your .env
+    // 4. Send the Email (TRUE FIRE AND FORGET - API Responds instantly)
     transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 

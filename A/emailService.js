@@ -6,10 +6,15 @@ const User = require('../models/User');
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
+  secure: false, // Must be false for port 587 (TLS upgrade)
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  family: 4, // Retained as an extra layer of instruction
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 /**
@@ -24,7 +29,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     
     // Check for the specific role email (e.g., HR_ADMIN). If missing, fallback to their primary role email.
     const recipientEmail = (emailsMap && emailsMap.get(targetRoleContext)) || 
-                           (emailsMap && emailsMap.get(user.security.role));
+                           (emailsMap && emailsMap.get(user?.security?.role));
 
     if (!recipientEmail) {
       console.log(`✉️ Email Aborted: User ${targetUserId} has no email set for role ${targetRoleContext}.`);
@@ -69,14 +74,15 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     `;
 
     // 4. Send the Email using the FROM address in your .env
-    await transporter.sendMail({
+    transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 
       subject,
       html: htmlTemplate,
-    });
+    })
+    .then(() => console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`))
+    .catch(err => console.error(`❌ SMTP Failed for ${recipientEmail}:`, err.message));
     
-    console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`);
     return true;
 
   } catch (error) {
