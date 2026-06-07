@@ -20,10 +20,6 @@ const apiLogger = require('./middleware/apiLogger');
 
 const app = express();
 
-// 🚨 CRITICAL FIX: Trust the cloud provider's load balancer proxy.
-// This permanently stops the 'X-Forwarded-For' express-rate-limit validation errors.
-app.set('trust proxy', 1);
-
 // 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
 app.use(cors({
   origin: function (origin, callback) {
