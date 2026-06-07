@@ -6,19 +6,19 @@ const User = require('../models/User');
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
-  secure: false, // 🚨 FIX: Must be false for port 587 (TLS upgrade)
+  secure: false, // Must be false for port 587 (TLS upgrade)
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  family: 4, // 🚨 CRITICAL FIX: Forces IPv4 instead of IPv6 to prevent the ENETUNREACH 60-second timeouts!
+  family: 4, // Retained as an extra layer of instruction
   tls: {
     rejectUnauthorized: false
   }
 });
 
 /**
- * 🚀 UPGRADED: Dynamic Workflow Email Generator (True Non-Blocking)
+ * 🚀 UPGRADED: Dynamic Workflow Email Generator
  */
 const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, title, bodyText, comment, actionUrl }) => {
   try {
@@ -74,8 +74,6 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     `;
 
     // 4. Send the Email using the FROM address in your .env
-    // 🚨 FIX: Removed 'await' here to make it a true background "Fire & Forget" task!
-    // This guarantees the frontend NEVER waits for the SMTP server to respond.
     transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 
@@ -85,7 +83,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     .then(() => console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`))
     .catch(err => console.error(`❌ SMTP Failed for ${recipientEmail}:`, err.message));
     
-    return true; // Instantly resolves the function so the API responds to frontend immediately
+    return true;
 
   } catch (error) {
     console.error(`❌ Failed to process email for User ID ${targetUserId}:`, error.message);
