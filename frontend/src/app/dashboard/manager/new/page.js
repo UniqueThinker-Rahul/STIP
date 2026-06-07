@@ -138,7 +138,6 @@ function NewAppraisalForm() {
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [quarterStatuses, setQuarterStatuses] = useState({});
-  // 🚨 UPGRADE: Added a new state map to track ALL team submissions by quarter
   const [teamSubmissionsMap, setTeamSubmissionsMap] = useState({});
 
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -151,7 +150,7 @@ function NewAppraisalForm() {
         const [teamRes, quarterRes, appRes] = await Promise.all([
           api.get('/users/my-team'),
           api.get('/quarters'),
-          api.get('/appraisals') // Fetch all appraisals to build the map
+          api.get('/appraisals') 
         ]);
         
         const myTeam = teamRes.data?.data || [];
@@ -162,7 +161,6 @@ function NewAppraisalForm() {
 
         const allApps = appRes.data?.data || [];
         
-        // 🚨 UPGRADE: Build a master map of which employees have submitted appraisals for which quarters
         const subMap = {};
         allApps.forEach(app => {
           const empId = app.employeeId?._id || app.employeeId;
@@ -222,7 +220,6 @@ function NewAppraisalForm() {
   useEffect(() => {
     if (!selectedStaffId || draftId || dbQuarters.length === 0) return;
 
-    // Use the existing map rather than fetching from the API again
     const empHistory = teamSubmissionsMap[selectedStaffId] || {};
     
     let newStatuses = {};
@@ -230,7 +227,6 @@ function NewAppraisalForm() {
       newStatuses[q._id] = empHistory[q._id] || 'missing';
     });
     
-    // Fetch specifically for Rejection reasons if needed
     if (Object.values(newStatuses).includes('reopened')) {
       api.get(`/appraisals`).then(({ data }) => {
         const apps = data?.data || [];
@@ -287,7 +283,6 @@ function NewAppraisalForm() {
 
   const requiresEPJustification = calculatedIPRF >= 1.3;
   
-  // 🚨 UPGRADED: Check status of current selected quarter from map or status object
   const currentQtrStatus = draftId 
       ? 'draft' 
       : quarterStatuses[formData.quarter] || (teamSubmissionsMap[selectedStaffId] && teamSubmissionsMap[selectedStaffId][formData.quarter]) || 'missing';
@@ -394,7 +389,6 @@ function NewAppraisalForm() {
     }
   };
 
-  // 🚨 UPGRADE: Searchable Dropdown Helper Function with Dynamic Status injection
   const renderSearchableDropdown = (fieldKey, options, currentValue, onSelect, placeholder, displayKey) => {
     const isOpen = openDropdown === fieldKey;
     const query = searchQueries[fieldKey] || '';
@@ -450,7 +444,6 @@ function NewAppraisalForm() {
                   const display = typeof opt === 'string' ? opt : displayKey(opt);
                   const isSelected = currentValue === val;
                   
-                  // 🚨 UPGRADE: Inject dynamic status tag for Employee Selection Dropdown
                   let statusTag = null;
                   if (fieldKey === 'emp') {
                     const status = teamSubmissionsMap[val]?.[formData.quarter] || 'missing';
@@ -503,10 +496,8 @@ function NewAppraisalForm() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-        {/* MAIN APPRAISAL FORM PIPELINE */}
         <div className="lg:col-span-2 space-y-4">
           
-          {/* STEP 1: EMPLOYEE SELECTOR CARD */}
           <div className="bg-[#0D2B55] rounded-xl p-5 shadow-sm">
             <div className="text-[10px] font-bold text-white/50 uppercase tracking-widest mb-3">Step 1 — Select Staff Member</div>
             <div className="flex flex-col sm:flex-row gap-3 items-end">
@@ -516,7 +507,6 @@ function NewAppraisalForm() {
                   <span className="text-[10px] text-[#e8c96a] font-bold bg-[#C9A84C]/20 px-2 py-0.5 rounded">Showing status for {currentQObj?.name || 'Quarter'}</span>
                 </div>
                 
-                {/* 🚨 UPGRADED: Employee Select Dropdown with Status tags */}
                 {renderSearchableDropdown(
                   'emp', 
                   team, 
@@ -555,7 +545,6 @@ function NewAppraisalForm() {
 
           {selectedStaffId && (
             <>
-              {/* Rejection Notification Alert Box */}
               {quarterStatuses[formData.quarter] === 'reopened' && rejectionReason && (
                 <div className="mb-4 bg-red-50 border-l-4 border-red-500 rounded-xl p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
                   <div className="flex items-center gap-2 mb-2">
@@ -611,7 +600,6 @@ function NewAppraisalForm() {
                           className="p-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-500 bg-gray-50 cursor-default" 
                         />
                       ) : (
-                        /* Job Title Select Dropdown */
                         renderSearchableDropdown('title', JOB_TITLES, formData.title, handleTitleSelect, '-- Select Job Title --', null)
                       )}
                     </div>
@@ -668,7 +656,6 @@ function NewAppraisalForm() {
                 </div>
               </div>
 
-              {/* STEP 3: PERFORMANCE CRITERIA COMPLIANCE INTERFACE */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-4">
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                   <div className="flex items-center gap-3">
@@ -683,7 +670,6 @@ function NewAppraisalForm() {
                   </div>
                 </div>
                 
-                {/* Scoring Guide Strip */}
                 <div className="bg-[#FAF8F4] border-b border-gray-200 px-4 py-2 flex gap-2 items-center overflow-x-auto text-[10px] font-bold whitespace-nowrap">
                    <span className="text-gray-500 uppercase tracking-widest mr-1">Guide:</span>
                    <span className="bg-red-50 text-red-700 px-2 py-1 rounded border border-red-200">0.0 Less than Satisfactory</span>
@@ -700,7 +686,6 @@ function NewAppraisalForm() {
 
                     return (
                       <div key={crit.id} className={`border rounded-xl overflow-hidden transition-all ${isRated ? 'border-[#0D2B55]/20 bg-white' : isExpanded ? 'border-[#0D2B55] bg-[#FAF8F4]/30' : 'border-gray-200 bg-white'}`}>
-                        {/* Header Box Controller */}
                         <div 
                           onClick={() => setExpandedCrit(isExpanded ? null : crit.id)} 
                           className="px-4 py-3 bg-[#FAF8F4] flex items-center justify-between cursor-pointer hover:bg-gray-100/80 transition-colors border-b border-transparent"
@@ -727,7 +712,6 @@ function NewAppraisalForm() {
                           </div>
                         </div>
 
-                        {/* 📊 INLINE ASSESSMENT RUBRIC EXPANSION PANEL */}
                         {isExpanded && (
                           <div className="p-4 bg-white space-y-4 border-t border-gray-100 animate-fade-in">
                             <div className="p-3 bg-slate-50 border border-gray-100 rounded-lg flex items-start gap-2">
@@ -735,7 +719,6 @@ function NewAppraisalForm() {
                               <p className="text-[11px] text-gray-600 leading-relaxed font-medium">{crit.desc}</p>
                             </div>
 
-                            {/* Direct Evaluation Option Buttons Selector Section */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                               {[
                                 { v: 0.0, l: 'Less than Satisfactory', bg: 'bg-red-50 text-red-700 border-red-300' },
@@ -783,7 +766,6 @@ function NewAppraisalForm() {
                   })}
                 </div>
 
-                {/* LIVE REAL-TIME Summary Metric Score Tracking Strip */}
                 <div className="mt-4 bg-[#0D2B55] rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-inner m-4">
                   <div>
                     <div className="text-[10px] font-bold text-white/60 uppercase tracking-widest">Calculated IPRF Total Modifier</div>
@@ -816,7 +798,6 @@ function NewAppraisalForm() {
                   </div>
                 )}
                 
-                {/* General Comments Box */}
                 <div className="mx-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-[30px] h-[30px] rounded-[7px] bg-[#F0FDF4] flex items-center justify-center text-[14px] shrink-0 mr-1">&#128172;</div>
@@ -832,7 +813,6 @@ function NewAppraisalForm() {
                 </div>
               </div>
 
-              {/* ACTION PIPELINE ROW CONTROLS */}
               <div className="flex flex-col sm:flex-row gap-3 pt-2 mt-4">
                 <button type="button" onClick={handleClear} className="px-5 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-50 transition-all">← Start Over</button>
                 
@@ -858,7 +838,6 @@ function NewAppraisalForm() {
           )}
         </div>
 
-        {/* RIGHT COLUMN - SIDE SUMMARY PANELS */}
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-slate-50">
@@ -1033,9 +1012,7 @@ function NewAppraisalForm() {
     </div>
   );
 }
-// ... [rest of your code above] ...
 
-// Ensure this is exactly at the bottom of the file!
 export default function NewAppraisal() {
   return (
     <Suspense fallback={<div className="p-10 text-center text-slate-500">Loading form...</div>}>
