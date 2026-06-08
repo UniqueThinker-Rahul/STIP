@@ -1,9 +1,16 @@
+// backend/src/server.js
+
+// 🚨 GLOBAL NETWORK FIX 1: Force Node.js to prefer IPv4 over IPv6 globally.
+// This must be the very first thing in the file.
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-// 1. Import your route files
+// Import your route files
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes'); 
 const appraisalRoutes = require('./routes/appraisalRoutes');
@@ -11,63 +18,57 @@ const reportRoutes = require('./routes/reportRoutes');
 const settingsRoutes = require('./routes/settingsRoutes');
 const companyMetricsRoutes = require('./routes/companyMetricsRoutes');
 const AppConfig = require('./models/AppConfig');
-const User = require('./models/User'); // Required for dependency checks
-const { authGuard, roleGuard } = require('./middleware/auth'); // Required for securing config routes
+const User = require('./models/User'); 
+const { authGuard, roleGuard } = require('./middleware/auth'); 
 const quarterRoutes = require('./routes/quarterRoutes');
 const auditRoutes = require('./routes/auditRoutes');
-// 🚨 UPGRADE: Import the global API logger middleware
 const apiLogger = require('./middleware/apiLogger');
 
 const app = express();
 
-// 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
+// 🚨 GLOBAL PROXY FIX: Must be declared BEFORE any other app.use() middleware.
+// This permanently fixes the ERR_ERL_UNEXPECTED_X_FORWARDED_FOR Railway rate limit error.
+app.set('trust proxy', 1);
+
+// CORS Configuration
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman or mobile apps)
     if (!origin) return callback(null, true);
-    
-    // Dynamically allow any Vercel domain, local dev, or Railway
     if (origin.includes('localhost') || origin.includes('vercel.app') || origin.includes('railway.app')) {
       return callback(null, true);
     } else {
       return callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true, // Required for cookies/sessions to cross domains
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
-
-// 🚨 UPGRADE: Activate the global logger to watch all incoming requests
 app.use(apiLogger);
 
-// 2. Map the routes to the URL paths
+// Map the routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);          
 app.use('/api/v1/appraisals', appraisalRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/company-metrics', companyMetricsRoutes);
-app.use('/api/v1/audit', require('./routes/auditRoutes'));
-app.use('/api/v1/quarters', quarterRoutes);
 app.use('/api/v1/audit', auditRoutes);
+app.use('/api/v1/quarters', quarterRoutes);
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {
   try {
     let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
-    
-    // Fallback failsafe if the database isn't populated yet
     if (!config) {
       config = {
         companyCodes: ["FSM", "CDU", "NAR", "GUM"],
         officeLocations: ["HR", "P3MO", "Communications", "ICT", "Finance", "ORCA", "Administration", "Pohnpei Terminal", "CDU", "NPP", "AMMO", "Chuuk Terminal", "Maritime", "Tonoas", "Guam", "Yap Terminal", "Kosrae Terminal", "Nauru Terminal"],
-        jobTitles: [] // Left empty for brevity, but you can populate it
+        jobTitles: [] 
       };
     }
-    
     res.json({ success: true, data: config });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch dropdown configurations.' });
@@ -75,24 +76,21 @@ app.get('/api/v1/config/dropdowns', async (req, res) => {
 });
 
 // PUT /api/v1/config/dropdowns/:category
-// Handles ADD, EDIT, and DELETE with strict Database Dependency Checks
 app.put(
   '/api/v1/config/dropdowns/:category', 
   authGuard, 
-  roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), // 🚨 Managers are explicitly blocked
+  roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), 
   async (req, res) => {
     try {
-      const { category } = req.params; // 'companyCodes', 'officeLocations', or 'jobTitles'
+      const { category } = req.params; 
       const { action, value, oldValue, newValue } = req.body;
 
-      // Validate category
       if (!['companyCodes', 'officeLocations', 'jobTitles'].includes(category)) {
         return res.status(400).json({ message: "Invalid configuration category." });
       }
 
       let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
       
-      // Auto-create config if it doesn't exist during the first update
       if (!config) {
           config = new AppConfig({
               configType: 'SYSTEM_DROPDOWNS',
@@ -102,63 +100,31 @@ app.put(
           });
       }
 
-      // ---------------------------------------------------------
-      // ACTION: DELETE (Strict Dependency Check)
-      // ---------------------------------------------------------
       if (action === 'DELETE') {
         let usageCount = 0;
+        if (category === 'companyCodes') usageCount = await User.countDocuments({ companyCode: value });
+        else if (category === 'officeLocations') usageCount = await User.countDocuments({ 'employmentDetails.officeLocation': value });
+        else if (category === 'jobTitles') usageCount = await User.countDocuments({ 'employmentDetails.jobTitle': value });
 
-        // 1. Check if the value is currently assigned to any user
-        if (category === 'companyCodes') {
-          usageCount = await User.countDocuments({ companyCode: value });
-        } else if (category === 'officeLocations') {
-          usageCount = await User.countDocuments({ 'employmentDetails.officeLocation': value });
-        } else if (category === 'jobTitles') {
-          usageCount = await User.countDocuments({ 'employmentDetails.jobTitle': value });
-        }
-
-        // 2. Block deletion if in use
-        if (usageCount > 0) {
-          return res.status(409).json({ 
-            message: `Deletion Blocked: "${value}" is currently assigned to ${usageCount} employee(s). You must reassign them before deleting this value.` 
-          });
-        }
-
-        // 3. Safe to delete
+        if (usageCount > 0) return res.status(409).json({ message: `Deletion Blocked: "${value}" is assigned to ${usageCount} employee(s).` });
         config[category] = config[category].filter(item => item !== value);
       }
-
-      // ---------------------------------------------------------
-      // ACTION: EDIT (Cascade Updates to Users)
-      // ---------------------------------------------------------
       else if (action === 'EDIT') {
         if (!newValue || newValue.trim() === '') return res.status(400).json({ message: "Value cannot be empty." });
         if (config[category].includes(newValue)) return res.status(400).json({ message: "This value already exists." });
 
-        // 1. Update the Config Array
         const index = config[category].indexOf(oldValue);
         if (index !== -1) config[category][index] = newValue.trim();
 
-        // 2. CASCADE UPDATE: Automatically update all users using the old value
-        if (category === 'companyCodes') {
-          await User.updateMany({ companyCode: oldValue }, { $set: { companyCode: newValue.trim() } });
-        } else if (category === 'officeLocations') {
-          await User.updateMany({ 'employmentDetails.officeLocation': oldValue }, { $set: { 'employmentDetails.officeLocation': newValue.trim() } });
-        } else if (category === 'jobTitles') {
-          await User.updateMany({ 'employmentDetails.jobTitle': oldValue }, { $set: { 'employmentDetails.jobTitle': newValue.trim() } });
-        }
+        if (category === 'companyCodes') await User.updateMany({ companyCode: oldValue }, { $set: { companyCode: newValue.trim() } });
+        else if (category === 'officeLocations') await User.updateMany({ 'employmentDetails.officeLocation': oldValue }, { $set: { 'employmentDetails.officeLocation': newValue.trim() } });
+        else if (category === 'jobTitles') await User.updateMany({ 'employmentDetails.jobTitle': oldValue }, { $set: { 'employmentDetails.jobTitle': newValue.trim() } });
       }
-
-      // ---------------------------------------------------------
-      // ACTION: ADD
-      // ---------------------------------------------------------
       else if (action === 'ADD') {
         if (!value || value.trim() === '') return res.status(400).json({ message: "Value cannot be empty." });
         if (config[category].includes(value.trim())) return res.status(400).json({ message: "This value already exists." });
-        
         config[category].push(value.trim());
       }
-
       else {
         return res.status(400).json({ message: "Invalid action." });
       }
