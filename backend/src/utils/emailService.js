@@ -1,22 +1,33 @@
 // backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
-const dns = require('dns'); // 🚨 Added to intercept the internal socket
+const dns = require('dns');
 const User = require('../models/User');
 
-// Configure the SMTP Transporter using Environment Variables
+// 🚨 DYNAMIC PORT FIX: Prevents SSL Handshake timeouts
+const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+// Port 465 requires secure: true (SSL). Port 587 requires secure: false (TLS).
+const isSecure = smtpPort === 465;
+
+// Configure the SMTP Transporter
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false, // Must be false for port 587 (TLS upgrade)
+  host: smtpHost,
+  port: smtpPort,
+  secure: isSecure, 
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  // 🚨 BULLETPROOF NETWORK FIX: Intercept the socket's DNS resolver 
-  // and manually force it to ONLY return IPv4 addresses, completely bypassing Railway's IPv6 routing.
+  // 🚨 BULLETPROOF NETWORK FIX: Bypass Railway's OS resolver entirely.
+  // dns.resolve4 queries the network directly for IPv4, guaranteeing no IPv6 timeouts.
   lookup: (hostname, options, callback) => {
-    dns.lookup(hostname, { family: 4 }, (err, address, family) => {
-      callback(err, address, family);
+    dns.resolve4(hostname, (err, addresses) => {
+      if (err || !addresses || addresses.length === 0) {
+        // Failsafe fallback
+        return dns.lookup(hostname, { family: 4 }, callback);
+      }
+      // Force Nodemailer to use the raw IPv4 string (e.g. 142.250.x.x)
+      callback(null, addresses[0], 4);
     });
   },
   tls: {
@@ -25,13 +36,13 @@ const transporter = nodemailer.createTransport({
 });
 
 /**
- * 🚀 UPGRADED: Dynamic Workflow Email Generator
+ * 🚀 UPGRADED: Dynamic Workflow Email Generator (True Background Non-Blocking)
  */
 const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, title, bodyText, comment, actionUrl }) => {
   try {
     const user = await User.findById(targetUserId).select('personalDetails security');
     
-    // 🚨 Extract the dictionary map
+    // Extract the dictionary map
     const emailsMap = user?.personalDetails?.notificationEmails;
     
     // Check for the specific role email (e.g., HR_ADMIN). If missing, fallback to their primary role email.
@@ -43,7 +54,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       return false;
     }
 
-    // 3. Construct HTML
+    // Construct HTML (Matching your exact design)
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
@@ -80,7 +91,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       </div>
     `;
 
-    // 4. Send the Email (TRUE FIRE AND FORGET - API Responds instantly)
+    // 🚨 SEND EMAIL: Fire and Forget. Does NOT use await.
     transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 
@@ -90,7 +101,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     .then(() => console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`))
     .catch(err => console.error(`❌ SMTP Failed for ${recipientEmail}:`, err.message));
     
-    return true;
+    return true; // Instantly resolves so your frontend UI never gets stuck
 
   } catch (error) {
     console.error(`❌ Failed to process email for User ID ${targetUserId}:`, error.message);
