@@ -2,18 +2,19 @@
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
 
-// 🚨 GLOBAL NETWORK FIX 2: Hardcode the TLS settings to bypass Railway environment variables.
-// If process.env.SMTP_PORT injects 587, the connection will drop the IPv4 rule and timeout.
-// By strictly enforcing host, 465, secure: true, and family: 4, it guarantees an IPv4 connection.
+// 🚨 THE ULTIMATE RAILWAY FIX:
+// DO NOT use process.env.SMTP_PORT. If it is 587, the connection will drop the IPv4 rule and timeout.
+// We must hardcode Port 465 (Implicit SSL) and secure: true. This forces Node.js to use the TLS module,
+// which strictly obeys the 'family: 4' flag, guaranteeing an IPv4 connection.
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com', // Hardcoded to prevent env override
-  port: 465,              // Hardcoded to force Implicit SSL (TLS)
-  secure: true,           // Hardcoded to enforce Port 465 requirements
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: 465,         // 🚨 HARDCODED to 465
+  secure: true,      // 🚨 HARDCODED to true
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  family: 4,              // Node.js will respect this exclusively because we are using port 465
+  family: 4,         // 🚨 Node.js will finally respect this!
 });
 
 /**
@@ -35,7 +36,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       return false;
     }
 
-    // Construct HTML 
+    // Construct HTML (Matching your exact design)
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
@@ -72,8 +73,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       </div>
     `;
 
-    // 🚨 SEND EMAIL: True Fire and Forget
-    // It processes in the background so the frontend UI doesn't have to wait.
+    // 🚨 SEND EMAIL: Fire and Forget. Does NOT use await.
     transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 
