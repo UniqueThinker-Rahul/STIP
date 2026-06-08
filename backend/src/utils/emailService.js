@@ -1,32 +1,20 @@
 // backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
-const dns = require('dns');
 const User = require('../models/User');
 
-// 🚨 THE DEFINITIVE RAILWAY IPv6 TIMEOUT FIX
-// 1. Port 465 + secure: true ensures we use TLS from the start.
-// 2. The explicit 'lookup' function with 'dns.resolve4' guarantees
-//    Nodemailer ONLY receives an IPv4 address, completely bypassing Railway's IPv6 network block.
+// 🚨 THE NUCLEAR FIX: BYPASS DNS ENTIRELY
+// We are giving Nodemailer Google's exact IPv4 address. 
+// Railway cannot force IPv6 because we are skipping the DNS lookup phase completely.
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: 465,         // Hardcoded to force Implicit SSL
-  secure: true,      // Required for 465
+  host: '142.250.141.108', // Direct Google SMTP IPv4 Address
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  // Intercept the network request and force an IPv4 'A' Record lookup
-  lookup: (hostname, options, callback) => {
-    dns.resolve4(hostname, (err, addresses) => {
-      if (err || !addresses || addresses.length === 0) {
-        // Failsafe
-        return dns.lookup(hostname, { family: 4 }, callback);
-      }
-      // Pass the strict IPv4 address back to Nodemailer
-      callback(null, addresses[0], 4);
-    });
-  },
   tls: {
+    servername: 'smtp.gmail.com', // CRITICAL: Required so Google accepts the direct IP connection
     rejectUnauthorized: false
   }
 });
@@ -50,7 +38,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       return false;
     }
 
-    // Construct HTML (Matching your exact design)
+    // Construct HTML 
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
