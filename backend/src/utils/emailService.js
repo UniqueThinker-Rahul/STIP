@@ -2,40 +2,36 @@
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
 
-// 🚨 THE ULTIMATE RAILWAY FIX:
-// We must force Port 465 (Implicit SSL). This uses 'tls.connect' under the hood,
-// which strictly obeys the 'family: 4' flag, unlike Port 587 which drops it.
+// Configure the SMTP Transporter using Environment Variables
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: 465,         // 🚨 FORCED to 465
-  secure: true,      // 🚨 FORCED to true (Requires Port 465)
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  family: 4,         // 🚨 Node.js will finally respect this and use IPv4!
 });
 
 /**
- * 🚀 UPGRADED: Dynamic Workflow Email Generator (True Background Non-Blocking)
+ * 🚀 UPGRADED: Dynamic Workflow Email Generator
  */
 const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, title, bodyText, comment, actionUrl }) => {
   try {
     const user = await User.findById(targetUserId).select('personalDetails security');
     
-    // Extract the dictionary map
+    // 🚨 Extract the dictionary map
     const emailsMap = user?.personalDetails?.notificationEmails;
     
     // Check for the specific role email (e.g., HR_ADMIN). If missing, fallback to their primary role email.
     const recipientEmail = (emailsMap && emailsMap.get(targetRoleContext)) || 
-                           (emailsMap && emailsMap.get(user?.security?.role));
+                           (emailsMap && emailsMap.get(user.security.role));
 
     if (!recipientEmail) {
       console.log(`✉️ Email Aborted: User ${targetUserId} has no email set for role ${targetRoleContext}.`);
       return false;
     }
 
-    // Construct HTML (Matching your exact design)
+    // 3. Construct HTML (Matching your Image Design exactly)
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
@@ -72,18 +68,16 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
       </div>
     `;
 
-    // 🚨 SEND EMAIL: Fire and Forget. Does NOT use await.
-    // This instantly resolves, ensuring your frontend UI is lightning fast and NEVER waits for the email.
-    transporter.sendMail({
+    // 4. Send the Email using the FROM address in your .env
+    await transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 
       subject,
       html: htmlTemplate,
-    })
-    .then(() => console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`))
-    .catch(err => console.error(`❌ SMTP Failed for ${recipientEmail}:`, err.message));
+    });
     
-    return true; 
+    console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`);
+    return true;
 
   } catch (error) {
     console.error(`❌ Failed to process email for User ID ${targetUserId}:`, error.message);

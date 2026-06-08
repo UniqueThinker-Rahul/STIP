@@ -1,8 +1,3 @@
-// backend/src/server.js
-// 🚨 GLOBAL NETWORK FIX: Forces Node.js to prioritize IPv4.
-const dns = require('dns');
-dns.setDefaultResultOrder('ipv4first');
-
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -20,13 +15,12 @@ const User = require('./models/User'); // Required for dependency checks
 const { authGuard, roleGuard } = require('./middleware/auth'); // Required for securing config routes
 const quarterRoutes = require('./routes/quarterRoutes');
 const auditRoutes = require('./routes/auditRoutes');
+// 🚨 UPGRADE: Import the global API logger middleware
 const apiLogger = require('./middleware/apiLogger');
 
 const app = express();
 
 // 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
-app.set('trust proxy', 1);
-
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like Postman or mobile apps)
