@@ -1,48 +1,19 @@
 // backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
-const dns = require('dns');
 const User = require('../models/User');
 
-// 🚨 GLOBAL BULLETPROOF NETWORK PATCH:
-// Nodemailer silently strips out the "family: 4" option for Port 587 connections.
-// To force IPv4 and permanently prevent Railway IPv6 ENETUNREACH timeouts, 
-// we intercept Node's core DNS lookup globally just for the SMTP host!
-const originalLookup = dns.lookup;
-dns.lookup = function(hostname, options, callback) {
-  const targetHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-  if (hostname === targetHost) {
-    if (!options) {
-      options = { family: 4 };
-    } else if (typeof options === 'function') {
-      callback = options;
-      options = { family: 4 };
-    } else if (typeof options === 'number') {
-      options = { family: 4 };
-    } else {
-      options = { ...options, family: 4 };
-    }
-  }
-  return originalLookup(hostname, options, callback);
-};
-
-// 🚨 DYNAMIC PORT FIX: Prevents SSL Handshake timeouts
-const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-// Port 465 requires secure: true (SSL). Port 587 requires secure: false (TLS).
-const isSecure = smtpPort === 465;
-
-// Configure the SMTP Transporter
+// 🚨 THE ULTIMATE RAILWAY FIX:
+// We must force Port 465 (Implicit SSL). This uses 'tls.connect' under the hood,
+// which strictly obeys the 'family: 4' flag, unlike Port 587 which drops it.
 const transporter = nodemailer.createTransport({
-  host: smtpHost,
-  port: smtpPort,
-  secure: isSecure, 
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: 465,         // 🚨 FORCED to 465
+  secure: true,      // 🚨 FORCED to true (Requires Port 465)
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  tls: {
-    rejectUnauthorized: false
-  }
+  family: 4,         // 🚨 Node.js will finally respect this and use IPv4!
 });
 
 /**
