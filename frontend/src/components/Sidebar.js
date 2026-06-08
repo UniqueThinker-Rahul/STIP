@@ -147,7 +147,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Information',
         items: [
-          { name: 'STIP Guide & FAQ', href: '/dashboard/employee/info', icon: HelpCircle },
+          // { name: 'STIP Guide & FAQ', href: '/dashboard/employee/info', icon: HelpCircle },
           { name: 'Deadlines', href: '/dashboard/employee/deadlines', icon: Calendar }
         ]
       }

@@ -208,7 +208,7 @@ export default function HRAllAppraisals() {
         </select>
 
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
-          <option value="">All Statuses</option>
+          <option value="">Appraisal Status</option>
           <option value="SUBMITTED">Submitted to HR</option>
           <option value="APPROVED_BY_HR">Approved by HR</option>
           <option value="WITH_CEO">With CEO</option>

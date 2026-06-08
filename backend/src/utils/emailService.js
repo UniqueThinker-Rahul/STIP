@@ -3,6 +3,28 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const User = require('../models/User');
 
+// 🚨 GLOBAL BULLETPROOF NETWORK PATCH:
+// Nodemailer silently strips out the "family: 4" option for Port 587 connections.
+// To force IPv4 and permanently prevent Railway IPv6 ENETUNREACH timeouts, 
+// we intercept Node's core DNS lookup globally just for the SMTP host!
+const originalLookup = dns.lookup;
+dns.lookup = function(hostname, options, callback) {
+  const targetHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  if (hostname === targetHost) {
+    if (!options) {
+      options = { family: 4 };
+    } else if (typeof options === 'function') {
+      callback = options;
+      options = { family: 4 };
+    } else if (typeof options === 'number') {
+      options = { family: 4 };
+    } else {
+      options = { ...options, family: 4 };
+    }
+  }
+  return originalLookup(hostname, options, callback);
+};
+
 // 🚨 DYNAMIC PORT FIX: Prevents SSL Handshake timeouts
 const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
 const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -17,18 +39,6 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
-  },
-  // 🚨 BULLETPROOF NETWORK FIX: Bypass Railway's OS resolver entirely.
-  // dns.resolve4 queries the network directly for IPv4, guaranteeing no IPv6 timeouts.
-  lookup: (hostname, options, callback) => {
-    dns.resolve4(hostname, (err, addresses) => {
-      if (err || !addresses || addresses.length === 0) {
-        // Failsafe fallback
-        return dns.lookup(hostname, { family: 4 }, callback);
-      }
-      // Force Nodemailer to use the raw IPv4 string (e.g. 142.250.x.x)
-      callback(null, addresses[0], 4);
-    });
   },
   tls: {
     rejectUnauthorized: false
@@ -92,6 +102,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     `;
 
     // 🚨 SEND EMAIL: Fire and Forget. Does NOT use await.
+    // This instantly resolves, ensuring your frontend UI is lightning fast and NEVER waits for the email.
     transporter.sendMail({
       from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
       to: recipientEmail, 
@@ -101,7 +112,7 @@ const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, ti
     .then(() => console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`))
     .catch(err => console.error(`❌ SMTP Failed for ${recipientEmail}:`, err.message));
     
-    return true; // Instantly resolves so your frontend UI never gets stuck
+    return true; 
 
   } catch (error) {
     console.error(`❌ Failed to process email for User ID ${targetUserId}:`, error.message);

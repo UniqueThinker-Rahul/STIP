@@ -1,5 +1,5 @@
-// 🚨 GLOBAL NETWORK FIX: Forces Node.js to use IPv4 for all outbound connections.
-// This permanently prevents the Railway ENETUNREACH IPv6 timeout error.
+// backend/src/server.js
+// 🚨 GLOBAL NETWORK FIX: Forces Node.js to prioritize IPv4.
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
@@ -20,7 +20,6 @@ const User = require('./models/User'); // Required for dependency checks
 const { authGuard, roleGuard } = require('./middleware/auth'); // Required for securing config routes
 const quarterRoutes = require('./routes/quarterRoutes');
 const auditRoutes = require('./routes/auditRoutes');
-// 🚨 UPGRADE: Import the global API logger middleware
 const apiLogger = require('./middleware/apiLogger');
 
 const app = express();
