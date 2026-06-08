@@ -1,20 +1,34 @@
 // backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 const User = require('../models/User');
 
-// 🚨 THE ULTIMATE RAILWAY FIX:
-// DO NOT use process.env.SMTP_PORT. If it is 587, the connection will drop the IPv4 rule and timeout.
-// We must hardcode Port 465 (Implicit SSL) and secure: true. This forces Node.js to use the TLS module,
-// which strictly obeys the 'family: 4' flag, guaranteeing an IPv4 connection.
+// 🚨 THE DEFINITIVE RAILWAY IPv6 TIMEOUT FIX
+// 1. Port 465 + secure: true ensures we use TLS from the start.
+// 2. The explicit 'lookup' function with 'dns.resolve4' guarantees
+//    Nodemailer ONLY receives an IPv4 address, completely bypassing Railway's IPv6 network block.
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: 465,         // 🚨 HARDCODED to 465
-  secure: true,      // 🚨 HARDCODED to true
+  port: 465,         // Hardcoded to force Implicit SSL
+  secure: true,      // Required for 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  family: 4,         // 🚨 Node.js will finally respect this!
+  // Intercept the network request and force an IPv4 'A' Record lookup
+  lookup: (hostname, options, callback) => {
+    dns.resolve4(hostname, (err, addresses) => {
+      if (err || !addresses || addresses.length === 0) {
+        // Failsafe
+        return dns.lookup(hostname, { family: 4 }, callback);
+      }
+      // Pass the strict IPv4 address back to Nodemailer
+      callback(null, addresses[0], 4);
+    });
+  },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 /**
