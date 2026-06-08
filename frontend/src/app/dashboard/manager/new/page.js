@@ -275,10 +275,26 @@ function NewAppraisalForm() {
   let scoreTarget = '0.0';
   
   if (ratedCount === 6) {
-    if (rawIPRF < 0.35) { calculatedIPRF = 0.0; scoreBucket = 'ls'; scoreTarget = '0.0'; }
-    else if (rawIPRF < 0.85) { calculatedIPRF = 0.7; scoreBucket = 'ni'; scoreTarget = '0.7'; }
-    else if (rawIPRF < 1.15) { calculatedIPRF = 1.0; scoreBucket = 'e'; scoreTarget = '1.0'; }
-    else { calculatedIPRF = 1.3; scoreBucket = 'ep'; scoreTarget = '1.3'; }
+    if (rawIPRF < 0.6) { 
+      calculatedIPRF = 0.0; 
+      scoreBucket = 'ls'; 
+      scoreTarget = '0.0'; 
+    }
+    else if (rawIPRF >= 0.6 && rawIPRF < 0.9) { 
+      calculatedIPRF = 0.7; 
+      scoreBucket = 'ni'; 
+      scoreTarget = '0.7'; 
+    }
+    else if (rawIPRF >= 0.9 && rawIPRF < 1.2) { 
+      calculatedIPRF = 1.0; 
+      scoreBucket = 'e'; 
+      scoreTarget = '1.0'; 
+    }
+    else if (rawIPRF >= 1.2) { 
+      calculatedIPRF = 1.3; 
+      scoreBucket = 'ep'; 
+      scoreTarget = '1.3'; 
+    }
   }
 
   const requiresEPJustification = calculatedIPRF >= 1.3;
@@ -993,15 +1009,21 @@ function NewAppraisalForm() {
                     
                     return (
                       <div key={c.id} className="flex justify-between items-center py-0.5">
-                        <span>{c.short}: <span className="font-bold">{val}</span> × {c.pct} =</span>
+                        <span>{c.short}: <span className="font-bold">{val.toFixed(1)}</span> × {c.pct} =</span>
                         <span className={`font-bold ${colorClass}`}>{(val * c.wt).toFixed(3)}</span>
                       </div>
                     );
                   })}
                   
-                  <div className="mt-2 pt-2 border-t border-gray-200 flex justify-between items-center font-bold text-[#0D2B55] text-xs">
-                    <span>Total: {ratedCount > 0 ? calculatedIPRF.toFixed(3) : '0.000'} →</span>
-                    <span>{ratedCount > 0 ? `${scoreTarget} (${scoreBucket.toUpperCase()})` : '—'}</span>
+                  <div className="mt-3 pt-3 border-t border-gray-300">
+                    <div className="flex justify-between items-center font-black text-[#0D2B55] text-xs">
+                      <span>Total Calculation :</span>
+                      <span className="font-bold">{ratedCount > 0 ? rawIPRF.toFixed(3) : '0.000'}</span>
+                    </div>
+                    <div className="flex justify-between items-center mb-1 text-gray-600 text-[10px]">
+                      <span>Final Modifier Value:</span>
+                      <span>{ratedCount > 0 ? `${scoreTarget} (${scoreBucket.toUpperCase()})` : '—'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
