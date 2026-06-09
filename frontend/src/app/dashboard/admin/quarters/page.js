@@ -42,8 +42,7 @@ export default function QuarterManagement() {
     setTimeout(() => setToast({ show: false, message: '', isError: false }), 4000);
   };
 
-  // 🚨 UPGRADED: Enhanced Role Permissions
-  // Allow HR, CEO, and ICT to create quarters
+  // 🚨 UPGRADED: Enhanced Role Permissions to explicitly allow ICT_ADMIN to create quarters
   const canCreateQuarter = currentUser && (
     currentUser.security?.role === 'HR_ADMIN' || currentUser.security?.secondaryRoles?.includes('HR_ADMIN') ||
     currentUser.security?.role === 'CEO' || currentUser.security?.secondaryRoles?.includes('CEO') ||
@@ -204,7 +203,6 @@ export default function QuarterManagement() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* 🚨 UPGRADED: Permission Check on Creation Card */}
         <div className={`lg:col-span-1 bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4 ${!canCreateQuarter ? 'opacity-60 pointer-events-none' : ''}`}>
           <div className="border-b border-gray-100 pb-3">
             <h2 className="text-sm font-bold text-[#0D2B55] flex items-center gap-1.5"><Plus className="w-4 h-4 text-emerald-600" /> Establish Timeline</h2>
@@ -300,7 +298,6 @@ export default function QuarterManagement() {
                         </td>
                         <td className="p-4">
                           <div className="flex flex-col items-center justify-center gap-1">
-                            {/* 🚨 UPGRADED: Permission Check on Late Override Toggle */}
                             <button disabled={actionLoading || !canOverrideDate} onClick={() => handleToggleForceUnlock(q._id)} className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus:outline-none ${q.forceUnlock ? 'bg-amber-500' : 'bg-gray-200'} ${!canOverrideDate ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                               <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${q.forceUnlock ? 'translate-x-5' : 'translate-x-0.5'}`} />
                             </button>
