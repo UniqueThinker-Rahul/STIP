@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Check, AlertTriangle, Loader2, ShieldAlert, History, FileX } from 'lucide-react';
+import { Calendar, Plus, Check, AlertTriangle, Loader2, ShieldAlert, History, FileX, Edit, Trash2 } from 'lucide-react';
 import api from '../../../../lib/api';
 
 export default function QuarterManagement() {
@@ -11,6 +11,8 @@ export default function QuarterManagement() {
   const [currentUser, setCurrentUser] = useState(null);
   const [toast, setToast] = useState({ show: false, message: '', isError: false });
 
+  // 🚨 UPGRADED: Added editing state
+  const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     year: new Date().getFullYear(),
@@ -23,7 +25,7 @@ export default function QuarterManagement() {
       setLoading(true);
       const [quarterRes, userRes] = await Promise.all([
         api.get('/quarters'),
-        api.get('/auth/me') // Use the secure route to get real role data
+        api.get('/auth/me') 
       ]);
       
       setQuarters(quarterRes.data?.data || []);
@@ -42,20 +44,19 @@ export default function QuarterManagement() {
     setTimeout(() => setToast({ show: false, message: '', isError: false }), 4000);
   };
 
-  // 🚨 UPGRADED: Enhanced Role Permissions to explicitly allow ICT_ADMIN to create quarters
   const canCreateQuarter = currentUser && (
     currentUser.security?.role === 'HR_ADMIN' || currentUser.security?.secondaryRoles?.includes('HR_ADMIN') ||
     currentUser.security?.role === 'CEO' || currentUser.security?.secondaryRoles?.includes('CEO') ||
     currentUser.security?.role === 'ICT_ADMIN' || currentUser.security?.secondaryRoles?.includes('ICT_ADMIN')
   );
 
-  // Allow ICT and HR Admin to trigger the Force Unlock (Deadline Override) toggle
   const canOverrideDate = currentUser && (
     currentUser.security?.role === 'ICT_ADMIN' || currentUser.security?.secondaryRoles?.includes('ICT_ADMIN') ||
     currentUser.security?.role === 'HR_ADMIN' || currentUser.security?.secondaryRoles?.includes('HR_ADMIN')
   );
 
-  const handleCreateQuarter = async (e) => {
+  // 🚨 UPGRADED: Unified Submit Handler for both Create and Update
+  const handleSubmitQuarter = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.startDate || !formData.endDate) {
       return showToast('Please fulfill all date and naming requirements.', true);
@@ -66,10 +67,33 @@ export default function QuarterManagement() {
 
     if (newStart >= newEnd) return showToast('The Deadline Cutoff must be strictly after the Start Date.', true);
 
-    const isDuplicateName = quarters.some(q => q.name === formData.name && q.year === formData.year);
+    if (newStart.getFullYear() !== formData.year || newEnd.getFullYear() !== formData.year) {
+      return showToast(`Date Error: Start and End dates must fall exactly within the selected fiscal year (${formData.year}).`, true);
+    }
+
+    // Check duplicates ignoring the currently editing record
+    const isDuplicateName = quarters.some(q => q._id !== editingId && q.name === formData.name && q.year === formData.year);
     if (isDuplicateName) return showToast(`Error: ${formData.name} has already been configured for the year ${formData.year}.`, true);
 
+    const quarterSequence = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const selectedQIndex = quarterSequence.indexOf(formData.name);
+    
+    if (selectedQIndex > 0) {
+      const requiredPreviousQ = quarterSequence[selectedQIndex - 1];
+      const prevQuarter = quarters.find(q => q._id !== editingId && q.year === formData.year && q.name === requiredPreviousQ);
+      
+      if (!prevQuarter) {
+        return showToast(`Sequence Error: You must establish ${requiredPreviousQ} for ${formData.year} before creating ${formData.name}.`, true);
+      }
+      
+      const prevQEndDate = new Date(prevQuarter.endDate);
+      if (newStart <= prevQEndDate) {
+        return showToast(`Timeline Error: ${formData.name} must start after ${requiredPreviousQ} ends (${prevQEndDate.toLocaleDateString()}).`, true);
+      }
+    }
+
     const hasOverlap = quarters.some(q => {
+      if (q._id === editingId) return false;
       if (q.year !== formData.year) return false;
       const exStart = new Date(q.startDate);
       const exEnd = new Date(q.endDate);
@@ -80,12 +104,49 @@ export default function QuarterManagement() {
 
     try {
       setActionLoading(true);
-      await api.post('/quarters', formData);
-      showToast(`Successfully published lifecycle parameters for ${formData.name}.`);
-      setFormData({ name: '', year: new Date().getFullYear(), startDate: '', endDate: '' });
+      if (editingId) {
+        await api.put(`/quarters/${editingId}`, formData);
+        showToast(`Successfully updated lifecycle parameters for ${formData.name}.`);
+      } else {
+        await api.post('/quarters', formData);
+        showToast(`Successfully published lifecycle parameters for ${formData.name}.`);
+      }
+      handleCancelEdit();
       loadSystemData();
     } catch (error) {
-      showToast(error.response?.data?.message || 'Failed to initialize database record.', true);
+      showToast(error.response?.data?.message || 'Failed to process database record.', true);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 🚨 UPGRADED: Delete and Edit Action Handlers
+  const initiateEdit = (q) => {
+    const formatAsInputDate = (dateString) => new Date(dateString).toISOString().split('T')[0];
+    setFormData({
+      name: q.name,
+      year: q.year,
+      startDate: formatAsInputDate(q.startDate),
+      endDate: formatAsInputDate(q.endDate)
+    });
+    setEditingId(q._id);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setFormData({ name: '', year: new Date().getFullYear(), startDate: '', endDate: '' });
+  };
+
+  const handleDeleteQuarter = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to permanently delete the upcoming quarter ${name}?`)) return;
+    try {
+      setActionLoading(true);
+      await api.delete(`/quarters/${id}`);
+      showToast(`${name} has been successfully deleted.`);
+      if (editingId === id) handleCancelEdit();
+      loadSystemData();
+    } catch (error) {
+      showToast(error.response?.data?.message || 'Failed to delete quarter.', true);
     } finally {
       setActionLoading(false);
     }
@@ -205,12 +266,14 @@ export default function QuarterManagement() {
         
         <div className={`lg:col-span-1 bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4 ${!canCreateQuarter ? 'opacity-60 pointer-events-none' : ''}`}>
           <div className="border-b border-gray-100 pb-3">
-            <h2 className="text-sm font-bold text-[#0D2B55] flex items-center gap-1.5"><Plus className="w-4 h-4 text-emerald-600" /> Establish Timeline</h2>
+            <h2 className="text-sm font-bold text-[#0D2B55] flex items-center gap-1.5">
+              {editingId ? <><Edit className="w-4 h-4 text-blue-600" /> Update Timeline</> : <><Plus className="w-4 h-4 text-emerald-600" /> Establish Timeline</>}
+            </h2>
           </div>
           
           {!canCreateQuarter && <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 font-medium flex items-center gap-1.5"><ShieldAlert className="w-4 h-4 text-amber-500" /> Requires HR, CEO, or ICT clearance.</div>}
 
-          <form onSubmit={handleCreateQuarter} className="space-y-4">
+          <form onSubmit={handleSubmitQuarter} className="space-y-4">
             <div>
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Quarter Label</label>
               <select required className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-slate-50 focus:bg-white focus:border-[#0D2B55] transition-colors shadow-sm"
@@ -238,9 +301,17 @@ export default function QuarterManagement() {
               <input type="date" required className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-slate-50 focus:bg-white focus:border-[#0D2B55] font-mono shadow-sm"
                 value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} />
             </div>
-            <button type="submit" disabled={actionLoading || !canCreateQuarter} className="w-full py-2 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white rounded-lg text-xs font-bold transition-colors shadow flex items-center justify-center gap-1.5 disabled:opacity-50">
-              {actionLoading ? 'Processing...' : 'Publish New Quarter Block'}
-            </button>
+            
+            <div className="flex gap-2">
+              {editingId && (
+                <button type="button" onClick={handleCancelEdit} disabled={actionLoading} className="w-1/3 py-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
+                  Cancel
+                </button>
+              )}
+              <button type="submit" disabled={actionLoading || !canCreateQuarter} className={`flex-1 py-2 text-white rounded-lg text-xs font-bold transition-colors shadow flex items-center justify-center gap-1.5 disabled:opacity-50 ${editingId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-[#0D2B55] hover:bg-[#1a3d6e]'}`}>
+                {actionLoading ? 'Processing...' : editingId ? 'Update Quarter Block' : 'Publish New Quarter Block'}
+              </button>
+            </div>
           </form>
         </div>
 
@@ -259,7 +330,7 @@ export default function QuarterManagement() {
                   <th className="p-4">Schedule</th>
                   <th className="p-4 text-center">Status</th>
                   <th className="p-4 text-center" title="Override system lock to allow late submissions">Late Exceptions</th>
-                  <th className="p-4 text-center">Exports</th>
+                  <th className="p-4 text-center">Actions & Exports</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
@@ -306,6 +377,15 @@ export default function QuarterManagement() {
                         </td>
                         <td className="p-4">
                           <div className="flex flex-col gap-1.5 items-center justify-center">
+                            
+                            {/* 🚨 UPGRADED: Edit & Delete only visible for Upcoming Quarters */}
+                            {isFuture && (
+                              <div className="flex w-[96px] gap-1 justify-center mb-1">
+                                <button onClick={() => initiateEdit(q)} className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded font-bold text-[10px] flex items-center justify-center transition-colors flex-1" title="Edit Upcoming Quarter"><Edit className="w-3 h-3" /></button>
+                                <button onClick={() => handleDeleteQuarter(q._id, q.name)} className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded font-bold text-[10px] flex items-center justify-center transition-colors flex-1" title="Delete Upcoming Quarter"><Trash2 className="w-3 h-3" /></button>
+                              </div>
+                            )}
+
                             <button onClick={() => handleDownloadReport(q, 'SUBMITTED')} className="w-24 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded font-bold text-[10px] flex items-center justify-center gap-1 transition-colors"><Check className="w-3 h-3" /> Submitted</button>
                             <button onClick={() => handleDownloadReport(q, 'MISSING')} className="w-24 px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded font-bold text-[10px] flex items-center justify-center gap-1 transition-colors"><FileX className="w-3 h-3" /> Pending</button>
                           </div>
