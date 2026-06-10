@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator, Search } from 'lucide-react';
+import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator, Search, MessageSquare } from 'lucide-react';
 import api from '../../../../lib/api'; 
 
 const CRITERIA = [
@@ -132,17 +132,42 @@ function NewAppraisalForm() {
   const [activeQuarterId, setActiveQuarterId] = useState('');
 
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [formData, setFormData] = useState({ title: '', quarter: '', comments: '', epJustification: '' });
+  const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '' });
+  
+  // 🚨 NEW: Store comments individually for each rating
+  const [criterionComments, setCriterionComments] = useState({
+    expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: ''
+  });
+  
   const [scores, setScores] = useState({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
   const [expandedCrit, setExpandedCrit] = useState('expectedResults'); 
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [quarterStatuses, setQuarterStatuses] = useState({});
   const [teamSubmissionsMap, setTeamSubmissionsMap] = useState({});
+  const [teamExactStatusMap, setTeamExactStatusMap] = useState({}); 
 
   const [openDropdown, setOpenDropdown] = useState(null);
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
+
+  // Helper to parse individual comments from a combined string if loading a draft
+  const parseComments = (combinedString) => {
+    if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
+    const parts = combinedString.split('|||');
+    if (parts.length === 6) {
+      return {
+        expectedResults: parts[0].replace('Results: ', '').trim(),
+        initiative: parts[1].replace('Initiative: ', '').trim(),
+        safeWorking: parts[2].replace('Safety: ', '').trim(),
+        jobCompetence: parts[3].replace('Competence: ', '').trim(),
+        dependability: parts[4].replace('Dependability: ', '').trim(),
+        adaptability: parts[5].replace('Adaptability: ', '').trim()
+      };
+    }
+    // Fallback if it's an old draft with just one general comment
+    return { expectedResults: combinedString, initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
+  };
 
   useEffect(() => {
     const fetchFormContext = async () => {
@@ -162,18 +187,23 @@ function NewAppraisalForm() {
         const allApps = appRes.data?.data || [];
         
         const subMap = {};
+        const exactMap = {}; 
         allApps.forEach(app => {
           const empId = app.employeeId?._id || app.employeeId;
           const qId = app.appraisalQuarter?._id || app.appraisalQuarter;
           const status = app.workflow?.status;
           
           if (!subMap[empId]) subMap[empId] = {};
+          if (!exactMap[empId]) exactMap[empId] = {};
           
           if (status === 'DRAFT') subMap[empId][qId] = 'draft';
           else if (status === 'NOT_APPROVED' || status === 'REOPENED') subMap[empId][qId] = 'reopened';
           else subMap[empId][qId] = 'submitted';
+
+          exactMap[empId][qId] = status; 
         });
         setTeamSubmissionsMap(subMap);
+        setTeamExactStatusMap(exactMap);
         
         const currentDate = new Date();
         const defaultQ = fetchedQuarters.find(q => new Date(q.endDate) >= currentDate && !q.isLocked) || fetchedQuarters[0];
@@ -194,9 +224,10 @@ function NewAppraisalForm() {
             setFormData({
               title: emp?.employmentDetails?.jobTitle || '',
               quarter: draftData.appraisalQuarter?._id || draftData.appraisalQuarter || (defaultQ?._id || ''),
-              epJustification: draftData.narrative?.epJustification || '',
-              comments: draftData.narrative?.generalComments || ''
+              epJustification: draftData.narrative?.epJustification || ''
             });
+
+            setCriterionComments(parseComments(draftData.narrative?.generalComments));
 
             setScores({
               expectedResults: draftData.scores?.deliveredResults?.rating ?? null,
@@ -244,12 +275,14 @@ function NewAppraisalForm() {
 
     if (Object.keys(empHistory).length > 0) {
       setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
+      setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
       const emp = team.find(s => s._id === selectedStaffId);
-      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
+      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', epJustification: '' }));
     } else {
       setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
+      setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
       const emp = team.find(s => s._id === selectedStaffId);
-      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', comments: '', epJustification: '' }));
+      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', epJustification: '' }));
     }
 
     setQuarterStatuses(newStatuses);
@@ -321,19 +354,13 @@ function NewAppraisalForm() {
   const handleScore = (critId, val) => {
     if (isCurrentQuarterLocked) return;
     setScores(prev => ({ ...prev, [critId]: val }));
-    
-    const currentIndex = CRITERIA.findIndex(c => c.id === critId);
-    if (currentIndex < CRITERIA.length - 1) {
-      setTimeout(() => setExpandedCrit(CRITERIA[currentIndex + 1].id), 250);
-    } else {
-      setTimeout(() => setExpandedCrit(null), 250);
-    }
   };
 
   const handleClear = () => {
     setSelectedStaffId('');
     setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
-    setFormData({ title: '', quarter: activeQuarterId, comments: '', epJustification: '' });
+    setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
+    setFormData({ title: '', quarter: activeQuarterId, epJustification: '' });
     setRejectionReason('');
     if (draftId) router.replace('/dashboard/manager/new'); 
   };
@@ -366,8 +393,19 @@ function NewAppraisalForm() {
       return alert("A comprehensive EP Justification is mandatory.");
     }
 
+    // 🚨 NEW: Strict Validation - Must provide a justification comment for ALL rated criteria
+    if (!isDraft) {
+      const missingComments = CRITERIA.filter(c => criterionComments[c.id].trim().length < 5);
+      if (missingComments.length > 0) {
+        return alert(`You must provide a mandatory justification comment (min. 5 chars) for: ${missingComments.map(c => c.short).join(', ')}`);
+      }
+    }
+
     setIsSubmitting(true);
     try {
+      // Compile individual comments into a structured single string for the backend payload
+      const compiledComments = `Results: ${criterionComments.expectedResults} ||| Initiative: ${criterionComments.initiative} ||| Safety: ${criterionComments.safeWorking} ||| Competence: ${criterionComments.jobCompetence} ||| Dependability: ${criterionComments.dependability} ||| Adaptability: ${criterionComments.adaptability}`;
+
       const payload = {
         employeeId: selectedStaffId,
         reviewYear: currentQObj?.year || new Date().getFullYear(),
@@ -380,7 +418,7 @@ function NewAppraisalForm() {
         calculatedResults: { finalIprfScore: calculatedIPRF },
         stipAward: parseFloat(stipAwardPct),
         narrative: {
-          generalComments: formData.comments.trim(),
+          generalComments: compiledComments, // Backend mapping maintained
           epJustification: formData.epJustification.trim()
         },
         status: isDraft ? 'DRAFT' : 'SUBMITTED' 
@@ -462,15 +500,16 @@ function NewAppraisalForm() {
                   
                   let statusTag = null;
                   if (fieldKey === 'emp') {
-                    const status = teamSubmissionsMap[val]?.[formData.quarter] || 'missing';
-                    if (status === 'submitted') {
-                      statusTag = <span className="bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Submitted</span>;
-                    } else if (status === 'reopened') {
-                      statusTag = <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Revision Req</span>;
-                    } else if (status === 'draft') {
-                      statusTag = <span className="bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Draft</span>;
+                    const exactStatus = teamExactStatusMap[val]?.[formData.quarter];
+                    
+                    if (!exactStatus) {
+                      statusTag = <span className="bg-gray-100 text-gray-500 border border-gray-200 px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Not Yet Started</span>;
+                    } else if (exactStatus === 'APPROVED') {
+                      statusTag = <span className="bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Approved</span>;
+                    } else if (exactStatus === 'NOT_APPROVED' || exactStatus === 'REOPENED') {
+                      statusTag = <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Rejected</span>;
                     } else {
-                      statusTag = <span className="bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Pending</span>;
+                      statusTag = <span className="bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE] px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">In Progress</span>;
                     }
                   }
 
@@ -678,7 +717,7 @@ function NewAppraisalForm() {
                     <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-[14px] shrink-0">&#11088;</div>
                     <div>
                       <div className="text-sm font-bold text-[#0D2B55]">Performance Criteria — CY2026 Weighted Scoring</div>
-                      <div className="text-[11px] text-gray-500">Rate each criterion • IPRF calculates live</div>
+                      <div className="text-[11px] text-gray-500">Rate and justify each criterion • IPRF calculates live</div>
                     </div>
                   </div>
                   <div className={`text-[11px] font-bold px-3 py-1 rounded-full ${ratedCount === 6 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -699,6 +738,7 @@ function NewAppraisalForm() {
                     const isExpanded = expandedCrit === crit.id;
                     const val = scores[crit.id];
                     const isRated = val !== null;
+                    const comment = criterionComments[crit.id];
 
                     return (
                       <div key={crit.id} className={`border rounded-xl overflow-hidden transition-all ${isRated ? 'border-[#0D2B55]/20 bg-white' : isExpanded ? 'border-[#0D2B55] bg-[#FAF8F4]/30' : 'border-gray-200 bg-white'}`}>
@@ -754,8 +794,28 @@ function NewAppraisalForm() {
                                 </button>
                               ))}
                             </div>
+                            
+                            {/* 🚨 NEW: Contextual Comment Box explicitly appears for the rated criteria */}
+                            {isRated && (
+                              <div className="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
+                                <div className="flex items-center gap-1.5 mb-2">
+                                  <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
+                                  <span className="text-[11px] font-bold text-slate-700">Rating Justification <span className="text-red-500">*</span></span>
+                                </div>
+                                <textarea 
+                                  disabled={isCurrentQuarterLocked}
+                                  className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-400 focus:bg-white resize-none shadow-inner transition-colors min-h-[60px]"
+                                  placeholder={`Why did you assign a rating of ${val.toFixed(1)} for ${crit.name}? (Mandatory)`}
+                                  value={comment}
+                                  onChange={(e) => setCriterionComments({...criterionComments, [crit.id]: e.target.value})}
+                                />
+                                {comment.trim().length > 0 && comment.trim().length < 5 && (
+                                  <p className="text-[10px] text-red-500 mt-1">Please provide a more detailed justification.</p>
+                                )}
+                              </div>
+                            )}
 
-                            <div className="mt-2 border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50">
+                            <div className="mt-4 border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50">
                               <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 text-[10px] font-bold text-[#0D2B55] uppercase tracking-wider">
                                 System Assessment Guide Reference Matrix
                               </div>
@@ -813,20 +873,6 @@ function NewAppraisalForm() {
                     />
                   </div>
                 )}
-                
-                <div className="mx-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-[30px] h-[30px] rounded-[7px] bg-[#F0FDF4] flex items-center justify-center text-[14px] shrink-0 mr-1">&#128172;</div>
-                      <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Manager General Comments</span>
-                    </div>
-                    <textarea 
-                      disabled={isCurrentQuarterLocked}
-                      className="w-full p-3 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-400 resize-none h-20 shadow-inner"
-                      placeholder="Add overall observations about this employee's performance this quarter (optional but recommended)..."
-                      value={formData.comments}
-                      onChange={(e) => setFormData({...formData, comments: e.target.value})}
-                    />
-                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2 mt-4">
