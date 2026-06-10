@@ -4,6 +4,17 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Plus, Check, AlertTriangle, Loader2, ShieldAlert, History, FileX, Edit, Trash2 } from 'lucide-react';
 import api from '../../../../lib/api';
 
+// 🚨 UPGRADED: Strict Date Formatter to permanently enforce dd/mm/yy
+const formatDate = (dateInput) => {
+  if (!dateInput) return 'N/A';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return 'N/A';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+};
+
 export default function QuarterManagement() {
   const [quarters, setQuarters] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -88,7 +99,7 @@ export default function QuarterManagement() {
       
       const prevQEndDate = new Date(prevQuarter.endDate);
       if (newStart <= prevQEndDate) {
-        return showToast(`Timeline Error: ${formData.name} must start after ${requiredPreviousQ} ends (${prevQEndDate.toLocaleDateString()}).`, true);
+        return showToast(`Timeline Error: ${formData.name} must start after ${requiredPreviousQ} ends (${formatDate(prevQEndDate)}).`, true);
       }
     }
 
@@ -196,7 +207,7 @@ export default function QuarterManagement() {
             record.calculatedResults?.finalIprfScore || 0,
             record.calculatedResults?.isExceedingPerformance ? 'EXCEEDING' : 'STANDARD',
             record.workflow?.status || 'UNKNOWN',
-            record.createdAt ? new Date(record.createdAt).toLocaleDateString() : 'N/A'
+            record.createdAt ? formatDate(record.createdAt) : 'N/A'
           ];
           csvRows.push(row.join(','));
         });
@@ -353,8 +364,8 @@ export default function QuarterManagement() {
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">Reference Year: {q.year}</div>
                         </td>
                         <td className="p-4 font-mono text-slate-600 space-y-0.5">
-                          <div>Start: {start.toLocaleDateString()}</div>
-                          <div className={isExpired ? 'text-rose-600 font-bold' : isActive ? 'text-emerald-600 font-bold' : ''}>End: {end.toLocaleDateString()}</div>
+                          <div>Start: {formatDate(start)}</div>
+                          <div className={isExpired ? 'text-rose-600 font-bold' : isActive ? 'text-emerald-600 font-bold' : ''}>End: {formatDate(end)}</div>
                         </td>
                         <td className="p-4 text-center">
                           {isFuture ? (
@@ -378,7 +389,6 @@ export default function QuarterManagement() {
                         <td className="p-4">
                           <div className="flex flex-col gap-1.5 items-center justify-center">
                             
-                            {/* 🚨 UPGRADED: Edit & Delete only visible for Upcoming Quarters */}
                             {isFuture && (
                               <div className="flex w-[96px] gap-1 justify-center mb-1">
                                 <button onClick={() => initiateEdit(q)} className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded font-bold text-[10px] flex items-center justify-center transition-colors flex-1" title="Edit Upcoming Quarter"><Edit className="w-3 h-3" /></button>
