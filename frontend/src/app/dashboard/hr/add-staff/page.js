@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { User, CheckCircle, Calculator, X, ChevronDown, Search } from 'lucide-react';
+import { User, CheckCircle, Calculator, X, ChevronDown, Search, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 
@@ -18,35 +18,35 @@ export default function AddNewStaff() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
-    fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '' 
+    fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '', isManager: false 
   });
 
   const [openDropdown, setOpenDropdown] = useState(null);
-  const [searchQueries, setSearchQueries] = useState({ mgrId: '', title: '', office: '', co: '' }); // 🚨 FIX: Added 'co' state
+  const [searchQueries, setSearchQueries] = useState({ mgrId: '', title: '', office: '', co: '' }); 
   const dropdownRef = useRef(null);
 
+  const fetchInitialData = async () => {
+    try {
+      const [mgrRes, configRes] = await Promise.all([
+        api.get('/users/managers'),
+        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) 
+      ]);
+      
+      setManagerList(mgrRes.data?.data || []);
+      
+      const configData = configRes.data?.data || {};
+      
+      setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
+      setOfficeLocations(configData.officeLocations || ['Headquarters', 'Branch A', 'Branch B']);
+      setJobTitles(configData.jobTitles || ['Manager', 'Analyst', 'Coordinator', 'Specialist']); 
+      
+    } catch (error) {
+      console.error("Failed to load initial data:", error);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [mgrRes, configRes] = await Promise.all([
-          api.get('/users/managers'),
-          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) 
-        ]);
-        
-        setManagerList(mgrRes.data?.data || []);
-        
-        const configData = configRes.data?.data || {};
-        
-        // Fallback defaults just in case the backend config is empty
-        setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
-        setOfficeLocations(configData.officeLocations || ['Headquarters', 'Branch A', 'Branch B']);
-        setJobTitles(configData.jobTitles || ['Manager', 'Analyst', 'Coordinator', 'Specialist']); 
-        
-      } catch (error) {
-        console.error("Failed to load initial data:", error);
-      }
-    };
-    fetchData();
+    fetchInitialData();
   }, []);
 
   useEffect(() => {
@@ -97,10 +97,11 @@ export default function AddNewStaff() {
   }
 
   const saveNewStaff = async () => {
-    const { fn, mn, ln, title, office, co, mgrId, hire, empId } = formData;
+    const { fn, mn, ln, title, office, co, mgrId, hire, empId, isManager } = formData;
     
-    if (!fn || !ln || !title || !office || !co || !mgrId || !hire || !empId) {
-      alert('Please fill in all required fields, including Office Station and Employee ID.');
+    // 🚨 UPGRADED: mgrId is REQUIRED unless isManager is true
+    if (!fn || !ln || !title || !office || !co || !hire || !empId || (!isManager && !mgrId)) {
+      alert('Please fill in all required fields. Reporting Manager is required unless the staff is designated as a Line Manager.');
       return;
     }
 
@@ -119,7 +120,7 @@ export default function AddNewStaff() {
         officeLocation: office,
         companyCode: co,
         dateOfHire: hire, 
-        role: "EMPLOYEE",
+        role: isManager ? "MANAGER" : "EMPLOYEE", 
         reportingTo: mgrId || null,
         email: generatedEmail,
         password: "Password123!",
@@ -131,6 +132,11 @@ export default function AddNewStaff() {
 
       setSuccessDetail(`${fullFirstName} ${ln} (${title}) added to the system with ID ${empId}. Pro-Rata: ${(prMonths / 12).toFixed(3)}.`);
       setSuccessModalOpen(true);
+      
+      if (isManager) {
+        fetchInitialData();
+      }
+
       clearForm();
       
     } catch (error) {
@@ -142,16 +148,14 @@ export default function AddNewStaff() {
   };
 
   const clearForm = () => {
-    setFormData({ fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '' });
+    setFormData({ fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '', isManager: false });
   };
 
-  // 🚨 FIX: Deep String Safety
   const renderSearchableDropdown = (field, options, placeholder, displayKey, valueKey = null) => {
     const isOpen = openDropdown === field;
-    const query = searchQueries[field] || ''; // Fallback to empty string
+    const query = searchQueries[field] || ''; 
 
     const filteredOptions = options.filter(opt => {
-      // Safely extract string, fallback to empty string if undefined
       const rawText = typeof opt === 'string' ? opt : (displayKey ? displayKey(opt) : '');
       const text = String(rawText || ''); 
       return text.toLowerCase().includes(query.toLowerCase());
@@ -298,7 +302,11 @@ export default function AddNewStaff() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[14px]">
               <div className="flex flex-col gap-[6px]">
-                <label className="text-[11px] font-[800] text-[#0D2B55]">Reporting Manager <span className="text-[#DC2626]">*</span></label>
+                {/* 🚨 UPGRADED: Dynamic visual logic for Reporting Manager field requirement */}
+                <label className="text-[11px] font-[800] text-[#0D2B55] flex justify-between items-center">
+                  <span>Reporting Manager {!formData.isManager && <span className="text-[#DC2626]">*</span>}</span>
+                  {formData.isManager && <span className="text-[9px] text-[#6b7280] font-normal uppercase">Optional</span>}
+                </label>
                 {renderSearchableDropdown('mgrId', managerList, 'Search for Manager...', (m) => {
                   if (!m) return '';
                   const fName = m.personalDetails?.firstName || m.firstName || '';
@@ -317,7 +325,7 @@ export default function AddNewStaff() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[14px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[20px]">
               <div className="flex flex-col gap-[6px]">
                 <label className="text-[11px] font-[800] text-[#0D2B55] flex items-center">
                   Employee ID <span className="text-[#DC2626] ml-[4px]">*</span>
@@ -337,6 +345,28 @@ export default function AddNewStaff() {
                   readOnly placeholder="Calculated from hire date" value={prStr}
                   className={`px-[12px] py-[9px] border-[1.5px] border-dashed border-[#E2DDD4] bg-[#FAF8F4] rounded-[8px] text-[13px] outline-none cursor-default font-[600] ${prColor || 'text-[#6b7280]'}`}
                 />
+              </div>
+            </div>
+
+            <div className="mb-[20px] p-[16px] bg-[#F0F9FF] border border-[#BFDBFE] rounded-[10px]">
+              <div className="flex items-center gap-[12px]">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer" 
+                    checked={formData.isManager}
+                    onChange={(e) => setFormData(prev => ({ ...prev, isManager: e.target.checked }))}
+                  />
+                  <div className="w-11 h-6 bg-white peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#6b7280] peer-checked:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0D2B55] border-[1.5px] border-[#BFDBFE]"></div>
+                </label>
+                <div>
+                  <div className="text-[13px] font-[800] text-[#0D2B55] flex items-center gap-[6px]">
+                    <ShieldCheck className="w-[14px] h-[14px] text-[#2563EB]" /> Designate as Line Manager
+                  </div>
+                  <div className="text-[11px] text-[#3B82F6] leading-snug mt-[2px]">
+                    If enabled, this employee will be granted Manager access and will appear in the "Reporting Manager" dropdown for future staff assignments.
+                  </div>
+                </div>
               </div>
             </div>
 

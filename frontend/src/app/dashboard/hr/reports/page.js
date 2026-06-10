@@ -12,6 +12,10 @@ export default function Reports() {
   const [selectedQuarterId, setSelectedQuarterId] = useState('');
   const [activeQuarterData, setActiveQuarterData] = useState(null);
   
+  // 🚨 NEW: States for the new Office Station filter
+  const [officeLocations, setOfficeLocations] = useState([]);
+  const [selectedOffice, setSelectedOffice] = useState('');
+
   const [loading, setLoading] = useState(true);
   const [exportingState, setExportingState] = useState({ key: null, format: null }); 
   const [success, setSuccess] = useState({show: false, icon: '', title: '', detail: ''});
@@ -19,15 +23,29 @@ export default function Reports() {
   useEffect(() => {
     const initData = async () => {
       try {
-        const res = await api.get('/quarters').catch(() => ({ data: { data: [] } }));
+        const [res, configRes, usersRes] = await Promise.all([
+          api.get('/quarters').catch(() => ({ data: { data: [] } })),
+          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
+          api.get('/users').catch(() => ({ data: { data: [] } }))
+        ]);
+        
         const fetchedQuarters = res.data?.data || [];
         setQuarters(fetchedQuarters);
         if (fetchedQuarters.length > 0) {
           setSelectedQuarterId(fetchedQuarters[0]._id);
           setActiveQuarterData(fetchedQuarters[0]);
         }
+
+        // 🚨 UPGRADE: Dynamically fetch all unique office stations from the database
+        let offices = configRes.data?.data?.officeLocations || [];
+        if (!offices || offices.length === 0) {
+          const allUsers = usersRes.data?.data || [];
+          offices = [...new Set(allUsers.map(u => u.employmentDetails?.officeLocation).filter(Boolean))];
+        }
+        setOfficeLocations(offices.sort());
+
       } catch (err) {
-        console.error("Failed to load quarters", err);
+        console.error("Failed to load reporting data", err);
       } finally {
         setLoading(false);
       }
@@ -113,7 +131,7 @@ export default function Reports() {
       }
 
       if (reportType === 'office') {
-        title = `Performance by Office Location - ${activeQuarterData?.name}`;
+        title = `Performance by Company Code - ${activeQuarterData?.name}`;
         columns = ['Company Code', 'Total Headcount', 'Appraisals Submitted', 'Completion Rate', 'Average IPRF Score'];
         const officeStats = {};
         allUsers.forEach(u => {
@@ -158,6 +176,47 @@ export default function Reports() {
            const niConcentration = stat.total > 0 ? ((stat.niCount / stat.total) * 100).toFixed(1) : 0;
            rows.push([stat.company, stat.manager, stat.total.toString(), avgScore, stat.niCount.toString(), `${niConcentration}%`]);
         });
+      }
+
+      // 🚨 NEW: Report by Office Station (Missing Appraisals)
+      if (reportType === 'office_missing') {
+        title = `Unappraised Staff - ${selectedOffice || 'All Offices'} - ${activeQuarterData?.name}`;
+        columns = ['Employee ID', 'Employee Name', 'Job Title', 'Office Station', 'Manager Name'];
+        
+        const missingUsers = allUsers.filter(u => {
+          if (!u.employmentDetails?.isActive || u.security?.role === 'CEO') return false;
+          if (selectedOffice && u.employmentDetails?.officeLocation !== selectedOffice) return false;
+          return !submittedUserIds.includes(u._id);
+        });
+
+        missingUsers.forEach(u => {
+          const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
+          
+          const mgr = u.employmentDetails?.reportingTo;
+          let mgrName = 'Unassigned';
+          if (mgr) {
+            if (mgr.personalDetails) {
+              mgrName = `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim();
+            } else {
+               const foundMgr = allUsers.find(s => s._id === mgr || s._id === mgr._id);
+               if (foundMgr) mgrName = `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim();
+            }
+          } else if (u.employmentDetails?.rawManagerName) {
+             mgrName = u.employmentDetails.rawManagerName;
+          }
+
+          rows.push([
+            u.employeeId || 'N/A', 
+            empName, 
+            u.employmentDetails?.jobTitle || '', 
+            u.employmentDetails?.officeLocation || 'N/A',
+            mgrName
+          ]);
+        });
+
+        if (rows.length === 0) {
+           return setSuccess({ show: true, icon: '🎉', title: 'Complete', detail: `All staff in ${selectedOffice || 'all offices'} have been appraised for this quarter.` });
+        }
       }
 
       if (rows.length === 0) {
@@ -326,12 +385,49 @@ export default function Reports() {
              </button>
           </div>
         </div>
+
+        {/* 🚨 NEW Card 4: Report by Office Station (Missing Staff Filter) */}
+        <div className="bg-white border border-slate-200 rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden">
+          <div className="p-6 flex-grow flex flex-col">
+            <div className="text-4xl mb-4">📍</div>
+            <div className="text-[16px] font-bold text-slate-900 mb-2">Report by Office Station</div>
+            <div className="text-xs text-slate-500 leading-relaxed mb-4">
+              Identify staff missing appraisals, isolated by a specific office location.
+            </div>
+            
+            <div className="mt-auto mb-4">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Filter Station</label>
+              <select 
+                value={selectedOffice} 
+                onChange={e => setSelectedOffice(e.target.value)}
+                className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 focus:border-blue-400 outline-none"
+              >
+                <option value="">-- All Office Stations --</option>
+                {officeLocations.map(loc => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+               <span className="inline-flex items-center px-2.5 py-1 rounded-[6px] text-[10px] font-bold tracking-wide bg-green-50 text-green-700">✓ Available any time</span>
+            </div>
+          </div>
+          <div className="flex bg-slate-50/50 border-t border-slate-100 p-4 gap-3">
+             <button onClick={() => handleDownload('office_missing', 'PDF')} disabled={exportingState.key !== null} className="flex-1 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 transition-colors">
+               {exportingState.key === 'office_missing' && exportingState.format === 'PDF' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'PDF'} Download
+             </button>
+             <button onClick={() => handleDownload('office_missing', 'CSV')} disabled={exportingState.key !== null} className="flex-1 py-2.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-[11px] font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 transition-colors">
+               {exportingState.key === 'office_missing' && exportingState.format === 'CSV' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : 'CSV'} Download
+             </button>
+          </div>
+        </div>
         
-        {/* Card 4: Report by Office */}
+        {/* Card 5: Performance by Company Code */}
         <div className="bg-white border border-slate-200 rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden">
           <div className="p-6 flex-grow">
             <div className="text-4xl mb-4">🏢</div>
-            <div className="text-[16px] font-bold text-slate-900 mb-2">Report by Office</div>
+            <div className="text-[16px] font-bold text-slate-900 mb-2">Report by Company Code</div>
             <div className="text-xs text-slate-500 leading-relaxed mb-6">
               Statistics grouped by FSM, CDU, NAR, GUM — headcount, completion rate, average IPRF.
             </div>
@@ -349,7 +445,7 @@ export default function Reports() {
           </div>
         </div>
         
-        {/* Card 5: Evaluated Criteria */}
+        {/* Card 6: Evaluated Criteria */}
         <div className="bg-white border border-slate-200 rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden">
           <div className="p-6 flex-grow">
             <div className="text-4xl mb-4">⭐</div>

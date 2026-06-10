@@ -13,7 +13,11 @@ export default function HRAllAppraisals() {
   const [managerList, setManagerList] = useState([]);
 
   const [search, setSearch] = useState('');
+  
+  // 🚨 UPGRADED: Added a separate state for the selected Year filter
+  const [filterYear, setFilterYear] = useState(''); 
   const [qtr, setQtr] = useState(''); 
+  
   const [statusFilter, setStatusFilter] = useState('');
   const [co, setCo] = useState('');
   const [mgrFilter, setMgrFilter] = useState('');
@@ -71,7 +75,11 @@ export default function HRAllAppraisals() {
         setDbQuarters(fetchedQuarters);
         
         const activeQ = fetchedQuarters.find(q => new Date(q.endDate) >= new Date() && !q.isLocked);
-        if (activeQ) setQtr(activeQ._id);
+        if (activeQ) {
+          // 🚨 UPGRADED: Auto-select the year of the active quarter
+          setFilterYear(activeQ.year.toString());
+          setQtr(activeQ._id);
+        }
 
         const configData = configRes.data?.data || {};
         setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']); 
@@ -84,6 +92,12 @@ export default function HRAllAppraisals() {
     };
     fetchData();
   }, []);
+
+  // 🚨 UPGRADED: Handle Year Change - reset the quarter when the year changes
+  const handleYearChange = (e) => {
+    setFilterYear(e.target.value);
+    setQtr(''); 
+  };
 
   const StatusTag = ({ st }) => {
     if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#E2DDD4]">UNKNOWN</span>;
@@ -151,6 +165,11 @@ export default function HRAllAppraisals() {
 
     const matchesSearch = search === '' || empName.includes(search.toLowerCase()) || empIdStr.includes(search.toLowerCase());
     const matchesQtr = qtr === '' || appQuarterId === qtr;
+    
+    // 🚨 UPGRADED: Only show appraisals for the selected year if a quarter isn't specifically chosen
+    const appYear = a.reviewYear || a.appraisalQuarter?.year;
+    const matchesYear = filterYear === '' || (appYear && appYear.toString() === filterYear) || matchesQtr;
+
     const matchesCo = co === '' || a.employeeId?.companyCode === co;
     const matchesMgr = mgrFilter === '' || mgrInfo.id === mgrFilter;
     
@@ -163,14 +182,18 @@ export default function HRAllAppraisals() {
       }
     }
     
-    return matchesSearch && matchesQtr && matchesStatus && matchesCo && matchesMgr;
+    return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr;
   });
 
   const getQuarterName = (qId) => {
     if (!qId) return 'N/A';
     const match = dbQuarters.find(q => q._id === qId);
-    return match ? match.name : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
+    return match ? `${match.name} (${match.year})` : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
   };
+
+  // 🚨 UPGRADED: Dynamically extract unique years and currently available quarters for that year
+  const availableYears = [...new Set(dbQuarters.map(q => q.year))].sort((a, b) => b - a);
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
 
   return (
     <div className="max-w-6xl mx-auto pb-[60px] font-sans">
@@ -200,12 +223,27 @@ export default function HRAllAppraisals() {
           ))}
         </select>
         
-        <select value={qtr} onChange={e => setQtr(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[140px]">
-          <option value="">All Quarters</option>
-          {dbQuarters.map(q => (
-             <option key={q._id} value={q._id}>{q.name} ({q.year})</option>
-          ))}
-        </select>
+        {/* 🚨 UPGRADED: Two-step Year & Quarter Filtering */}
+        <div className="flex gap-[6px]">
+          <select value={filterYear} onChange={handleYearChange} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[100px]">
+            <option value="">All Years</option>
+            {availableYears.map(y => (
+               <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            <option value="">All Quarters</option>
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
+        </div>
 
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
           <option value="">Appraisal Status</option>

@@ -23,6 +23,9 @@ export default function HRDashboard() {
 
   // 🚨 UPGRADE: Dynamic Company Codes State
   const [companyCodes, setCompanyCodes] = useState([]);
+  
+  // 🚨 NEW: State for active quarter
+  const [activeQuarter, setActiveQuarter] = useState(null);
 
   // State for the Balanced Scorecard
   const [metrics, setMetrics] = useState({
@@ -34,12 +37,13 @@ export default function HRDashboard() {
     try {
       if (isInitialLoad) setLoading(true);
       
-      const [appraisalsRes, staffRes, metricsRes, configRes] = await Promise.all([
+      // 🚨 UPGRADE: Added fetch for quarters
+      const [appraisalsRes, staffRes, metricsRes, configRes, quartersRes] = await Promise.all([
         api.get('/appraisals').catch(() => ({ data: [] })), 
         api.get('/users').catch(() => ({ data: [] })),
         api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
-        // 🚨 UPGRADE: Fetching the dynamic system configurations
-        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) 
+        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
+        api.get('/quarters').catch(() => ({ data: { data: [] } }))
       ]);
       
       setAppraisals(appraisalsRes.data?.data || appraisalsRes.data || []);
@@ -49,12 +53,28 @@ export default function HRDashboard() {
         setMetrics(metricsRes.data.data);
       }
 
-      // 🚨 UPGRADE: Set the dynamic company codes from the DB
       if (configRes.data?.data?.companyCodes) {
         setCompanyCodes(configRes.data.data.companyCodes);
       } else {
-        // Fallback just in case the DB is empty
         setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
+      }
+
+      // 🚨 NEW: Logic to find the active quarter based on today's date
+      const allQuarters = quartersRes.data?.data || [];
+      const now = new Date();
+      let currentActive = allQuarters.find(q => {
+        const start = new Date(q.startDate); start.setHours(0,0,0,0);
+        const end = new Date(q.endDate); end.setHours(23,59,59,999);
+        return now >= start && now <= end;
+      });
+      
+      // Fallback: If no quarter is currently active, grab the most recently ended one or the next upcoming one
+      if (!currentActive && allQuarters.length > 0) {
+          currentActive = allQuarters[0]; 
+      }
+      
+      if (currentActive) {
+          setActiveQuarter(currentActive);
       }
 
     } catch (error) {
@@ -65,10 +85,8 @@ export default function HRDashboard() {
   };
 
   useEffect(() => {
-    // 1. Initial Load
     fetchDashboardData(true);
 
-    // 2. REAL-TIME ENGINE: Silently poll the database every 30 seconds for updates
     const liveUpdateInterval = setInterval(() => {
       fetchDashboardData(false);
     }, 30000);
@@ -76,7 +94,6 @@ export default function HRDashboard() {
     return () => clearInterval(liveUpdateInterval);
   }, []);
 
-  // Accurate schema mapping for HR counts
   const atHR = appraisals.filter(a => ['SUBMITTED', 'UNDER_HR_REVIEW'].includes(a.workflow?.status)).length;
   const atCEO = appraisals.filter(a => ['WITH_CEO'].includes(a.workflow?.status)).length;
   const approved = appraisals.filter(a => ['APPROVED', 'APPROVED_BY_HR'].includes(a.workflow?.status)).length;
@@ -91,12 +108,10 @@ export default function HRDashboard() {
   const epPct = Math.round(ep / 9 * 100);
   const over = ep >= 9;
 
-  // Sort recent activity dynamically by date
   const recent = [...appraisals]
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
     .slice(0, 5);
 
-  // Destructure metrics for the UI
   const { cpPct, bscRawScore, financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital } = metrics;
 
   if (loading) {
@@ -110,7 +125,7 @@ export default function HRDashboard() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">HR Admin Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">STIP program management — CY2026</p>
+          <p className="text-sm text-slate-500 mt-1">STIP program management — CY{activeQuarter ? activeQuarter.year : '2026'}</p>
         </div>
         <div className="flex gap-3">
           <button onClick={() => router.push('/dashboard/hr/review')} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors flex items-center">
@@ -131,10 +146,8 @@ export default function HRDashboard() {
           <div className="text-3xl font-bold text-amber-200 my-2">{total190}</div>
           <div className="text-xs text-slate-400 mb-3">STIP-eligible employees</div>
           <div className="flex flex-wrap gap-2">
-            {/* 🚨 UPGRADE: Dynamic Map for Company Code Badges */}
             {companyCodes.map((code, index) => {
               const count = staff.filter(s => s.companyCode === code).length || 0;
-              // Cycle through the predefined badge colors so each company gets a distinct look
               const colorClass = BADGE_COLORS[index % BADGE_COLORS.length];
               return (
                 <span key={code} className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${colorClass}`}>
@@ -198,7 +211,10 @@ export default function HRDashboard() {
           <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 bg-slate-50">
             <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-xl">📅</div>
             <div>
-              <h2 className="text-base font-semibold text-slate-900">Q3 2026 — Appraisal Progress</h2>
+              {/* 🚨 UPGRADED: Fully dynamic title based on the active database quarter */}
+              <h2 className="text-base font-semibold text-slate-900">
+                {activeQuarter ? `${activeQuarter.name} ${activeQuarter.year}` : 'Active Quarter'} — Appraisal Progress
+              </h2>
               <p className="text-xs text-slate-500">Completion rate by status</p>
             </div>
           </div>
@@ -372,7 +388,7 @@ export default function HRDashboard() {
                     </div>
                     <div>
                      <div className="text-sm font-semibold text-slate-800">{empName} — {status.replace(/_/g, ' ')}</div>
-                      <div className="text-xs text-slate-500">{qtr} 2026 · {new Date(a.updatedAt || a.createdAt).toLocaleDateString()}</div>
+                      <div className="text-xs text-slate-500">{qtr} {activeQuarter ? activeQuarter.year : '2026'} · {new Date(a.updatedAt || a.createdAt).toLocaleDateString()}</div>
                     </div>
                   </div>
                 );

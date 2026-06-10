@@ -13,6 +13,9 @@ export default function EmployeeDashboard() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false); // Local state for acknowledgement demo
+  
+  // 🚨 NEW: State for active quarter
+  const [activeQuarter, setActiveQuarter] = useState(null);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -28,10 +31,11 @@ export default function EmployeeDashboard() {
         const sessionUser = JSON.parse(userCookie);
 
         // 2. Fetch Live Data
-        const [usersRes, metricsRes, appraisalsRes] = await Promise.all([
+        const [usersRes, metricsRes, appraisalsRes, quartersRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
           api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
-          api.get('/appraisals').catch(() => ({ data: { data: [] } }))
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
         // Find my specific user details for accurate Pro-Rata
@@ -46,6 +50,23 @@ export default function EmployeeDashboard() {
         // The backend might already filter this to just ours based on the EMPLOYEE role, but we check to be safe
         const myApp = allApps.find(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
         setAppraisal(myApp || null);
+
+        // 🚨 NEW: Find active quarter
+        const allQuarters = quartersRes.data?.data || [];
+        const now = new Date();
+        let currentActive = allQuarters.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return now >= start && now <= end;
+        });
+        
+        if (!currentActive && allQuarters.length > 0) {
+            currentActive = allQuarters[0]; 
+        }
+        
+        if (currentActive) {
+            setActiveQuarter(currentActive);
+        }
 
       } catch (error) {
         console.error('Failed to load employee dashboard data:', error);
@@ -116,6 +137,25 @@ export default function EmployeeDashboard() {
   const step3Done = status === 'APPROVED';
   const step4Done = acknowledged;
 
+  // 🚨 NEW: Dynamic countdown logic
+  let daysRemaining = null;
+  if (activeQuarter) {
+    const now = new Date();
+    const end = new Date(activeQuarter.endDate); end.setHours(23,59,59,999);
+    if (end > now) {
+        const diffTime = Math.abs(end - now);
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    }
+  }
+
+  const formatDeadlineDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-GB', { month: 'short' });
+    return `${day} ${month}`;
+  };
+
   if (loading) {
     return <div className="p-10 text-center text-slate-500 font-[600] animate-pulse">Loading Your STIP Dashboard...</div>;
   }
@@ -127,7 +167,8 @@ export default function EmployeeDashboard() {
       <div className="mb-[20px] flex justify-between items-start">
         <div>
           <h1 className="text-[24px] font-[800] text-[#0D2B55] mb-[4px]">My STIP Dashboard</h1>
-          <p className="text-[13px] text-[#6b7280]">CY2026 &mdash; Short-Term Incentive Program overview</p>
+          {/* 🚨 UPGRADED: Dynamic Year */}
+          <p className="text-[13px] text-[#6b7280]">CY{activeQuarter ? activeQuarter.year : '2026'} &mdash; Short-Term Incentive Program overview</p>
         </div>
         {status === 'APPROVED' && !acknowledged && (
           <button 
@@ -143,7 +184,8 @@ export default function EmployeeDashboard() {
       {!step1Done && (
         <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] text-[#92400E] rounded-[10px] p-[12px_16px] text-[13px] mb-[20px] shadow-sm flex items-center gap-[8px]">
           <span className="text-[16px] leading-none">&#9200;</span> 
-          <span>Your Q3 appraisal has not been submitted yet by your Line Manager. Deadline: <strong className="font-[800]">30 September 2026</strong>.</span>
+          {/* 🚨 UPGRADED: Dynamic text and date */}
+          <span>Your {activeQuarter?.name || 'appraisal'} has not been submitted yet by your Line Manager. Deadline: <strong className="font-[800]">{activeQuarter ? new Date(activeQuarter.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Pending'}</strong>.</span>
         </div>
       )}
 
@@ -209,7 +251,8 @@ export default function EmployeeDashboard() {
             <div className="flex items-center gap-[12px]">
               <div className="w-[36px] h-[36px] rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[16px]">&#128203;</div>
               <div>
-                <div className="text-[15px] font-[800] text-[#0D2B55]">Q3 2026 Appraisal Status</div>
+                {/* 🚨 UPGRADED: Dynamic Quarter Name */}
+                <div className="text-[15px] font-[800] text-[#0D2B55]">{activeQuarter?.name || 'Appraisal'} Status</div>
                 <div className="text-[12px] font-[500] text-[#6b7280]">Real-time status of your appraisal journey</div>
               </div>
             </div>
@@ -231,7 +274,7 @@ export default function EmployeeDashboard() {
                 <div className="pt-[6px]">
                   <div className={`text-[14px] font-[800] mb-[2px] ${step1Done ? 'text-[#0f1923]' : 'text-[#6b7280]'}`}>Line Manager submits appraisal</div>
                   <div className="text-[13px] text-[#6b7280]">
-                    {step1Done ? `Submitted Q3 2026 appraisal. IPRF: ${iprf.toFixed(1)} — ${iprfLabel(iprf)}` : 'Your manager has not submitted your appraisal yet.'}
+                    {step1Done ? `Submitted ${activeQuarter?.name || ''} appraisal. IPRF: ${iprf.toFixed(1)} — ${iprfLabel(iprf)}` : 'Your manager has not submitted your appraisal yet.'}
                   </div>
                 </div>
               </div>
@@ -321,13 +364,27 @@ export default function EmployeeDashboard() {
               <div className="text-[14px] font-[800] text-[#0D2B55]">Next Deadline</div>
             </div>
             <div className="p-[24px] text-center flex-1 flex flex-col justify-center">
-              <div className="text-[36px] font-[800] text-[#92400E] leading-none mb-[6px]">30 Sep</div>
-              <div className="text-[12px] font-[600] text-[#6b7280] mb-[12px]">Q3 2026 submission deadline</div>
-              <div className="inline-block">
-                <span className="px-[12px] py-[4px] rounded-[6px] text-[11px] font-[700] bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
-                  136 days remaining
-                </span>
+              {/* 🚨 UPGRADED: Fully dynamic next deadline data */}
+              <div className="text-[36px] font-[800] text-[#92400E] leading-none mb-[6px]">
+                {activeQuarter ? formatDeadlineDate(activeQuarter.endDate) : '—'}
               </div>
+              <div className="text-[12px] font-[600] text-[#6b7280] mb-[12px]">
+                {activeQuarter ? `${activeQuarter.name} submission deadline` : 'No active quarter'}
+              </div>
+              
+              {daysRemaining !== null ? (
+                <div className="inline-block">
+                  <span className="px-[12px] py-[4px] rounded-[6px] text-[11px] font-[700] bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
+                    {daysRemaining} days remaining
+                  </span>
+                </div>
+              ) : (
+                <div className="inline-block">
+                  <span className="px-[12px] py-[4px] rounded-[6px] text-[11px] font-[700] bg-[#FAF8F4] text-[#6b7280] border border-[#E2DDD4]">
+                    Deadline passed
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
