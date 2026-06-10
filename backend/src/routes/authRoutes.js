@@ -1,3 +1,4 @@
+// backend/src/routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
@@ -5,14 +6,44 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 
-const { authGuard } = require('../middleware/auth');
+const { authGuard, roleGuard } = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
-const { updatePassword } = require('../controllers/authController');
+
+// 🚨 FIX: Ensure all controller functions are imported correctly
+const { 
+  updatePassword, 
+  adminResetPassword, 
+  requestPasswordReset, 
+  getPendingResetRequests, 
+  dismissResetRequest 
+} = require('../controllers/authController');
 
 // 🚀 IMPORT THE AUDIT LOGGER
 const { logAudit } = require('../utils/logger');
 
+// Public Forgot Password Route (No authGuard!)
+router.post('/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), requestPasswordReset);
+
+// 🚨 FIX: Registered queue tracking routes under /api/v1/auth
+router.get('/password-requests', authGuard, roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), getPendingResetRequests);
+router.patch('/password-requests/:id/dismiss', authGuard, roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), dismissResetRequest);
+
 router.patch('/update-password', authGuard, updatePassword);
+
+// ICT Admin Password Reset Route
+router.patch(
+  '/admin-reset-password', 
+  authGuard, 
+  roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), 
+  async (req, res, next) => {
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'ADMIN_PASSWORD_RESET_ATTEMPT', category: 'SECURITY', severity: 'HIGH',
+      details: `ICT Admin initiated a password reset override for Employee ID: ${req.body.employeeId}`, req
+    });
+    next();
+  },
+  adminResetPassword
+);
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
@@ -48,21 +79,15 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
-    // ⚡ DYNAMIC PORTAL CLEARANCE CHECK (UPGRADED FOR MULTI-ROLE) ⚡
     const actualRole = user.security.role;
-    // Safely extract the secondary roles array (default to empty array if missing)
     const secondaryRoles = user.security.secondaryRoles || [];
-    
-    // Combine the primary role and secondary roles into one master list of all allowed roles for this user
     const allUserRoles = [actualRole, ...secondaryRoles];
     
     let authorized = false;
 
-    // Check if the requested portal exactly matches ANY of the user's assigned roles
     if (requestedPortal && allUserRoles.includes(requestedPortal)) {
         authorized = true; 
     } 
-    // Special exception: CEOs, HR Admins, and ICT Admins automatically have Manager clearance
     else if (requestedPortal === 'MANAGER' && allUserRoles.some(role => ['CEO', 'HR_ADMIN', 'ICT_ADMIN'].includes(role))) {
         authorized = true; 
     }
@@ -82,7 +107,6 @@ router.post('/login', loginLimiter, async (req, res) => {
       { $set: { 'security.currentSessionId': sessionId } }
     );
 
-    // The token assumes the identity of the specific portal they requested to enter
     const tokenRole = requestedPortal || actualRole;
 
     const token = jwt.sign(
@@ -231,16 +255,10 @@ router.patch('/change-password', authGuard, async (req, res) => {
 });
 
 // GET /api/v1/auth/me
-// Returns the currently authenticated user's profile based on their JWT
 router.get('/me', authGuard, async (req, res) => {
   try {
-    // req.user.id is populated by your authGuard middleware
     const user = await User.findById(req.user.id).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User profile not found.' });
-    }
-
+    if (!user) return res.status(404).json({ message: 'User profile not found.' });
     res.json({ data: user });
   } catch (error) {
     console.error("Error fetching current user:", error);

@@ -184,6 +184,17 @@ export default function UnifiedLogin() {
               <button type="submit" disabled={loading} className="w-full bg-[#0D2B55] hover:bg-[#153b75] text-white font-bold py-3.5 rounded-xl transition-colors mt-2 shadow-md">
                 {loading ? 'Authenticating...' : 'Secure Login'}
               </button>
+              
+              {/* 🚨 UPGRADED: Added Recovery Gateway Shortcut Link */}
+              <div className="mt-4 text-center">
+                <button 
+                  type="button" 
+                  onClick={() => router.push('/forgot-password')} 
+                  className="text-xs font-semibold text-[#0D2B55] hover:underline"
+                >
+                  Forgot Password?
+                </button>
+              </div>
             </form>
           </div>
         )}
@@ -218,6 +229,17 @@ export default function UnifiedLogin() {
               <button type="submit" disabled={loading} className="w-full bg-[#C9A84C] hover:bg-[#b59540] text-[#0D2B55] font-bold py-3.5 rounded-xl transition-colors mt-2 shadow-md">
                 {loading ? 'Verifying...' : 'Access My Record'}
               </button>
+
+              {/* 🚨 UPGRADED: Added Recovery Gateway Shortcut Link */}
+              <div className="mt-4 text-center">
+                <button 
+                  type="button" 
+                  onClick={() => router.push('/forgot-password')} 
+                  className="text-xs font-semibold text-slate-500 hover:text-[#0D2B55] hover:underline"
+                >
+                  Forgot Password?
+                </button>
+              </div>
             </form>
           </div>
         )}

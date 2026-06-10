@@ -165,6 +165,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'Scorecard Lock', href: '/dashboard/ict/scorecard', icon: Lock },
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
           { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
+          { name: 'Update Password', href: '/dashboard/ict/reset-password', icon: Lock },
           //  { name: 'Panel Permissions', href: '/dashboard/ict/users/roles', icon: Lock },
           { name: 'System Status', href: '/dashboard/ict/system', icon: Database },
           // 🚨 UPGRADED: Added Quarter Cycles to ICT Menu for override control

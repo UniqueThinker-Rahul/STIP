@@ -24,10 +24,24 @@ export default function ProfilePage() {
         const userCookie = Cookies.get('stip_user');
         if (userCookie) {
           const parsedUser = JSON.parse(userCookie);
-          // Fetch fresh data from backend
+          
+          // 🚨 FIX: Prefer fetching specific user data directly if possible, or fall back to finding in the users array
+          try {
+            // First try to hit the specific auth/me or users/me endpoint if it exists
+            const meRes = await api.get('/auth/me');
+            if (meRes.data?.data) {
+                setUser(meRes.data.data);
+                return; // Exit early if successful
+            }
+          } catch (e) {
+            // Ignore failure here and fallback to scanning the /users array
+          }
+
+          // Fallback: Fetch fresh data from backend users list
           const res = await api.get('/users').catch(() => ({ data: { data: [] } }));
           const allUsers = res.data?.data || [];
           const currentUser = allUsers.find(u => u._id === parsedUser.id || u.employeeId === parsedUser.employeeId) || parsedUser;
+          
           setUser(currentUser);
         }
       } catch (error) {
@@ -83,6 +97,10 @@ export default function ProfilePage() {
   const fullName = `${fName} ${lName}`.trim() || user.email?.split('@')[0] || 'Unknown User';
   const init = fName ? fName[0] : (fullName[0] || 'U');
 
+  // 🚨 FIX: Safely extract job title and company code checking both flat and nested structures
+  const displayJobTitle = user.employmentDetails?.jobTitle || user.jobTitle || 'Not Assigned';
+  const displayCompanyCode = user.companyCode || user.employmentDetails?.companyCode || 'FSM';
+
   return (
     <div className="max-w-[1000px] mx-auto pb-[60px] font-sans">
       <div className="mb-[20px]">
@@ -108,14 +126,14 @@ export default function ProfilePage() {
               <Briefcase className="text-[#6b7280] w-[18px] h-[18px]" />
               <div>
                 <div className="text-[10px] font-[700] text-[#6b7280] uppercase tracking-widest">Job Title</div>
-                <div className="text-[13px] font-[700] text-[#0f1923]">{user.employmentDetails?.jobTitle || 'Not Assigned'}</div>
+                <div className="text-[13px] font-[700] text-[#0f1923]">{displayJobTitle}</div>
               </div>
             </div>
             <div className="flex items-center gap-[12px] p-[12px] bg-[#FAF8F4] rounded-[8px] border border-[#E2DDD4]">
               <Building className="text-[#6b7280] w-[18px] h-[18px]" />
               <div>
                 <div className="text-[10px] font-[700] text-[#6b7280] uppercase tracking-widest">Company Code</div>
-                <div className="text-[13px] font-[700] text-[#0f1923]">{user.companyCode || 'FSM'}</div>
+                <div className="text-[13px] font-[700] text-[#0f1923]">{displayCompanyCode}</div>
               </div>
             </div>
             <div className="flex items-center gap-[12px] p-[12px] bg-[#FAF8F4] rounded-[8px] border border-[#E2DDD4]">
@@ -129,7 +147,7 @@ export default function ProfilePage() {
               <Mail className="text-[#6b7280] w-[18px] h-[18px]" />
               <div>
                 <div className="text-[10px] font-[700] text-[#6b7280] uppercase tracking-widest">Username / Email</div>
-                <div className="text-[13px] font-[700] text-[#0f1923]">{user.username}</div>
+                <div className="text-[13px] font-[700] text-[#0f1923]">{user.username || user.email}</div>
               </div>
             </div>
           </div>

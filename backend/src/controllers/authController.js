@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 
 exports.updatePassword = async (req, res) => {
@@ -15,14 +15,127 @@ exports.updatePassword = async (req, res) => {
       return res.status(400).json({ message: 'Current password is incorrect' });
     }
 
-    // Update to new password
-    user.password = newPassword; 
-    // Important: Mongoose pre-save hook will automatically hash the new password
+    // Hash the new password before saving
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt); 
+    
     await user.save();
 
     res.status(200).json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error updating password' });
+  }
+};
+
+// 🚨 NEW: Public route to request a password reset ticket
+exports.requestPasswordReset = async (req, res) => {
+  try {
+    const { employeeId, contactData } = req.body;
+    
+    // Find user by Employee ID and either username or email (if email exists in future)
+    const user = await User.findOne({ 
+      employeeId: employeeId.trim(),
+      $or: [{ username: contactData.trim() }] // Expand this if you add email support later
+    });
+
+    if (!user) {
+      // Return generic success to prevent hackers from guessing active employee IDs
+      return res.status(200).json({ message: 'If those details match our records, a secure reset request has been forwarded to the ICT Administrator.' });
+    }
+
+    // Tag the user's security profile with a pending request
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'security.resetRequested': true, 'security.resetRequestDate': new Date() } }
+    );
+
+    res.status(200).json({ message: 'If those details match our records, a secure reset request has been forwarded to the ICT Administrator.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error processing request.' });
+  }
+};
+
+// 🚨 NEW: ICT Admin route to fetch all pending requests
+exports.getPendingResetRequests = async (req, res) => {
+  try {
+    const pendingUsers = await User.find({ 'security.resetRequested': true })
+      .select('employeeId personalDetails username employmentDetails security.resetRequestDate')
+      .sort({ 'security.resetRequestDate': 1 }); // Oldest first
+    res.status(200).json({ data: pendingUsers });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error fetching requests.' });
+  }
+};
+
+// 🚨 NEW: ICT Admin route to dismiss an invalid request
+exports.dismissResetRequest = async (req, res) => {
+  try {
+    await User.updateOne(
+      { _id: req.params.id },
+      { $unset: { 'security.resetRequested': 1, 'security.resetRequestDate': 1 } }
+    );
+    res.status(200).json({ message: 'Request successfully dismissed.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error dismissing request.' });
+  }
+};
+
+// 🚨 UPGRADED: Administrative Force-Reset Password (clears the request queue)
+exports.adminResetPassword = async (req, res) => {
+  try {
+    const { employeeId, username, newPassword } = req.body;
+
+    if (!employeeId || !username || !newPassword) {
+      return res.status(400).json({ message: 'Employee ID, Username, and New Password are required.' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters long.' });
+    }
+
+    // Find the user verifying BOTH the employeeId and username match for safety
+    const user = await User.findOne({ 
+      employeeId: employeeId.trim(), 
+      username: username.trim() 
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'No matching user found with that Employee ID and Username combination.' });
+    }
+
+    // Ensure ICT Admin cannot change CEO passwords (optional safety guard)
+    if (user.security?.role === 'CEO' && req.user.role !== 'CEO') {
+        return res.status(403).json({ message: 'Permission Denied: Cannot administratively reset a CEO password.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // 🚨 Update password, force change on next login, AND clear the request flag from the queue
+    await User.updateOne(
+      { _id: user._id },
+      { 
+        $set: { 
+          password: hashedPassword, 
+          'security.isFirstLogin': true, 
+          'security.currentSessionId': null 
+        },
+        $unset: {
+          'security.resetRequested': 1,
+          'security.resetRequestDate': 1
+        }
+      }
+    );
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Password successfully reset for ${user.personalDetails.firstName} ${user.personalDetails.lastName}. They will be prompted to change it upon their next login.` 
+    });
+
+  } catch (error) {
+    console.error('Admin Reset Password Error:', error);
+    res.status(500).json({ message: 'Server error during administrative password reset.' });
   }
 };

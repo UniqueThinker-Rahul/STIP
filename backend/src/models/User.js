@@ -10,7 +10,6 @@ const userSchema = new mongoose.Schema({
   personalDetails: {
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
-    // 🚨 REPLACE the old notificationEmail string with this MAP:
     notificationEmails: { 
       type: Map, 
       of: String, 
@@ -21,13 +20,13 @@ const userSchema = new mongoose.Schema({
   employmentDetails: {
     jobTitle: { type: String, required: true },
     officeLocation: { type: String, default: 'Unassigned' },
-    salary: { type: Number, default: 0 }, // 🚨 ADDED: Salary Field
+    salary: { type: Number, default: 0 }, 
     dateOfHire: { type: Date, required: true },
     prorateValue: { type: Number, default: 12 },
-    rawManagerName: { type: String }, // Temporary field for importing
+    rawManagerName: { type: String }, 
     reportingTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     isActive: { type: Boolean, default: true },
-    isDeleted: { type: Boolean, default: false } // 🚨 Account Status Field
+    isDeleted: { type: Boolean, default: false } 
   },
 
   security: {
@@ -36,7 +35,6 @@ const userSchema = new mongoose.Schema({
       enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'],
       default: 'EMPLOYEE'
     },
-    // 🚨 ADD THIS EXACT BLOCK SO MONGODB STOPS DELETING YOUR MULTI-ROLES
     secondaryRoles: [{
       type: String,
       enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN']
@@ -48,6 +46,14 @@ const userSchema = new mongoose.Schema({
     currentSessionId: {
       type: String,
       default: null
+    },
+    // 🚨 NEW: Added fields to track password reset requests
+    resetRequested: { 
+      type: Boolean, 
+      default: false 
+    },
+    resetRequestDate: { 
+      type: Date 
     }
   }
   
