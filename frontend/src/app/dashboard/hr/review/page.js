@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import api from '../../../../lib/api';
 import { useRouter } from 'next/navigation';
-import { Check, AlertTriangle, Calculator, ChevronDown, Info, Clock } from 'lucide-react';
+import { Check, AlertTriangle, Calculator, ChevronDown, Info, Clock, ChevronUp } from 'lucide-react';
+import React from 'react';
 
 const CRITERIA = [
   { id: 'deliveredResults', short: 'Results', name: "Delivered Expected Results", wt: 0.30, pct: "30%", desc: "Did the employee deliver the expected results of their position in 2025/2026?" },
@@ -24,6 +25,9 @@ export default function ReviewAppraisals() {
   const [hrComment, setHrComment] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  
+  // 🚨 UPGRADED: State to manage the visibility of long comments
+  const [showAllComments, setShowAllComments] = useState(false);
   
   const [notification, setNotification] = useState({ show: false, message: '', type: '' });
 
@@ -59,6 +63,7 @@ export default function ReviewAppraisals() {
     setShowReject(false);
     setHrComment('');
     setBreakdownOpen(false);
+    setShowAllComments(false); // Reset visibility when selecting a new user
     
     if (a.workflow?.status === 'SUBMITTED') {
       try {
@@ -94,6 +99,33 @@ export default function ReviewAppraisals() {
     } catch (error) {
       showNotification('Error rejecting appraisal.', 'error');
     }
+  };
+
+  // 🚨 UPGRADED: Parses the comment block into an array of { header, content } objects
+  const parseNarrativeBlocks = (text) => {
+    if (!text) return [];
+    
+    const blocks = [];
+    const lines = text.split('\n');
+    let currentBlock = null;
+
+    lines.forEach(line => {
+      if (/^(1\.|2\.|3\.|4\.|5\.|6\.)/.test(line.trim())) {
+        if (currentBlock) blocks.push(currentBlock);
+        currentBlock = { header: line.trim(), content: [] };
+      } else if (currentBlock && line.trim() !== '') {
+        currentBlock.content.push(line.trim());
+      }
+    });
+
+    if (currentBlock) blocks.push(currentBlock);
+    
+    // Fallback for older drafts that don't have the numbered lists
+    if (blocks.length === 0 && text.trim().length > 0) {
+      return [{ header: 'General Feedback', content: [text.trim()] }];
+    }
+    
+    return blocks;
   };
 
   const isEpCapReached = totalEPCount >= 9 && (selectedReview?.calculatedResults?.finalIprfScore >= 1.3);
@@ -214,7 +246,7 @@ export default function ReviewAppraisals() {
               {/* Inspector Body */}
               <div className="p-[24px] flex-1 overflow-y-auto bg-[#FAF8F4]">
                 
-                {/* 🚨 UPGRADED: Timestamp Tracking Box */}
+                {/* Timestamp Tracking Box */}
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-[16px] mb-[20px] shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Clock className="w-8 h-8 text-blue-400 shrink-0" />
@@ -337,13 +369,48 @@ export default function ReviewAppraisals() {
                     </div>
                   )}
                   
+                  {/* 🚨 UPGRADED: Structured Comments Box with View More Logic */}
                   {selectedReview.narrative?.generalComments && (
-                    <div className="bg-white border border-[#E2DDD4] rounded-xl p-[16px] shadow-sm">
-                      <div className="text-[11px] font-[800] text-[#0D2B55] uppercase tracking-widest mb-[8px] flex items-center gap-[6px]">
-                        <Info className="w-[14px] h-[14px]" /> General Comments
+                    <div className="bg-white border border-[#E2DDD4] rounded-xl shadow-sm overflow-hidden flex flex-col">
+                      <div className="p-[16px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
+                        <div className="text-[11px] font-[800] text-[#0D2B55] uppercase tracking-widest flex items-center gap-[6px]">
+                          <Info className="w-[14px] h-[14px]" /> Rating Justifications
+                        </div>
                       </div>
-                      <div className="text-[13px] text-[#0f1923] leading-relaxed italic border-l-[3px] border-[#0D2B55]/20 pl-[12px]">
-                        "{selectedReview.narrative.generalComments}"
+                      
+                      <div className="p-[16px] text-[13px] leading-relaxed custom-scrollbar max-h-[350px] overflow-y-auto">
+                        <div className="border-l-[3px] border-[#0D2B55]/20 pl-[16px] space-y-[16px]">
+                          {(() => {
+                            const blocks = parseNarrativeBlocks(selectedReview.narrative.generalComments);
+                            const displayBlocks = showAllComments ? blocks : blocks.slice(0, 3);
+                            
+                            return (
+                              <>
+                                {displayBlocks.map((block, i) => (
+                                  <div key={i} className="animate-in fade-in">
+                                    <h4 className="font-[800] text-[#0D2B55] mb-[4px]">{block.header}</h4>
+                                    {block.content.map((text, j) => (
+                                      <p key={j} className="text-[#475569]">{text}</p>
+                                    ))}
+                                  </div>
+                                ))}
+                                
+                                {blocks.length > 3 && (
+                                  <button 
+                                    onClick={() => setShowAllComments(!showAllComments)}
+                                    className="mt-[12px] flex items-center gap-[6px] text-[11px] font-[800] text-[#0D2B55] bg-blue-50 hover:bg-blue-100 border border-blue-200 px-[12px] py-[6px] rounded-full transition-colors"
+                                  >
+                                    {showAllComments ? (
+                                      <><ChevronUp className="w-[14px] h-[14px]" /> Collapse View</>
+                                    ) : (
+                                      <><ChevronDown className="w-[14px] h-[14px]" /> Show {blocks.length - 3} More Justifications</>
+                                    )}
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
                       </div>
                     </div>
                   )}

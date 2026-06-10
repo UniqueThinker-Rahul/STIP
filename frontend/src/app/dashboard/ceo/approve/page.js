@@ -2,7 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Calculator, ChevronDown, ChevronUp, Info, AlertTriangle, Clock, Check, Eye } from 'lucide-react';
+import React from 'react';
 import api from '../../../../lib/api';
+
+// 🚨 BUG FIX: Mapped IDs perfectly to match the backend DB schema ('deliveredResults' and 'behaviors')
+const CRITERIA = [
+  { id: 'deliveredResults', short: 'Results', name: "Delivered Expected Results", wt: 0.30, pct: "30%" },
+  { id: 'behaviors', short: 'Initiative', name: "Behaviors & Initiative", wt: 0.20, pct: "20%" },
+  { id: 'safeWorking', short: 'Safety', name: "Safe Working", wt: 0.20, pct: "20%" },
+  { id: 'jobCompetence', short: 'Competence', name: "Job Competence", wt: 0.10, pct: "10%" },
+  { id: 'dependability', short: 'Dependability', name: "Dependability", wt: 0.10, pct: "10%" },
+  { id: 'adaptability', short: 'Adaptability', name: "Adaptability", wt: 0.10, pct: "10%" }
+];
 
 export default function CEOApproveAppraisals() {
   const router = useRouter();
@@ -15,6 +27,10 @@ export default function CEOApproveAppraisals() {
   const [ceoComment, setCeoComment] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  
+  // 🚨 NEW: Dedicated State for the Appraisal Details Popup Modal
+  const [detailsModal, setDetailsModal] = useState({ show: false, data: null });
+  const [showAllComments, setShowAllComments] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -44,10 +60,22 @@ export default function CEOApproveAppraisals() {
     fetchData();
   }, []);
 
-  const openModal = (type, id, name) => {
+  const openActionModal = (e, type, id, name) => {
+    e.stopPropagation(); 
     setActionModal({ show: true, type, id, name });
     setCeoComment('');
     setSuccessMsg('');
+  };
+
+  // 🚨 NEW: Trigger the details popup modal
+  const openDetailsModal = (e, appraisal) => {
+    e.stopPropagation();
+    setDetailsModal({ show: true, data: appraisal });
+    setShowAllComments(false); // Reset comments view
+  };
+
+  const closeDetailsModal = () => {
+    setDetailsModal({ show: false, data: null });
   };
 
   const handleApprove = async () => {
@@ -107,6 +135,31 @@ export default function CEOApproveAppraisals() {
     return 'L'; 
   };
 
+  const parseNarrativeBlocks = (text) => {
+    if (!text) return [];
+    
+    const blocks = [];
+    const lines = text.split('\n');
+    let currentBlock = null;
+
+    lines.forEach(line => {
+      if (/^(1\.|2\.|3\.|4\.|5\.|6\.)/.test(line.trim())) {
+        if (currentBlock) blocks.push(currentBlock);
+        currentBlock = { header: line.trim(), content: [] };
+      } else if (currentBlock && line.trim() !== '') {
+        currentBlock.content.push(line.trim());
+      }
+    });
+
+    if (currentBlock) blocks.push(currentBlock);
+    
+    if (blocks.length === 0 && text.trim().length > 0) {
+      return [{ header: 'General Feedback', content: [text.trim()] }];
+    }
+    
+    return blocks;
+  };
+
   return (
     <div className="w-full max-w-full pb-[60px] font-sans">
       
@@ -115,7 +168,7 @@ export default function CEOApproveAppraisals() {
           &#10003; Approve Appraisals
         </div>
         <div className="text-[13px] text-[#6b7280]">
-          Appraisals submitted by HR Manager &mdash; awaiting CEO decision
+          Appraisals submitted by HR Manager &mdash; awaiting CEO decision. Click the eye icon or profile to view full details.
         </div>
       </div>
 
@@ -126,7 +179,7 @@ export default function CEOApproveAppraisals() {
               <tr>
                 <th className="p-[12px_16px]">Employee</th>
                 <th className="p-[12px_16px] text-[#C9A84C]">Job Title</th>
-                <th className="p-[12px_16px]">Quarter</th>
+                <th className="p-[12px_16px] text-center">View</th>
                 <th className="p-[12px_16px] text-center">IPRF</th>
                 <th className="p-[12px_16px] text-center">Award %</th>
                 <th className="p-[12px_16px] text-center">Pro-Rata</th>
@@ -170,14 +223,18 @@ export default function CEOApproveAppraisals() {
                   }
 
                   return (
-                    <tr key={a._id} className={`hover:bg-[#FAF8F4] transition-colors ${i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'}`}>
-                      <td className="p-[12px_16px] whitespace-nowrap">
+                    <tr key={a._id} className={`transition-colors ${i % 2 === 1 ? 'bg-[#FAF8F4]/40 hover:bg-[#FAF8F4]' : 'bg-white hover:bg-[#FAF8F4]'}`}>
+                      {/* Clicking the profile area triggers the popup */}
+                      <td 
+                        className="p-[12px_16px] whitespace-nowrap cursor-pointer group" 
+                        onClick={(e) => openDetailsModal(e, a)}
+                      >
                         <div className="flex items-center gap-[9px]">
-                          <div className="w-[30px] h-[30px] rounded-[6px] bg-[#E2DDD4] text-[#0f1923] font-[800] flex items-center justify-center text-[11px]">
+                          <div className="w-[30px] h-[30px] rounded-[6px] bg-[#E2DDD4] text-[#0f1923] font-[800] flex items-center justify-center text-[11px] group-hover:bg-[#0D2B55] group-hover:text-white transition-colors">
                             {init1}{init2}
                           </div>
                           <div>
-                            <div className="font-[600] text-[#0D2B55]">{empName}</div>
+                            <div className="font-[600] text-[#0D2B55] group-hover:underline">{empName}</div>
                             <div className="text-[10px] text-[#6b7280]">
                               {coCode} &middot; {a.period?.quarter || 'Q3'} &middot; {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB')}
                             </div>
@@ -187,11 +244,17 @@ export default function CEOApproveAppraisals() {
                       <td className="p-[12px_16px] whitespace-nowrap text-[12px] text-[#0f1923]">
                         {jobTitle}
                       </td>
-                      <td className="p-[12px_16px] whitespace-nowrap">
-                        <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#FDE68A]">
-                          {a.period?.quarter || 'Q3'}
-                        </span>
+                      
+                      <td className="p-[12px_16px] whitespace-nowrap text-center">
+                        <button 
+                          onClick={(e) => openDetailsModal(e, a)}
+                          className="p-[6px] rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-800 transition-colors inline-flex items-center justify-center"
+                          title="View Details"
+                        >
+                          <Eye className="w-[16px] h-[16px]" />
+                        </button>
                       </td>
+
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
                         <span className={`px-[8px] py-[4px] rounded-[6px] text-[11px] font-[800] ${iprfStyle(iprf)}`}>
                           {iprf.toFixed(1)} — {iprfLabel(iprf)}
@@ -211,13 +274,13 @@ export default function CEOApproveAppraisals() {
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
                         <div className="flex gap-[6px] justify-center items-center">
                           <button 
-                            onClick={() => openModal('approve', a._id, empName)}
+                            onClick={(e) => openActionModal(e, 'approve', a._id, empName)}
                             className="bg-[#059669] hover:bg-[#047857] text-white px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
                           >
                             &#10003; Approve
                           </button>
                           <button 
-                            onClick={() => openModal('reject', a._id, empName)}
+                            onClick={(e) => openActionModal(e, 'reject', a._id, empName)}
                             className="bg-[#DC2626] hover:bg-[#B91C1C] text-white px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
                           >
                             &#10007; Not Approve
@@ -237,8 +300,204 @@ export default function CEOApproveAppraisals() {
         &#8505; <strong>How it works:</strong> HR Manager submits appraisals to CEO &rarr; They appear here &rarr; CEO clicks Approve or Not Approve &rarr; If Not Approved, mandatory comment required &rarr; HR notified by email with CEO comments
       </div>
 
-      {actionModal.show && (
+      {/* 🚨 NEW: Dedicated Appraisal Details Popup Modal */}
+      {detailsModal.show && detailsModal.data && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[900px] max-h-[90vh] shadow-2xl flex flex-col slide-in-from-bottom-4">
+            
+            {/* Modal Header */}
+            <div className="p-[16px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] rounded-t-[16px]">
+              <div>
+                <h3 className="text-[18px] font-[800] text-[#0D2B55]">
+                  {detailsModal.data.employeeId?.personalDetails?.firstName} {detailsModal.data.employeeId?.personalDetails?.lastName}
+                </h3>
+                <div className="text-[12px] text-[#6b7280] font-[500]">
+                  {detailsModal.data.employeeId?.employmentDetails?.jobTitle} &middot; {detailsModal.data.employeeId?.companyCode || 'FSM'}
+                </div>
+              </div>
+              <button 
+                onClick={closeDetailsModal}
+                className="w-[32px] h-[32px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:bg-slate-100 hover:text-[#0D2B55] transition-colors"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-[24px] overflow-y-auto custom-scrollbar flex-1 bg-white">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-[24px]">
+                
+                {/* Left Column */}
+                <div>
+                  {/* Timestamps */}
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-[16px] mb-[16px] shadow-sm flex flex-col sm:flex-row gap-4 items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Clock className="w-6 h-6 text-blue-400 shrink-0" />
+                      <div>
+                        <div className="text-[9px] font-[800] text-blue-600 uppercase tracking-widest mb-[2px]">Manager Submitted</div>
+                        <div className="text-[11px] font-[700] text-[#0D2B55]">
+                          {new Date(detailsModal.data.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(detailsModal.data.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="w-px h-6 bg-blue-200 hidden sm:block"></div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-500 font-bold shrink-0 text-[9px]">HR</div>
+                      <div>
+                        <div className="text-[9px] font-[800] text-blue-600 uppercase tracking-widest mb-[2px]">HR Approved</div>
+                        <div className="text-[11px] font-[700] text-[#0D2B55]">
+                          {new Date(detailsModal.data.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(detailsModal.data.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 🚨 BUG FIXED: Correctly Maps Score Data Using Matched Criteria IDs */}
+                  <div className="bg-white border border-[#E2DDD4] rounded-xl shadow-sm p-[16px] mb-[16px]">
+                    <div className="flex items-center gap-[12px] mb-[12px] border-b border-[#E2DDD4] pb-[12px]">
+                      <div className="w-[28px] h-[28px] rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <Calculator className="w-[14px] h-[14px]" />
+                      </div>
+                      <div>
+                        <div className="text-[13px] font-[800] text-[#0D2B55]">IPRF Breakdown</div>
+                        <div className="text-[10px] text-[#6b7280]">// Σ (Rating × Weight)</div>
+                      </div>
+                    </div>
+                    <div className="font-mono text-[11px] text-[#6b7280]">
+                      {CRITERIA.map(c => {
+                        // Securely extract the value whether it's nested object or flat number
+                        let val = detailsModal.data.scores?.[c.id];
+                        if (typeof val === 'object' && val !== null) {
+                          val = val.rating;
+                        }
+                        
+                        if (val === undefined || val === null) return null;
+                        
+                        const numVal = Number(val);
+                        const calculatedScore = numVal * c.wt;
+                        const colorClass = numVal === 0.0 ? 'text-red-500' : numVal === 0.7 ? 'text-amber-500' : numVal === 1.0 ? 'text-green-500' : 'text-blue-500';
+                        
+                        return (
+                          <div key={c.id} className="flex justify-between items-center py-[4px]">
+                            <span>{c.short}: <span className="font-[800] text-[#0f1923]">{numVal.toFixed(1)}</span> × {c.pct} =</span>
+                            <span className={`font-[800] ${colorClass}`}>{calculatedScore.toFixed(3)}</span>
+                          </div>
+                        );
+                      })}
+                      <div className="mt-[8px] pt-[8px] border-t border-[#E2DDD4] flex justify-between items-center font-[800] text-[#0D2B55] text-[12px]">
+                        <span>Final Rounded IPRF →</span>
+                        <span>{detailsModal.data.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* HR Notes */}
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-[16px] shadow-sm">
+                    <div className="text-[11px] font-[800] text-[#065F46] uppercase tracking-widest mb-[8px] flex items-center gap-[6px]">
+                      <Check className="w-[14px] h-[14px]" /> HR Review Notes
+                    </div>
+                    <div className="text-[13px] text-[#065F46] leading-relaxed italic border-l-[3px] border-[#065F46]/20 pl-[12px]">
+                      "{detailsModal.data.narrative?.hrComments || 'Approved by HR Administrator.'}"
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Manager Narratives */}
+                <div className="bg-white border border-[#E2DDD4] rounded-xl shadow-sm overflow-hidden flex flex-col h-full">
+                  <div className="p-[16px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
+                    <div className="text-[11px] font-[800] text-[#0D2B55] uppercase tracking-widest flex items-center gap-[6px]">
+                      <Info className="w-[14px] h-[14px]" /> Manager Rating Justifications
+                    </div>
+                  </div>
+                  
+                  <div className="p-[16px] text-[13px] leading-relaxed custom-scrollbar overflow-y-auto" style={{ maxHeight: '400px' }}>
+                    {detailsModal.data.calculatedResults?.finalIprfScore >= 1.3 && (
+                      <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-xl p-[16px] mb-[16px]">
+                        <div className="text-[10px] font-[800] text-[#92400E] uppercase tracking-widest mb-[6px] flex items-center gap-[4px]">
+                          <AlertTriangle className="w-[12px] h-[12px]" /> Exceeds Performance Justification
+                        </div>
+                        <div className="text-[12px] text-[#92400E] font-[500]">
+                          {detailsModal.data.narrative?.epJustification || 'No justification provided.'}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="border-l-[3px] border-[#0D2B55]/20 pl-[16px] space-y-[16px]">
+                      {(() => {
+                        const text = detailsModal.data.narrative?.generalComments || 'No general comments provided.';
+                        const blocks = parseNarrativeBlocks(text);
+                        const displayBlocks = showAllComments ? blocks : blocks.slice(0, 3);
+                        
+                        return (
+                          <>
+                            {displayBlocks.map((block, idx) => (
+                              <div key={idx} className="animate-in fade-in">
+                                <h4 className="font-[800] text-[#0D2B55] mb-[4px]">{block.header}</h4>
+                                {block.content.map((p, j) => (
+                                  <p key={j} className="text-[#475569] text-[12px]">{p}</p>
+                                ))}
+                              </div>
+                            ))}
+                            
+                            {blocks.length > 3 && (
+                              <button 
+                                onClick={() => setShowAllComments(!showAllComments)}
+                                className="mt-[12px] flex items-center gap-[6px] text-[11px] font-[800] text-[#0D2B55] bg-blue-50 hover:bg-blue-100 border border-blue-200 px-[12px] py-[6px] rounded-full transition-colors"
+                              >
+                                {showAllComments ? (
+                                  <><ChevronUp className="w-[14px] h-[14px]" /> Collapse View</>
+                                ) : (
+                                  <><ChevronDown className="w-[14px] h-[14px]" /> Show {blocks.length - 3} More Justifications</>
+                                )}
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Modal Footer (Action Shortcuts) */}
+            <div className="p-[16px_24px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex justify-end gap-[12px] rounded-b-[16px]">
+               <button 
+                  onClick={() => {
+                    closeDetailsModal();
+                    openActionModal(
+                      { stopPropagation: () => {} }, 
+                      'reject', 
+                      detailsModal.data._id, 
+                      `${detailsModal.data.employeeId?.personalDetails?.firstName} ${detailsModal.data.employeeId?.personalDetails?.lastName}`
+                    );
+                  }}
+                  className="px-[16px] py-[8px] bg-white border border-[#DC2626] text-[#DC2626] font-[800] text-[12px] rounded-[8px] hover:bg-[#FEF2F2] transition-colors"
+               >
+                 Reject Appraisal
+               </button>
+               <button 
+                  onClick={() => {
+                    closeDetailsModal();
+                    openActionModal(
+                      { stopPropagation: () => {} }, 
+                      'approve', 
+                      detailsModal.data._id, 
+                      `${detailsModal.data.employeeId?.personalDetails?.firstName} ${detailsModal.data.employeeId?.personalDetails?.lastName}`
+                    );
+                  }}
+                  className="px-[16px] py-[8px] bg-[#059669] text-white font-[800] text-[12px] rounded-[8px] hover:bg-[#047857] shadow-sm transition-colors"
+               >
+                 Approve Appraisal
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action Approval / Rejection Modal */}
+      {actionModal.show && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[200] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[460px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
             
             <div className={`p-[16px_22px] flex justify-between items-center ${actionModal.type === 'approve' ? 'bg-[#059669]' : 'bg-[#DC2626]'}`}>
@@ -318,7 +577,6 @@ export default function CEOApproveAppraisals() {
                   </div>
                 </>
               )}
-
             </div>
           </div>
         </div>

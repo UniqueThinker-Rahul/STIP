@@ -134,7 +134,6 @@ function NewAppraisalForm() {
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '' });
   
-  // 🚨 NEW: Store comments individually for each rating
   const [criterionComments, setCriterionComments] = useState({
     expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: ''
   });
@@ -151,21 +150,46 @@ function NewAppraisalForm() {
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
 
-  // Helper to parse individual comments from a combined string if loading a draft
+  // 🚨 UPGRADED PARSER: Cleanly reads the new multi-line format
   const parseComments = (combinedString) => {
     if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
-    const parts = combinedString.split('|||');
-    if (parts.length === 6) {
+    
+    // Read New Multi-line structure
+    if (combinedString.includes('1. Delivered Expected Results:')) {
+      const extract = (currentLabel, nextLabel) => {
+        const startIdx = combinedString.indexOf(currentLabel);
+        if (startIdx === -1) return '';
+        const startOfContent = startIdx + currentLabel.length;
+        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
+        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
+        return combinedString.substring(startOfContent, endIdx).trim();
+      };
+
       return {
-        expectedResults: parts[0].replace('Results: ', '').trim(),
-        initiative: parts[1].replace('Initiative: ', '').trim(),
-        safeWorking: parts[2].replace('Safety: ', '').trim(),
-        jobCompetence: parts[3].replace('Competence: ', '').trim(),
-        dependability: parts[4].replace('Dependability: ', '').trim(),
-        adaptability: parts[5].replace('Adaptability: ', '').trim()
+        expectedResults: extract('1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
+        initiative: extract('2. Behaviors & Initiative:', '3. Safe Working:'),
+        safeWorking: extract('3. Safe Working:', '4. Job Competence:'),
+        jobCompetence: extract('4. Job Competence:', '5. Dependability:'),
+        dependability: extract('5. Dependability:', '6. Adaptability:'),
+        adaptability: extract('6. Adaptability:', null)
       };
     }
-    // Fallback if it's an old draft with just one general comment
+
+    // Backward compatibility for old '|||' drafts
+    if (combinedString.includes('|||')) {
+      const parts = combinedString.split('|||');
+      if (parts.length === 6) {
+        return {
+          expectedResults: parts[0].replace('Results: ', '').trim(),
+          initiative: parts[1].replace('Initiative: ', '').trim(),
+          safeWorking: parts[2].replace('Safety: ', '').trim(),
+          jobCompetence: parts[3].replace('Competence: ', '').trim(),
+          dependability: parts[4].replace('Dependability: ', '').trim(),
+          adaptability: parts[5].replace('Adaptability: ', '').trim()
+        };
+      }
+    }
+
     return { expectedResults: combinedString, initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
   };
 
@@ -393,7 +417,6 @@ function NewAppraisalForm() {
       return alert("A comprehensive EP Justification is mandatory.");
     }
 
-    // 🚨 NEW: Strict Validation - Must provide a justification comment for ALL rated criteria
     if (!isDraft) {
       const missingComments = CRITERIA.filter(c => criterionComments[c.id].trim().length < 5);
       if (missingComments.length > 0) {
@@ -403,8 +426,25 @@ function NewAppraisalForm() {
 
     setIsSubmitting(true);
     try {
-      // Compile individual comments into a structured single string for the backend payload
-      const compiledComments = `Results: ${criterionComments.expectedResults} ||| Initiative: ${criterionComments.initiative} ||| Safety: ${criterionComments.safeWorking} ||| Competence: ${criterionComments.jobCompetence} ||| Dependability: ${criterionComments.dependability} ||| Adaptability: ${criterionComments.adaptability}`;
+      // 🚨 UPGRADED FORMAT: Strict perfect spacing structure
+      const compiledComments = 
+`1. Delivered Expected Results:
+${criterionComments.expectedResults}
+
+2. Behaviors & Initiative:
+${criterionComments.initiative}
+
+3. Safe Working:
+${criterionComments.safeWorking}
+
+4. Job Competence:
+${criterionComments.jobCompetence}
+
+5. Dependability:
+${criterionComments.dependability}
+
+6. Adaptability:
+${criterionComments.adaptability}`;
 
       const payload = {
         employeeId: selectedStaffId,
@@ -418,7 +458,7 @@ function NewAppraisalForm() {
         calculatedResults: { finalIprfScore: calculatedIPRF },
         stipAward: parseFloat(stipAwardPct),
         narrative: {
-          generalComments: compiledComments, // Backend mapping maintained
+          generalComments: compiledComments,
           epJustification: formData.epJustification.trim()
         },
         status: isDraft ? 'DRAFT' : 'SUBMITTED' 
@@ -795,7 +835,6 @@ function NewAppraisalForm() {
                               ))}
                             </div>
                             
-                            {/* 🚨 NEW: Contextual Comment Box explicitly appears for the rated criteria */}
                             {isRated && (
                               <div className="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
                                 <div className="flex items-center gap-1.5 mb-2">
