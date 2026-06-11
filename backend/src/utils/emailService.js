@@ -1,19 +1,23 @@
-// backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: process.env.SMTP_SECURE === 'true',
+  port: process.env.SMTP_PORT || 465, // Must be 465 for Railway
+  secure: process.env.SMTP_SECURE === 'true', // Must be true for 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  tls: {
-    rejectUnauthorized: false
-  },
-  // 🚨 CRITICAL RAILWAY FIX: Forces IPv4 to prevent Gmail ETIMEDOUT crashes
-  family: 4 
+  // 🚨 FIX 1: Tell Nodemailer to only use IPv4
+  family: 4, 
+  
+  // 🚨 FIX 2: Force Node v22 DNS to strictly resolve IPv4 (A records) only
+  lookup: (hostname, options, callback) => {
+    dns.lookup(hostname, { family: 4, hints: dns.ADDRCONFIG | dns.V4MAPPED }, (err, address, family) => {
+      callback(err, address, family);
+    });
+  }
 });
 
 const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
