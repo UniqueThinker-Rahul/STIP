@@ -9,9 +9,14 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: false
+  },
+  // 🚨 CRITICAL RAILWAY FIX: Forces IPv4 to prevent Gmail ETIMEDOUT crashes
+  family: 4 
 });
 
-const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
 
 const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
