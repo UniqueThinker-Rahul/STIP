@@ -26,16 +26,18 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
     }
 
     for (const recipient of recipients) {
+      // Create the in-app notification immediately
       await Notification.create({ recipient: recipient._id, sender: senderId, title, message, type, actionUrl });
-      console.log(`🔔 [IN-APP NOTIFICATION] Saved to database for ${recipient.personalDetails?.firstName} (${recipient.security?.role})`);
     }
     
+    // We return the specific target emails so the caller can send the rich external emails
     return recipients.map(r => {
+       // Pull specific contextual email if exists, otherwise fallback to root email
        let email = null;
        if (r.personalDetails?.notificationEmails?.get) {
          email = r.personalDetails.notificationEmails.get(targetRoleContext) || r.username;
        } else {
-         email = r.username; 
+         email = r.username; // Assuming username is an email address format in your system
        }
        
        return {
@@ -59,7 +61,7 @@ const getIprfLabel = (score) => {
     return 'Not Graded';
 };
 
-// 1. Create a new appraisal
+// 1. Create a new appraisal (Draft or Submitted)
 exports.createAppraisal = async (req, res) => {
   try {
     const quarterId = req.body.appraisalQuarter;
@@ -74,6 +76,7 @@ exports.createAppraisal = async (req, res) => {
 
     const isFuture = currentDate < startDate;
     const isPastDeadline = currentDate > endDate;
+    
     const isLocked = quarter.isLocked || isFuture || (isPastDeadline && !quarter.forceUnlock);
 
     if (isLocked) {
@@ -130,6 +133,7 @@ exports.createAppraisal = async (req, res) => {
       await appraisal.save();
     }
 
+    // 🚨 FIRE AND FORGET: Handle emails and notifications
     if (req.body.status === 'SUBMITTED' || req.body.status === 'UNDER_HR_REVIEW') {
       const empName = `${employeeData?.personalDetails?.firstName} ${employeeData?.personalDetails?.lastName}`;
       const mgrName = req.user.personalDetails ? `${req.user.personalDetails.firstName} ${req.user.personalDetails.lastName}` : 'Line Manager';
@@ -137,7 +141,6 @@ exports.createAppraisal = async (req, res) => {
 
       setImmediate(async () => {
         try {
-          console.log(`\n📧 [EMAIL SYSTEM] Initializing Manager Submit sequence...`);
           const hrTargets = await dispatchNotification({
             senderId: req.user.id,
             recipientRole: 'HR_ADMIN',
@@ -148,12 +151,9 @@ exports.createAppraisal = async (req, res) => {
             actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
           });
 
-          console.log(`📧 [EMAIL SYSTEM] Found ${hrTargets.length} HR_ADMIN users to notify.`);
-
+          // Dispatch Rich Email
           for (const hr of hrTargets) {
-            console.log(`   -> Target: ${hr.firstName} | Extracted Email String: "${hr.email}"`);
             if (hr.email && hr.email.includes('@')) {
-               console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
                await sendManagerSubmitEmail({
                  toEmail: hr.email,
                  hrName: hr.firstName || 'HR Manager',
@@ -168,12 +168,9 @@ exports.createAppraisal = async (req, res) => {
                  iprfLabel: getIprfLabel(iprfScore),
                  submitDate: new Date().toLocaleDateString('en-GB')
                });
-               console.log(`   -> ✅ SUCCESS. Email delivered to ${hr.email}`);
-            } else {
-               console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
             }
           }
-        } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+        } catch (e) { console.error("Email Dispatch Error:", e) }
       });
     }
 
@@ -219,9 +216,9 @@ exports.forwardToCEO = async (req, res) => {
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
     const isEP = iprfScore >= 1.3;
 
+    // 🚨 FIRE AND FORGET
     setImmediate(async () => {
       try {
-        console.log(`\n📧 [EMAIL SYSTEM] Initializing HR Forward sequence...`);
         const ceoTargets = await dispatchNotification({
           senderId: req.user.id,
           recipientRole: 'CEO',
@@ -232,12 +229,9 @@ exports.forwardToCEO = async (req, res) => {
           actionUrl: `${process.env.FRONTEND_URL}/dashboard/ceo/approve`
         });
 
-        console.log(`📧 [EMAIL SYSTEM] Found ${ceoTargets.length} CEO users to notify.`);
-
+        // Dispatch Rich Email
         for (const ceo of ceoTargets) {
-          console.log(`   -> Target: ${ceo.firstName} | Extracted Email String: "${ceo.email}"`);
           if (ceo.email && ceo.email.includes('@')) {
-            console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
             await sendHRForwardEmail({
               toEmail: ceo.email,
               ceoName: ceo.firstName || 'CEO',
@@ -255,12 +249,9 @@ exports.forwardToCEO = async (req, res) => {
               forwardDate: new Date().toLocaleDateString('en-GB'),
               isEP: isEP
             });
-            console.log(`   -> ✅ SUCCESS. Email delivered to ${ceo.email}`);
-          } else {
-             console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
           }
         }
-      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+      } catch (e) { console.error("Email Dispatch Error:", e) }
     });
 
     res.status(200).json({ success: true, data: appraisal }); 
@@ -301,14 +292,11 @@ exports.approveRejectAppraisal = async (req, res) => {
     const quarterYear = appraisal.appraisalQuarter?.year || new Date().getFullYear();
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
 
+    // 🚨 FIRE AND FORGET
     setImmediate(async () => {
       try {
-        console.log(`\n📧 [EMAIL SYSTEM] Initializing CEO Decision sequence (${status})...`);
-        
-        // 🚨 UPGRADED: Collect BOTH the Manager AND the HR Admin as targets for the CEO's decision
-        let managerTargets = [];
         if (appraisal.managerId) {
-          managerTargets = await dispatchNotification({
+          await dispatchNotification({
             senderId: req.user.id,
             recipientId: appraisal.managerId._id,
             targetRoleContext: 'MANAGER',
@@ -333,18 +321,13 @@ exports.approveRejectAppraisal = async (req, res) => {
           actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
         }); 
 
-        // Combine them so they both receive the rich email!
-        const allTargets = [...hrTargets, ...managerTargets];
-        console.log(`📧 [EMAIL SYSTEM] Found ${allTargets.length} targets (HR & Line Managers) to notify of decision.`);
-
-        for (const target of allTargets) {
-          console.log(`   -> Target: ${target.firstName} | Extracted Email String: "${target.email}"`);
-          if (target.email && target.email.includes('@')) {
-            console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
+        // Dispatch Rich Email to HR
+        for (const hr of hrTargets) {
+          if (hr.email && hr.email.includes('@')) {
             if (isApproved) {
                await sendCEOApproveEmail({
-                 toEmail: target.email,
-                 recipientName: target.firstName || 'User', // Passed generic so it says "Dear John (Manager)" or "Dear Jane (HR)"
+                 toEmail: hr.email,
+                 hrName: hr.firstName || 'HR Manager',
                  empName: empName,
                  empId: appraisal.employeeId.employeeId,
                  quarter: quarterName,
@@ -356,8 +339,8 @@ exports.approveRejectAppraisal = async (req, res) => {
                });
             } else {
                await sendCEORejectEmail({
-                 toEmail: target.email,
-                 recipientName: target.firstName || 'User',
+                 toEmail: hr.email,
+                 hrName: hr.firstName || 'HR Manager',
                  empName: empName,
                  empId: appraisal.employeeId.employeeId,
                  quarter: quarterName,
@@ -370,12 +353,9 @@ exports.approveRejectAppraisal = async (req, res) => {
                  mgrName: mgrName
                });
             }
-            console.log(`   -> ✅ SUCCESS. Email delivered to ${target.email}`);
-          } else {
-            console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
           }
         }
-      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+      } catch (e) { console.error("Email Dispatch Error:", e) }
     });
 
     res.status(200).json({ success: true, data: appraisal }); 

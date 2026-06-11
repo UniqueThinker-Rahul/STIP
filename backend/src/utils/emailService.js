@@ -1,96 +1,143 @@
 // backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
-const User = require('../models/User');
 
-// 🚨 THE NUCLEAR FIX: BYPASS DNS ENTIRELY
-// We are giving Nodemailer Google's exact IPv4 address. 
-// Railway cannot force IPv6 because we are skipping the DNS lookup phase completely.
 const transporter = nodemailer.createTransport({
-  host: '142.250.141.108', // Direct Google SMTP IPv4 Address
-  port: 465,
-  secure: true,
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: process.env.SMTP_PORT || 587,
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  tls: {
-    servername: 'smtp.gmail.com', // CRITICAL: Required so Google accepts the direct IP connection
-    rejectUnauthorized: false
-  }
 });
 
-/**
- * 🚀 UPGRADED: Dynamic Workflow Email Generator (True Background Non-Blocking)
- */
-const sendAppraisalEmail = async ({ targetUserId, targetRoleContext, subject, title, bodyText, comment, actionUrl }) => {
-  try {
-    const user = await User.findById(targetUserId).select('personalDetails security');
-    
-    // Extract the dictionary map
-    const emailsMap = user?.personalDetails?.notificationEmails;
-    
-    // Check for the specific role email (e.g., HR_ADMIN). If missing, fallback to their primary role email.
-    const recipientEmail = (emailsMap && emailsMap.get(targetRoleContext)) || 
-                           (emailsMap && emailsMap.get(user?.security?.role));
+const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-    if (!recipientEmail) {
-      console.log(`✉️ Email Aborted: User ${targetUserId} has no email set for role ${targetRoleContext}.`);
-      return false;
-    }
+const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+  <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
+    <h2 style="color: #ffffff; margin: 0; font-size: 20px;">${title}</h2>
+  </div>
+  <div style="padding: 24px; color: #333333; line-height: 1.6; font-size: 14px;">
+    <p style="margin-top: 0; font-size: 15px;">Dear <strong>${recipientName}</strong>,</p>
+    ${content}
+    <div style="text-align: center; margin-top: 30px; margin-bottom: 10px;">
+      <a href="${linkUrl}" style="display: inline-block; padding: 12px 24px; background-color: #C9A84C; color: #0D2B55; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; border: 1px solid #b59540;">Go To STIP Portal</a>
+    </div>
+  </div>
+  <div style="background-color: #FAF8F4; padding: 16px; text-align: center; border-top: 1px solid #E2DDD4;">
+    <p style="margin: 0; font-size: 11px; color: #6b7280;">This is an automated notification from the FSM Petroleum STIP Portal.</p>
+  </div>
+</div>
+`;
 
-    // Construct HTML 
-    const htmlTemplate = `
-      <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-        <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
-          <h2 style="color: #ffffff; margin: 0; font-size: 20px; letter-spacing: 0.5px;">${title}</h2>
-        </div>
-        <div style="padding: 30px; background-color: #ffffff;">
-          <p style="color: #0f1923; font-size: 15px; line-height: 1.6; margin-top: 0;">
-            ${bodyText}
-          </p>
-          ${comment ? `
-            <div style="background-color: #FAF8F4; border-left: 4px solid #C9A84C; padding: 16px; margin: 24px 0; border-radius: 0 6px 6px 0;">
-              <p style="margin: 0 0 6px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">
-                Notes / Justification
-              </p>
-              <p style="margin: 0; color: #0f1923; font-size: 14px; font-style: italic; line-height: 1.5;">
-                "${comment}"
-              </p>
-            </div>
-          ` : ''}
-          ${actionUrl ? `
-            <div style="text-align: center; margin-top: 32px; margin-bottom: 10px;">
-              <a href="${actionUrl}" style="background-color: #0D2B55; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: bold; display: inline-block;">
-                View in STIP Portal
-              </a>
-            </div>
-          ` : ''}
-        </div>
-        <div style="background-color: #FAF8F4; padding: 16px; text-align: center; border-top: 1px solid #E2DDD4;">
-          <p style="margin: 0; color: #94a3b8; font-size: 11px;">
-            This is an automated notification from the FSM Petroleum Corporation STIP System.<br/>
-            You are receiving this because you opted into email alerts in your Profile Settings.
-          </p>
-        </div>
-      </div>
-    `;
+exports.sendManagerSubmitEmail = async ({ toEmail, hrName, empName, empId, empTitle, empCompany, mgrName, quarter, year, iprfFactor, iprfLabel, submitDate }) => {
+  const subject = `New STIP Appraisal Submitted — ${empName} (${quarter} ${year})`;
+  const content = `
+    <p>A new STIP performance appraisal has been submitted and is awaiting your review.</p>
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #FAF8F4; border-radius: 8px; overflow: hidden;">
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; width: 130px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Employee</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; font-weight: bold;">${empName} <span style="color: #6b7280; font-weight: normal;">(ID: ${empId})</span></td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Position</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${empTitle}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Company/Office</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${empCompany}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Submitted by</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${mgrName} (Line Manager)</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Period</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${quarter} ${year}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">IPRF Rating</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #1E40AF; font-weight: bold;">${iprfFactor} — ${iprfLabel}</td></tr>
+      <tr><td style="padding: 10px 15px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Submitted on</td><td style="padding: 10px 15px;">${submitDate}</td></tr>
+    </table>
+    <p>Please log in to the STIP Portal to review and, if appropriate, forward this appraisal to the CEO for final approval.</p>
+  `;
 
-    // 🚨 SEND EMAIL: Fire and Forget. Does NOT use await.
-    transporter.sendMail({
-      from: `"STIP System" <${process.env.SMTP_FROM_EMAIL}>`,
-      to: recipientEmail, 
-      subject,
-      html: htmlTemplate,
-    })
-    .then(() => console.log(`✉️ Email sent successfully to ${recipientEmail}: ${subject}`))
-    .catch(err => console.error(`❌ SMTP Failed for ${recipientEmail}:`, err.message));
-    
-    return true; 
-
-  } catch (error) {
-    console.error(`❌ Failed to process email for User ID ${targetUserId}:`, error.message);
-    return false;
-  }
+  return transporter.sendMail({ 
+    from: process.env.SMTP_FROM, 
+    to: toEmail, 
+    subject, 
+    html: createHTMLTemplate('New STIP Appraisal Submitted', hrName, content, `${PORTAL_BASE_URL}/dashboard/hr/appraisals`) 
+  });
 };
 
-module.exports = { sendAppraisalEmail };
+exports.sendHRForwardEmail = async ({ toEmail, ceoName, empName, empId, empTitle, empCompany, mgrName, hrName, quarter, year, iprfFactor, iprfLabel, awardPercent, forwardDate, isEP }) => {
+  const subject = `STIP Appraisal Awaiting CEO Approval — ${empName} (${quarter} ${year})`;
+  
+  let epWarning = '';
+  if (isEP) {
+    epWarning = `<div style="background-color: #FFFBEB; border-left: 4px solid #D97706; padding: 12px; margin: 16px 0; color: #92400E; font-size: 13px;">
+      <strong>&#9888; Exceeds Performance:</strong> This is an EP rating and includes written justification from the Line Manager. EP ratings are capped at 5% of employees.
+    </div>`;
+  }
+
+  const content = `
+    <p>An appraisal has been reviewed by HR and is now awaiting your approval.</p>
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #FAF8F4; border-radius: 8px; overflow: hidden;">
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; width: 130px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Employee</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; font-weight: bold;">${empName} <span style="color: #6b7280; font-weight: normal;">(ID: ${empId})</span></td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Position</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${empTitle}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Company/Office</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${empCompany}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Line Manager</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${mgrName}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Reviewed by</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${hrName} (HR)</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Period</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${quarter} ${year}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">IPRF Rating</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #1E40AF; font-weight: bold;">${iprfFactor} — ${iprfLabel}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Est. Award</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #059669; font-weight: bold;">${awardPercent}% of base salary</td></tr>
+      <tr><td style="padding: 10px 15px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Forwarded on</td><td style="padding: 10px 15px;">${forwardDate}</td></tr>
+    </table>
+    ${epWarning}
+    <p>Please log in to the STIP Portal to Approve or Not Approve this appraisal.<br/>If you select "Not Approve", a comment is required.</p>
+  `;
+
+  return transporter.sendMail({ 
+    from: process.env.SMTP_FROM, 
+    to: toEmail, 
+    subject, 
+    html: createHTMLTemplate('STIP Appraisal Awaiting CEO Approval', ceoName, content, `${PORTAL_BASE_URL}/dashboard/ceo/approve`) 
+  });
+};
+
+exports.sendCEOApproveEmail = async ({ toEmail, recipientName, empName, empId, quarter, year, iprfFactor, iprfLabel, ceoName, decisionDate }) => {
+  const subject = `STIP Appraisal Approved by CEO — ${empName} (${quarter} ${year})`;
+  const content = `
+    <p>The CEO has <strong>APPROVED</strong> the following appraisal:</p>
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #FAF8F4; border-radius: 8px; overflow: hidden;">
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; width: 130px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Employee</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; font-weight: bold;">${empName} <span style="color: #6b7280; font-weight: normal;">(ID: ${empId})</span></td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Period</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${quarter} ${year}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">IPRF Rating</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #059669; font-weight: bold;">${iprfFactor} — ${iprfLabel}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Approved by</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${ceoName} (CEO)</td></tr>
+      <tr><td style="padding: 10px 15px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Approved on</td><td style="padding: 10px 15px;">${decisionDate}</td></tr>
+    </table>
+    <p>This appraisal is now fully approved and ready for payroll processing.</p>
+  `;
+
+  return transporter.sendMail({ 
+    from: process.env.SMTP_FROM, 
+    to: toEmail, 
+    subject, 
+    // 🚨 FIX: Removed the /login route so it goes to the base URL
+    html: createHTMLTemplate('STIP Appraisal Approved', recipientName, content, `${PORTAL_BASE_URL}`) 
+  });
+};
+
+exports.sendCEORejectEmail = async ({ toEmail, recipientName, empName, empId, quarter, year, iprfFactor, iprfLabel, ceoName, decisionDate, ceoComment, mgrName }) => {
+  const subject = `STIP Appraisal Not Approved by CEO — ${empName} (${quarter} ${year})`;
+  const content = `
+    <p>The CEO has <strong>NOT APPROVED</strong> the following appraisal and has provided comments:</p>
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #FAF8F4; border-radius: 8px; overflow: hidden;">
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; width: 130px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Employee</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; font-weight: bold;">${empName} <span style="color: #6b7280; font-weight: normal;">(ID: ${empId})</span></td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Period</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${quarter} ${year}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">IPRF Rating</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #1E40AF; font-weight: bold;">${iprfFactor} — ${iprfLabel}</td></tr>
+      <tr><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Reviewed by</td><td style="padding: 10px 15px; border-bottom: 1px solid #E2DDD4;">${ceoName}</td></tr>
+      <tr><td style="padding: 10px 15px; color: #6b7280; font-weight: bold; font-size: 12px; text-transform: uppercase;">Decision date</td><td style="padding: 10px 15px;">${decisionDate}</td></tr>
+    </table>
+    
+    <div style="background-color: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px; margin: 20px 0; color: #991B1B;">
+      <h4 style="margin-top: 0; margin-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">CEO Comment:</h4>
+      <p style="margin: 0; font-style: italic;">"${ceoComment}"</p>
+    </div>
+
+    <p><strong>Action required:</strong> Please review the comments above and follow up with the Line Manager (${mgrName}) as needed.</p>
+  `;
+
+  return transporter.sendMail({ 
+    from: process.env.SMTP_FROM, 
+    to: toEmail, 
+    subject, 
+    // 🚨 FIX: Removed the /login route so it goes to the base URL
+    html: createHTMLTemplate('STIP Appraisal Not Approved', recipientName, content, `${PORTAL_BASE_URL}`) 
+  });
+};

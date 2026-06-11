@@ -130,6 +130,8 @@ function NewAppraisalForm() {
 
   const [dbQuarters, setDbQuarters] = useState([]);
   const [activeQuarterId, setActiveQuarterId] = useState('');
+  
+  const [filterYear, setFilterYear] = useState('');
 
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '' });
@@ -150,11 +152,9 @@ function NewAppraisalForm() {
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
 
-  // 🚨 UPGRADED PARSER: Cleanly reads the new multi-line format
   const parseComments = (combinedString) => {
     if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
     
-    // Read New Multi-line structure
     if (combinedString.includes('1. Delivered Expected Results:')) {
       const extract = (currentLabel, nextLabel) => {
         const startIdx = combinedString.indexOf(currentLabel);
@@ -175,7 +175,6 @@ function NewAppraisalForm() {
       };
     }
 
-    // Backward compatibility for old '|||' drafts
     if (combinedString.includes('|||')) {
       const parts = combinedString.split('|||');
       if (parts.length === 6) {
@@ -230,10 +229,15 @@ function NewAppraisalForm() {
         setTeamExactStatusMap(exactMap);
         
         const currentDate = new Date();
-        const defaultQ = fetchedQuarters.find(q => new Date(q.endDate) >= currentDate && !q.isLocked) || fetchedQuarters[0];
+        const defaultQ = fetchedQuarters.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return currentDate >= start && currentDate <= end && !q.isLocked;
+        }) || fetchedQuarters[0];
         
         if (defaultQ) {
           setActiveQuarterId(defaultQ._id);
+          setFilterYear(defaultQ.year?.toString() || new Date().getFullYear().toString());
           setFormData(prev => ({ ...prev, quarter: defaultQ._id }));
         }
 
@@ -245,11 +249,18 @@ function NewAppraisalForm() {
             setSelectedStaffId(empId);
             const emp = myTeam.find(e => e._id === empId);
             
+            const qId = draftData.appraisalQuarter?._id || draftData.appraisalQuarter || (defaultQ?._id || '');
+            const matchedQ = fetchedQuarters.find(q => q._id === qId);
+
             setFormData({
               title: emp?.employmentDetails?.jobTitle || '',
-              quarter: draftData.appraisalQuarter?._id || draftData.appraisalQuarter || (defaultQ?._id || ''),
+              quarter: qId,
               epJustification: draftData.narrative?.epJustification || ''
             });
+
+            if (matchedQ) {
+              setFilterYear(matchedQ.year?.toString() || new Date().getFullYear().toString());
+            }
 
             setCriterionComments(parseComments(draftData.narrative?.generalComments));
 
@@ -364,7 +375,8 @@ function NewAppraisalForm() {
   
   const currentQObj = dbQuarters.find(q => q._id === formData.quarter);
   const isExpired = currentQObj ? new Date() > new Date(currentQObj.endDate) : false;
-  const isCurrentQuarterLocked = isAlreadySubmitted || (currentQObj && (currentQObj.isLocked || (isExpired && !currentQObj.forceUnlock)));
+  const isFuture = currentQObj ? new Date() < new Date(currentQObj.startDate) : false;
+  const isCurrentQuarterLocked = isAlreadySubmitted || (currentQObj && (currentQObj.isLocked || (isExpired && !currentQObj.forceUnlock) || isFuture));
 
   let proRata = 1.0;
   let prMonths = 12;
@@ -375,8 +387,46 @@ function NewAppraisalForm() {
 
   const stipAwardPct = (CP * calculatedIPRF * proRata * 100).toFixed(2);
 
+  const availableYears = [...new Set(dbQuarters.map(q => q.year?.toString() || new Date().getFullYear().toString()))].sort((a, b) => b - a);
+
+  const handleYearChange = (e) => {
+      const y = e.target.value;
+      setFilterYear(y);
+      const firstQOfYear = dbQuarters.find(q => q.year?.toString() === y);
+      if (firstQOfYear) {
+          setFormData(prev => ({ ...prev, quarter: firstQOfYear._id }));
+      } else {
+          setFormData(prev => ({ ...prev, quarter: '' }));
+      }
+  };
+
+  // 🚨 UPGRADED: Logic to determine if a specific criterion is complete based on score type
+  const isCriterionComplete = (critId) => {
+    const val = scores[critId];
+    if (val === null) return false;
+    
+    // If rating is 1.0, it's instantly complete (no comment needed)
+    if (val === 1.0) return true;
+    
+    // For 0.0, 0.7, and 1.3, we enforce the 5 char rule
+    const comment = criterionComments[critId] || '';
+    return comment.trim().length >= 5;
+  };
+
+  const isCriterionUnlocked = (idx) => {
+    if (idx === 0) return true;
+    const prevCritId = CRITERIA[idx - 1].id;
+    return isCriterionComplete(prevCritId);
+  };
+
   const handleScore = (critId, val) => {
     if (isCurrentQuarterLocked) return;
+    
+    // If switching TO 1.0, clear the comment
+    if (val === 1.0) {
+       setCriterionComments(prev => ({ ...prev, [critId]: '' }));
+    }
+    
     setScores(prev => ({ ...prev, [critId]: val }));
   };
 
@@ -418,7 +468,14 @@ function NewAppraisalForm() {
     }
 
     if (!isDraft) {
-      const missingComments = CRITERIA.filter(c => criterionComments[c.id].trim().length < 5);
+      // Find criteria that are NOT 1.0 but missing a 5+ char comment
+      const missingComments = CRITERIA.filter(c => {
+         const s = scores[c.id];
+         if (s === 1.0) return false;
+         const com = criterionComments[c.id] || '';
+         return com.trim().length < 5;
+      });
+      
       if (missingComments.length > 0) {
         return alert(`You must provide a mandatory justification comment (min. 5 chars) for: ${missingComments.map(c => c.short).join(', ')}`);
       }
@@ -426,25 +483,24 @@ function NewAppraisalForm() {
 
     setIsSubmitting(true);
     try {
-      // 🚨 UPGRADED FORMAT: Strict perfect spacing structure
       const compiledComments = 
 `1. Delivered Expected Results:
-${criterionComments.expectedResults}
+${criterionComments.expectedResults || 'No comment required for E (1.0).'}
 
 2. Behaviors & Initiative:
-${criterionComments.initiative}
+${criterionComments.initiative || 'No comment required for E (1.0).'}
 
 3. Safe Working:
-${criterionComments.safeWorking}
+${criterionComments.safeWorking || 'No comment required for E (1.0).'}
 
 4. Job Competence:
-${criterionComments.jobCompetence}
+${criterionComments.jobCompetence || 'No comment required for E (1.0).'}
 
 5. Dependability:
-${criterionComments.dependability}
+${criterionComments.dependability || 'No comment required for E (1.0).'}
 
 6. Adaptability:
-${criterionComments.adaptability}`;
+${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
 
       const payload = {
         employeeId: selectedStaffId,
@@ -720,21 +776,42 @@ ${criterionComments.adaptability}`;
                     
                     <div className="flex flex-col gap-1">
                       <label className="text-[11px] font-[600] text-[#0D2B55]">Appraisal Quarter <span className="text-red-500">*</span></label>
-                      <select 
-                        value={formData.quarter} 
-                        onChange={e => setFormData({...formData, quarter: e.target.value})}
-                        className={`p-[10px] border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
-                      >
-                        {dbQuarters.length === 0 ? <option value="">No Quarters Configured</option> : dbQuarters.map(q => {
-                           const exp = new Date() > new Date(q.endDate);
-                           const lockStatus = (q.isLocked || (exp && !q.forceUnlock)) ? 'Locked' : q.forceUnlock ? 'Open (Override)' : 'Active';
-                           return (
-                             <option key={q._id} value={q._id}>
-                               {q.name} — {quarterStatuses[q._id] === 'submitted' ? 'Already Submitted' : lockStatus}
-                             </option>
-                           );
-                        })}
-                      </select>
+                      <div className="flex gap-2">
+                        <select 
+                          value={filterYear} 
+                          onChange={handleYearChange}
+                          className={`p-[10px] border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all w-[35%] ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
+                        >
+                          {availableYears.length === 0 ? <option value="">Year</option> : availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+
+                        <select 
+                          value={formData.quarter} 
+                          onChange={e => setFormData({...formData, quarter: e.target.value})}
+                          className={`p-[10px] border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all w-[65%] ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
+                        >
+                          {dbQuarters.filter(q => q.year?.toString() === filterYear).length === 0 ? <option value="">No Quarters</option> : dbQuarters.filter(q => q.year?.toString() === filterYear).map(q => {
+                             const start = new Date(q.startDate); start.setHours(0,0,0,0);
+                             const end = new Date(q.endDate); end.setHours(23,59,59,999);
+                             const now = new Date();
+                             const isQFuture = now < start;
+                             const exp = now > end;
+                             
+                             let lockStatus = '';
+                             if (quarterStatuses[q._id] === 'submitted') lockStatus = 'Already Submitted';
+                             else if (q.isLocked || (exp && !q.forceUnlock)) lockStatus = 'Locked';
+                             else if (isQFuture) lockStatus = 'Upcoming';
+                             else if (q.forceUnlock) lockStatus = 'Open (Override)';
+                             else lockStatus = 'Active';
+
+                             return (
+                               <option key={q._id} value={q._id}>
+                                 {q.name} — {lockStatus}
+                               </option>
+                             );
+                          })}
+                        </select>
+                      </div>
                     </div>
                   </div>
                   
@@ -744,6 +821,8 @@ ${criterionComments.adaptability}`;
                       <div>
                         {isAlreadySubmitted 
                           ? "LOCKED: An active appraisal for this quarter is already in the system. You cannot edit it." 
+                          : isFuture
+                          ? `LOCKED: Submissions for this tracking period open on ${new Date(currentQObj?.startDate).toLocaleDateString()}.`
                           : `LOCKED: Submissions for this tracking period closed on ${new Date(currentQObj?.endDate).toLocaleDateString()}. Please contact HR Administration if you need to request an ICT Late Override.`}
                       </div>
                     </div>
@@ -778,18 +857,26 @@ ${criterionComments.adaptability}`;
                     const isExpanded = expandedCrit === crit.id;
                     const val = scores[crit.id];
                     const isRated = val !== null;
-                    const comment = criterionComments[crit.id];
+                    
+                    // 🚨 UPGRADED: 1.0 does not require a comment to be considered "unlocked" for the next section
+                    const unlocked = isCriterionUnlocked(idx);
 
                     return (
-                      <div key={crit.id} className={`border rounded-xl overflow-hidden transition-all ${isRated ? 'border-[#0D2B55]/20 bg-white' : isExpanded ? 'border-[#0D2B55] bg-[#FAF8F4]/30' : 'border-gray-200 bg-white'}`}>
+                      <div key={crit.id} className={`border rounded-xl overflow-hidden transition-all ${isRated ? 'border-[#0D2B55]/20 bg-white' : isExpanded && unlocked ? 'border-[#0D2B55] bg-[#FAF8F4]/30' : 'border-gray-200 bg-white'} ${!unlocked ? 'opacity-60' : ''}`}>
                         <div 
-                          onClick={() => setExpandedCrit(isExpanded ? null : crit.id)} 
-                          className="px-4 py-3 bg-[#FAF8F4] flex items-center justify-between cursor-pointer hover:bg-gray-100/80 transition-colors border-b border-transparent"
+                          onClick={() => {
+                            if (!unlocked) return;
+                            setExpandedCrit(isExpanded ? null : crit.id);
+                          }} 
+                          className={`px-4 py-3 bg-[#FAF8F4] flex items-center justify-between transition-colors border-b border-transparent ${unlocked ? 'cursor-pointer hover:bg-gray-100/80' : 'cursor-not-allowed'}`}
                         >
                           <div className="flex items-center gap-3 flex-1">
-                            <div className="w-6 h-6 rounded-full bg-[#0D2B55] text-white flex items-center justify-center text-[10px] font-bold">{idx + 1}</div>
+                            <div className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${unlocked ? 'bg-[#0D2B55]' : 'bg-gray-400'}`}>{idx + 1}</div>
                             <div>
-                              <div className="text-xs font-bold text-gray-900">{crit.name}</div>
+                              <div className={`text-xs font-bold ${unlocked ? 'text-gray-900' : 'text-gray-500'}`}>
+                                {crit.name}
+                                {!unlocked && <span className="ml-2 text-[9px] text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200">Complete previous step to unlock</span>}
+                              </div>
                               <div className="text-[10px] text-gray-500 mt-0.5">Weight Modifier Factor: <span className="font-bold text-[#0D2B55]">{crit.pct}</span></div>
                             </div>
                           </div>
@@ -803,12 +890,12 @@ ${criterionComments.adaptability}`;
                               ) : (
                                 <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-gray-200 text-gray-500">Pending Rating</span>
                               )}
-                              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D2B55]' : ''}`} />
+                              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isExpanded && unlocked ? 'rotate-180 text-[#0D2B55]' : ''}`} />
                             </div>
                           </div>
                         </div>
 
-                        {isExpanded && (
+                        {isExpanded && unlocked && (
                           <div className="p-4 bg-white space-y-4 border-t border-gray-100 animate-fade-in">
                             <div className="p-3 bg-slate-50 border border-gray-100 rounded-lg flex items-start gap-2">
                               <Info className="w-3.5 h-3.5 text-[#0D2B55] mt-0.5 shrink-0" />
@@ -835,7 +922,8 @@ ${criterionComments.adaptability}`;
                               ))}
                             </div>
                             
-                            {isRated && (
+                            {/* 🚨 UPGRADED: The comment box only renders if the rating is NOT 1.0 */}
+                            {isRated && val !== 1.0 && (
                               <div className="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
                                 <div className="flex items-center gap-1.5 mb-2">
                                   <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
@@ -845,11 +933,11 @@ ${criterionComments.adaptability}`;
                                   disabled={isCurrentQuarterLocked}
                                   className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-400 focus:bg-white resize-none shadow-inner transition-colors min-h-[60px]"
                                   placeholder={`Why did you assign a rating of ${val.toFixed(1)} for ${crit.name}? (Mandatory)`}
-                                  value={comment}
+                                  value={criterionComments[crit.id]}
                                   onChange={(e) => setCriterionComments({...criterionComments, [crit.id]: e.target.value})}
                                 />
-                                {comment.trim().length > 0 && comment.trim().length < 5 && (
-                                  <p className="text-[10px] text-red-500 mt-1">Please provide a more detailed justification.</p>
+                                {criterionComments[crit.id].trim().length > 0 && criterionComments[crit.id].trim().length < 5 && (
+                                  <p className="text-[10px] text-red-500 mt-1">Please provide a more detailed justification to unlock the next criteria.</p>
                                 )}
                               </div>
                             )}

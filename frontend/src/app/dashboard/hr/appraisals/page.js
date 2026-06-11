@@ -11,16 +11,21 @@ export default function HRAllAppraisals() {
   const [dbQuarters, setDbQuarters] = useState([]);
   const [companyCodes, setCompanyCodes] = useState([]);
   const [managerList, setManagerList] = useState([]);
+  
+  // 🚨 UPGRADED: Added state to store dynamically fetched Office Stations
+  const [availableOffices, setAvailableOffices] = useState([]);
 
   const [search, setSearch] = useState('');
   
-  // 🚨 UPGRADED: Added a separate state for the selected Year filter
   const [filterYear, setFilterYear] = useState(''); 
   const [qtr, setQtr] = useState(''); 
   
   const [statusFilter, setStatusFilter] = useState('');
   const [co, setCo] = useState('');
   const [mgrFilter, setMgrFilter] = useState('');
+  
+  // 🚨 UPGRADED: Added state for Office Station Filter
+  const [officeFilter, setOfficeFilter] = useState('');
   
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
 
@@ -40,6 +45,13 @@ export default function HRAllAppraisals() {
         
         const allUsers = usersRes.data?.data || [];
         setStaff(allUsers);
+        
+        // 🚨 UPGRADED: Dynamically extract all unique Office Stations from the live user base securely
+        const extractedOffices = allUsers
+            .map(u => u?.employmentDetails?.officeLocation)
+            .filter(location => location && typeof location === 'string' && location.trim() !== '');
+        const uniqueOffices = [...new Set(extractedOffices)].sort();
+        setAvailableOffices(uniqueOffices);
         
         const uniqueManagers = new Map();
         
@@ -76,7 +88,6 @@ export default function HRAllAppraisals() {
         
         const activeQ = fetchedQuarters.find(q => new Date(q.endDate) >= new Date() && !q.isLocked);
         if (activeQ) {
-          // 🚨 UPGRADED: Auto-select the year of the active quarter
           setFilterYear(activeQ.year.toString());
           setQtr(activeQ._id);
         }
@@ -93,7 +104,6 @@ export default function HRAllAppraisals() {
     fetchData();
   }, []);
 
-  // 🚨 UPGRADED: Handle Year Change - reset the quarter when the year changes
   const handleYearChange = (e) => {
     setFilterYear(e.target.value);
     setQtr(''); 
@@ -166,12 +176,14 @@ export default function HRAllAppraisals() {
     const matchesSearch = search === '' || empName.includes(search.toLowerCase()) || empIdStr.includes(search.toLowerCase());
     const matchesQtr = qtr === '' || appQuarterId === qtr;
     
-    // 🚨 UPGRADED: Only show appraisals for the selected year if a quarter isn't specifically chosen
     const appYear = a.reviewYear || a.appraisalQuarter?.year;
     const matchesYear = filterYear === '' || (appYear && appYear.toString() === filterYear) || matchesQtr;
 
     const matchesCo = co === '' || a.employeeId?.companyCode === co;
     const matchesMgr = mgrFilter === '' || mgrInfo.id === mgrFilter;
+    
+    // 🚨 UPGRADED: Connect Office Station Filter 
+    const matchesOffice = officeFilter === '' || a.employeeId?.employmentDetails?.officeLocation === officeFilter;
     
     let matchesStatus = true;
     if (statusFilter !== '') {
@@ -182,7 +194,20 @@ export default function HRAllAppraisals() {
       }
     }
     
-    return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr;
+    return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
+  }).sort((a, b) => {
+    // 🚨 UPGRADED: Core Sorting Logic (CEO Activity First -> Then Recent Date/Time)
+    const ceoStatuses = ['WITH_CEO', 'APPROVED'];
+    const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
+    const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
+
+    if (isACeo !== isBCeo) {
+      return isBCeo - isACeo; // Push CEO activity to top
+    }
+
+    const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+    const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+    return dateB - dateA; // Most recent on top
   });
 
   const getQuarterName = (qId) => {
@@ -191,18 +216,60 @@ export default function HRAllAppraisals() {
     return match ? `${match.name} (${match.year})` : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
   };
 
-  // 🚨 UPGRADED: Dynamically extract unique years and currently available quarters for that year
   const availableYears = [...new Set(dbQuarters.map(q => q.year))].sort((a, b) => b - a);
   const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+
+  // 🚨 UPGRADED: CSV Download Generator Function
+  const handleDownloadReport = () => {
+    let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Status,Last Updated Date & Time\n";
+    
+    filtered.forEach(a => {
+      const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
+      const empId = `"${a.employeeId?.employeeId || ''}"`;
+      const jobTitle = `"${a.employeeId?.employmentDetails?.jobTitle || ''}"`;
+      const office = `"${a.employeeId?.employmentDetails?.officeLocation || 'Unassigned'}"`;
+      const coCode = `"${a.employeeId?.companyCode || 'FSM'}"`;
+      const mgrInfo = getManagerInfo(a.managerId);
+      const mgrName = `"${mgrInfo.name}"`;
+      const qtrName = `"${getQuarterName(a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter)}"`;
+      const score = `"${a.isMissing ? 'N/A' : (a.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0')}"`;
+      
+      let statusText = a.workflow?.status || 'UNKNOWN';
+      if (a.isMissing) statusText = 'NOT_STARTED';
+      const status = `"${statusText}"`;
+      
+      const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
+
+      csvContent += `${empName},${empId},${jobTitle},${office},${coCode},${mgrName},${qtrName},${score},${status},${updated}\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `HR_Appraisals_Report_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="max-w-6xl mx-auto pb-[60px] font-sans">
       
-      <div className="mb-[20px] flex justify-between items-end">
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <h1 className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">&#128203; HR Tracking & Master List</h1>
           <p className="text-[13px] text-[#6b7280]">View submitted appraisals or track missing submissions by Line Manager</p>
         </div>
+        
+        {/* 🚨 UPGRADED: Download Report Button tied directly to active filters */}
+        <button 
+          onClick={handleDownloadReport} 
+          disabled={loading || filtered.length === 0}
+          className="py-[10px] px-[16px] bg-[#059669] hover:bg-[#047857] text-white rounded-[8px] text-[13px] font-[700] transition-colors flex items-center gap-[6px] shadow-sm disabled:opacity-50"
+        >
+          &#11015; Download Filtered Report
+        </button>
       </div>
 
       <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm p-[16px] mb-[20px] flex flex-wrap gap-[12px]">
@@ -216,6 +283,14 @@ export default function HRAllAppraisals() {
           <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
         </div>
         
+        {/* 🚨 UPGRADED: New Office Station Dropdown */}
+        <select value={officeFilter} onChange={e => setOfficeFilter(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
+          <option value="">All Offices</option>
+          {availableOffices.map(off => (
+             <option key={`off-${off}`} value={off}>{off}</option>
+          ))}
+        </select>
+
         <select value={mgrFilter} onChange={e => setMgrFilter(e.target.value)} className="py-[10px] px-[12px] bg-[#F8FAFC] border border-[#E2DDD4] rounded-[8px] text-[13px] font-[600] text-[#0f1923] outline-none cursor-pointer w-[180px]">
           <option value="">All Managers</option>
           {managerList.map(mgr => (
@@ -223,7 +298,6 @@ export default function HRAllAppraisals() {
           ))}
         </select>
         
-        {/* 🚨 UPGRADED: Two-step Year & Quarter Filtering */}
         <div className="flex gap-[6px]">
           <select value={filterYear} onChange={handleYearChange} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[100px]">
             <option value="">All Years</option>
@@ -294,7 +368,8 @@ export default function HRAllAppraisals() {
                         <div className="font-[700] text-[#0D2B55]">{empName}</div>
                         <div className="text-[11px] text-[#6b7280]">
                           {a.employeeId?.employmentDetails?.jobTitle} 
-                          {!a.isMissing && a.updatedAt && ` · ${new Date(a.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`}
+                          {/* 🚨 UPGRADED: Accurate Time & Date display for modifications */}
+                          {!a.isMissing && a.updatedAt && ` · ${new Date(a.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}
                         </div>
                       </td>
                       <td className="p-[12px_16px] text-[#0f1923] text-[12px] font-[600]">{mgrInfo.name}</td>
@@ -356,7 +431,7 @@ export default function HRAllAppraisals() {
                     {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
                   </h3>
                   <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Last updated {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Last updated {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               </div>

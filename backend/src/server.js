@@ -22,6 +22,7 @@ const quarterRoutes = require('./routes/quarterRoutes');
 const auditRoutes = require('./routes/auditRoutes');
 // 🚨 UPGRADE: Import the global API logger middleware
 const apiLogger = require('./middleware/apiLogger');
+const notificationRoutes = require('./routes/notificationRoutes');
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use('/api/v1/company-metrics', companyMetricsRoutes);
 app.use('/api/v1/audit', require('./routes/auditRoutes'));
 app.use('/api/v1/quarters', quarterRoutes);
 app.use('/api/v1/audit', auditRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

@@ -1,3 +1,4 @@
+// backend/src/models/Notification.js
 const mongoose = require('mongoose');
 
 const notificationSchema = new mongoose.Schema({
@@ -23,12 +24,18 @@ const notificationSchema = new mongoose.Schema({
     enum: ['APPRAISAL_SUBMITTED', 'APPRAISAL_FORWARDED', 'APPRAISAL_APPROVED', 'APPRAISAL_REJECTED', 'SYSTEM_ALERT'],
     default: 'SYSTEM_ALERT'
   },
+  actionUrl: { 
+    type: String 
+  },
+  // 🚨 UPGRADED: Added targetRole to segregate multi-role user alerts
+  targetRole: {
+    type: String,
+    enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'],
+    required: true
+  },
   isRead: { 
     type: Boolean, 
     default: false 
-  },
-  actionLink: { 
-    type: String // Optional URL to direct the user when they click the notification
   }
 }, { timestamps: true });
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users } from "lucide-react";
+import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle } from "lucide-react";
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -53,10 +53,12 @@ export default function StaffManagement() {
   const [successMsg, setSuccessMsg] = useState('');
   const [isRecycleBinView, setIsRecycleBinView] = useState(false); 
 
-  // 🚨 Custom Searchable Dropdown States for Edit Modal
   const [openDropdown, setOpenDropdown] = useState(null);
   const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '' });
   const dropdownRef = useRef(null);
+
+  // 🚨 NEW: State for mass delete loader
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -86,7 +88,6 @@ export default function StaffManagement() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // Close custom dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -137,7 +138,7 @@ export default function StaffManagement() {
       
       setSuccessMsg(`${editingStaff.personalDetails.firstName}'s profile updated successfully.`);
       setEditingStaff(null);
-      setOpenDropdown(null); // Ensure dropdowns close
+      setOpenDropdown(null); 
       fetchData();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (e) { alert("Failed to update to database."); }
@@ -152,6 +153,33 @@ export default function StaffManagement() {
       fetchData();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (e) { alert("Failed to delete from database."); }
+  };
+
+  // 🚨 NEW: Mass Delete Function
+  const handleMassDelete = async () => {
+    if (dbStaff.length === 0) return alert("No active staff to delete.");
+    
+    const confirm1 = window.confirm(`WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`);
+    if (!confirm1) return;
+
+    const confirm2 = window.prompt(`To confirm this mass deletion, please type "DELETE ALL" below:`);
+    if (confirm2 !== "DELETE ALL") {
+      return alert("Mass deletion cancelled.");
+    }
+
+    try {
+      setIsDeletingAll(true);
+      // NOTE: You need to add this route to your backend user routes: router.delete('/mass-delete', ...)
+      await api.delete('/users/mass-delete'); 
+      setSuccessMsg(`All employees have been successfully moved to the Recycle Bin.`);
+      fetchData();
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (e) { 
+      console.error(e);
+      alert("Failed to execute mass deletion. Make sure the backend route exists."); 
+    } finally {
+      setIsDeletingAll(false);
+    }
   };
 
   const handleRestore = async (userId) => {
@@ -189,7 +217,7 @@ export default function StaffManagement() {
         `"${e.personalDetails?.firstName || ''}"`,
         `"${e.personalDetails?.lastName || ''}"`,
         e.companyCode || '',
-        `"${e.employmentDetails?.officeLocation || 'Unassigned'}"`,
+        `"${e.employmentDetails?.officeLocation || 'd'}"`,
         `"${e.employmentDetails?.jobTitle || ''}"`,
         e.employmentDetails?.salary || 0,
         e.employmentDetails?.dateOfHire ? new Date(e.employmentDetails.dateOfHire).toLocaleDateString() : '',
@@ -230,7 +258,6 @@ export default function StaffManagement() {
     });
   };
 
-  // 🚨 UPGRADE: Searchable Dropdown Helper specifically tailored for the Edit Modal
   const renderSearchableDropdown = (fieldKey, dbFieldObj, dbFieldProp, options, placeholder, displayKey, valueKey = null) => {
     const isOpen = openDropdown === fieldKey;
     const query = searchQueries[fieldKey] || '';
@@ -241,12 +268,10 @@ export default function StaffManagement() {
       return text.toLowerCase().includes(query.toLowerCase());
     });
 
-    // Extract current value from the complex editingStaff object structure
     const currentValue = dbFieldProp 
         ? editingStaff[dbFieldObj]?.[dbFieldProp] 
         : editingStaff[dbFieldObj];
         
-    // Specifically handle the manager object vs ID string discrepancy
     const safeCurrentValue = (fieldKey === 'mgr' && typeof currentValue === 'object' && currentValue !== null) 
         ? currentValue._id 
         : currentValue;
@@ -258,7 +283,6 @@ export default function StaffManagement() {
       : placeholder;
 
     const handleSelect = (val) => {
-        // Deep update the editingStaff state
         setEditingStaff(prev => {
             const newState = { ...prev };
             if (dbFieldProp) {
@@ -299,7 +323,6 @@ export default function StaffManagement() {
             </div>
             
             <div className="max-h-[180px] overflow-y-auto overflow-x-hidden custom-scrollbar">
-              {/* Added an Unassigned option explicitly for Managers */}
               {fieldKey === 'mgr' && !query && (
                 <div 
                     onClick={() => handleSelect(null)}
@@ -406,9 +429,24 @@ export default function StaffManagement() {
           <div className="text-xs font-semibold text-slate-500">
             Showing <span className="text-slate-900">{data.length}</span> {isRecycleBinView ? 'deleted' : 'active'} staff members
           </div>
-          <button onClick={handleDownloadCSV} className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-slate-700 bg-white border shadow-sm hover:bg-slate-50 rounded-lg transition-colors">
-             <Download className="w-3.5 h-3.5" /> Download CSV
-          </button>
+          
+          <div className="flex gap-2">
+            {/* 🚨 NEW: Mass Delete Button (Only in active view) */}
+            {!isRecycleBinView && (
+              <button 
+                onClick={handleMassDelete} 
+                disabled={dbStaff.length === 0 || isDeletingAll}
+                className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+              >
+                {isDeletingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />} 
+                Delete All Staff
+              </button>
+            )}
+
+            <button onClick={handleDownloadCSV} className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-slate-700 bg-white border shadow-sm hover:bg-slate-50 rounded-lg transition-colors">
+               <Download className="w-3.5 h-3.5" /> Download CSV
+            </button>
+          </div>
         </div>
       </div>
 
@@ -521,7 +559,6 @@ export default function StaffManagement() {
                 </div>
               </div>
               
-              {/* 🚨 UPGRADE: Searchable Dropdowns for Edit Modal */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Job Title</label>
