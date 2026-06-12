@@ -1,18 +1,27 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: process.env.SMTP_PORT || 465, // Must be 465 for Railway
-  secure: process.env.SMTP_SECURE === 'true', // Must evaluate to true for port 465
+  secure: process.env.SMTP_SECURE === 'true', // Must be true for 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
+  },
+  // 🚨 FIX 1: Tell Nodemailer to only use IPv4
+  family: 4, 
+  
+  // 🚨 FIX 2: Force Node v22 DNS to strictly resolve IPv4 (A records) only
+  lookup: (hostname, options, callback) => {
+    dns.lookup(hostname, { family: 4, hints: dns.ADDRCONFIG | dns.V4MAPPED }, (err, address, family) => {
+      callback(err, address, family);
+    });
   }
-  // The global dns.setDefaultResultOrder('ipv4first') in server.js 
-  // safely handles IPv4 resolution for this connection.
 });
 
 const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
+
 const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
   <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
