@@ -14,8 +14,13 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+<<<<<<< HEAD
 const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
 // ... rest of your emailService.js file
+=======
+// const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
+const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'https://stipdash.vercel.app'
+>>>>>>> ea8a466d06c48ece4582c288c83f37202ab024a8
 const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
   <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
