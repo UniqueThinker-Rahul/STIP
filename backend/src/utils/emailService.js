@@ -12,7 +12,8 @@ const transporter = nodemailer.createTransport({
   // safely handles IPv4 resolution for this connection.
 });
 
-const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
+// const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
+const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'https://stipdash.vercel.app'
 const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
   <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
