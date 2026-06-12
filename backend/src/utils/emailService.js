@@ -1,21 +1,59 @@
 const nodemailer = require('nodemailer');
+const mongoose = require('mongoose');
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: 465, // Hardcoded to 465
-  secure: true, // FORCED TRUE: This prevents the ETIMEDOUT hang on port 465
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  tls: {
-    // Prevents arbitrary container certificate chain blocking
-    rejectUnauthorized: false
+// Safely bind to the SystemConfig database collection dynamically
+const getSystemConfigModel = () => {
+  try {
+    return mongoose.model('SystemConfig');
+  } catch (error) {
+    const SystemConfigSchema = new mongoose.Schema({
+      key: { type: String, required: true, unique: true },
+      value: { type: Object, required: true }
+    }, { timestamps: true });
+    return mongoose.model('SystemConfig', SystemConfigSchema);
   }
-});
+};
 
 const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
-// ... rest of your emailService.js file
+
+// 🚨 UPGRADE: Dynamically fetches SMTP settings from the database in real-time
+const createDynamicTransporter = async () => {
+  const SystemConfig = getSystemConfigModel();
+  let dbConfig = null;
+  
+  try {
+    const configDoc = await SystemConfig.findOne({ key: 'smtp_settings' });
+    if (configDoc && configDoc.value) {
+      dbConfig = configDoc.value;
+    }
+  } catch (err) {
+    console.error("Dynamic SMTP Config fetch failed. Falling back to ENV:", err);
+  }
+
+  // Uses Database first, falls back to static .env if DB is empty
+  const host = dbConfig?.host || process.env.SMTP_HOST || 'smtp.titan.email';
+  const port = Number(dbConfig?.port) || Number(process.env.SMTP_PORT) || 465;
+  const secure = dbConfig?.secure !== undefined ? dbConfig.secure : (process.env.SMTP_SECURE === 'true' || port === 465);
+  const user = dbConfig?.user || process.env.SMTP_USER;
+  const pass = dbConfig?.pass || process.env.SMTP_PASS;
+  
+  const fromName = dbConfig?.fromName || 'STIP Portal';
+  const fromEmail = dbConfig?.fromEmail || user;
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
+    family: 4 // FORCED IPv4
+  });
+
+  return {
+    transporter,
+    fromLine: `"${fromName}" <${fromEmail}>`
+  };
+};
 
 const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
@@ -51,8 +89,9 @@ exports.sendManagerSubmitEmail = async ({ toEmail, hrName, empName, empId, empTi
     <p>Please log in to the STIP Portal to review and, if appropriate, forward this appraisal to the CEO for final approval.</p>
   `;
 
+  const { transporter, fromLine } = await createDynamicTransporter();
   return transporter.sendMail({ 
-    from: process.env.SMTP_FROM, 
+    from: fromLine, 
     to: toEmail, 
     subject, 
     html: createHTMLTemplate('New STIP Appraisal Submitted', hrName, content, `${PORTAL_BASE_URL}/dashboard/hr/appraisals`) 
@@ -86,8 +125,9 @@ exports.sendHRForwardEmail = async ({ toEmail, ceoName, empName, empId, empTitle
     <p>Please log in to the STIP Portal to Approve or Not Approve this appraisal.<br/>If you select "Not Approve", a comment is required.</p>
   `;
 
+  const { transporter, fromLine } = await createDynamicTransporter();
   return transporter.sendMail({ 
-    from: process.env.SMTP_FROM, 
+    from: fromLine, 
     to: toEmail, 
     subject, 
     html: createHTMLTemplate('STIP Appraisal Awaiting CEO Approval', ceoName, content, `${PORTAL_BASE_URL}/dashboard/ceo/approve`) 
@@ -108,11 +148,11 @@ exports.sendCEOApproveEmail = async ({ toEmail, recipientName, empName, empId, q
     <p>This appraisal is now fully approved and ready for payroll processing.</p>
   `;
 
+  const { transporter, fromLine } = await createDynamicTransporter();
   return transporter.sendMail({ 
-    from: process.env.SMTP_FROM, 
+    from: fromLine, 
     to: toEmail, 
     subject, 
-    // 🚨 FIX: Removed the /login route so it goes to the base URL
     html: createHTMLTemplate('STIP Appraisal Approved', recipientName, content, `${PORTAL_BASE_URL}`) 
   });
 };
@@ -137,11 +177,11 @@ exports.sendCEORejectEmail = async ({ toEmail, recipientName, empName, empId, qu
     <p><strong>Action required:</strong> Please review the comments above and follow up with the Line Manager (${mgrName}) as needed.</p>
   `;
 
+  const { transporter, fromLine } = await createDynamicTransporter();
   return transporter.sendMail({ 
-    from: process.env.SMTP_FROM, 
+    from: fromLine, 
     to: toEmail, 
     subject, 
-    // 🚨 FIX: Removed the /login route so it goes to the base URL
     html: createHTMLTemplate('STIP Appraisal Not Approved', recipientName, content, `${PORTAL_BASE_URL}`) 
   });
 };

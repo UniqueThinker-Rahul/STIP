@@ -22,7 +22,6 @@ const getIprfLabel = (score) => {
     return 'Not Graded';
 };
 
-// Find this helper function at the top of your backend/src/routes/appraisalRoutes.js
 const dispatchNotification = async ({ senderId, recipientRole, recipientId, targetRoleContext, title, message, type, actionUrl }) => {
   try {
     let recipients = [];
@@ -41,7 +40,6 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
     for (const recipient of recipients) {
       if (!recipient || !recipient._id) continue;
       
-      // 🚨 UPGRADED: Saves the targetRole so it routes to the correct dashboard
       await Notification.create({ 
         recipient: recipient._id, 
         sender: senderId, 
@@ -49,7 +47,7 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
         message, 
         type, 
         actionUrl,
-        targetRole: targetRoleContext || recipientRole || 'EMPLOYEE' // Injection mapping
+        targetRole: targetRoleContext || recipientRole || 'EMPLOYEE'
       });
       
       console.log(`🔔 [IN-APP] Saved DB notification for ${recipient.personalDetails?.firstName} (Routed to: ${targetRoleContext})`);
@@ -69,6 +67,53 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
     return [];
   }
 };
+
+// 🚨 UPGRADED: Real-time Analytics perfectly mapped to match your exact UI config
+router.get('/analytics/category-averages', async (req, res) => {
+  try {
+    // Only calculate averages from submitted/approved appraisals (ignore drafts)
+    let matchStage = {
+       'workflow.status': { $in: ['SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED'] }
+    };
+
+    if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
+       matchStage.managerId = req.user.id || req.user._id;
+    }
+
+    // Mathematical average of all scores across the database
+    const aggregation = await Appraisal.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          JobCompetence: { $avg: "$scores.jobCompetence.rating" },
+          Dependability: { $avg: "$scores.dependability.rating" },
+          ExpectedResults: { $avg: "$scores.deliveredResults.rating" },
+          Adaptability: { $avg: "$scores.adaptability.rating" },
+          SafeWorking: { $avg: "$scores.safeWorking.rating" },
+          Behaviors: { $avg: "$scores.behaviors.rating" } // 🚨 Mapped perfectly to "Behaviors"
+        }
+      }
+    ]);
+
+    const result = aggregation[0] || {};
+    
+    // 🚨 Explicitly formatting keys to match your CATEGORY_CONFIG exactly
+    const data = [
+      { name: 'Job Competence', score: Number(result.JobCompetence || 0) },
+      { name: 'Behaviors', score: Number(result.Behaviors || 0) },
+      { name: 'Dependability', score: Number(result.Dependability || 0) },
+      { name: 'Adaptability/Flexibility', score: Number(result.Adaptability || 0) },
+      { name: 'Safe Working Environment', score: Number(result.SafeWorking || 0) },
+      { name: 'Expected Results', score: Number(result.ExpectedResults || 0) }
+    ];
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Aggregation error:", error);
+    res.status(500).json({ success: false, message: 'Failed to fetch analytics' });
+  }
+});
 
 // 1. GET /api/v1/appraisals
 router.get('/', async (req, res) => {
@@ -155,7 +200,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
       const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
       setImmediate(async () => {
-        try { // <--- MAKE SURE THIS IS HERE
+        try { 
           console.log(`\n📧 [EMAIL TRIGGER 1] Manager Submitted Appraisal for ${employeeName}...`);
           const hrTargets = await dispatchNotification({
             senderId: managerId, recipientRole: 'HR_ADMIN', targetRoleContext: 'HR_ADMIN',
@@ -180,14 +225,14 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
                console.log(`   -> ✅ SUCCESS.`);
             } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
           }
-        } catch (emailError) { // <--- MAKE SURE THE 'TRY' BLOCK IS CLOSED WITH } RIGHT BEFORE THIS
+        } catch (emailError) { 
           console.error("📧 [EMAIL SYSTEM FAILURE]:", emailError.message);
         }
       });
     }
 
     res.status(201).json({ message: status === 'DRAFT' ? 'Draft saved successfully.' : 'Appraisal submitted successfully.', data: appraisal });
-  } catch (error) { // <--- THIS IS YOUR EXISTING CATCH FOR THE MAIN ROUTE
+  } catch (error) { 
     console.error("Database Save Error:", error);
     res.status(500).json({ message: 'Failed to save appraisal record.', error: error.message });
   }
@@ -220,7 +265,6 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     const mgrName = appraisal.managerId ? `${appraisal.managerId.personalDetails?.firstName} ${appraisal.managerId.personalDetails?.lastName}` : 'Line Manager';
     
-    // 🚨 FIX: Dynamically fetch active HR User from DB
     const actionUser = await User.findById(req.user.id || req.user._id);
     const hrName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'HR Manager';
     
@@ -228,7 +272,6 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
     const qYear = appraisal.appraisalQuarter?.year || appraisal.period?.year || new Date().getFullYear();
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
     
-    // 🚨 FIX: Appended exact time to the date
     const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     setImmediate(async () => {
@@ -281,7 +324,6 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
 
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     
-    // 🚨 FIX: Dynamically fetch active CEO User from DB
     const actionUser = await User.findById(req.user.id || req.user._id);
     const ceoName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'CEO';
     
@@ -289,7 +331,6 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
     const qYear = appraisal.appraisalQuarter?.year || appraisal.period?.year || new Date().getFullYear();
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
     
-    // 🚨 FIX: Appended exact time to the date
     const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     setImmediate(async () => {
@@ -353,7 +394,6 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     const mgrName = appraisal.managerId ? `${appraisal.managerId.personalDetails?.firstName} ${appraisal.managerId.personalDetails?.lastName}` : 'Line Manager';
     
-    // 🚨 FIX: Dynamically fetch active rejector User from DB
     const actionUser = await User.findById(req.user.id || req.user._id);
     const rejectorName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : (req.user.role === 'CEO' ? 'CEO' : 'HR');
     
@@ -361,7 +401,6 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
     const qYear = appraisal.appraisalQuarter?.year || appraisal.period?.year || new Date().getFullYear();
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
     
-    // 🚨 FIX: Appended exact time to the date
     const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     setImmediate(async () => {

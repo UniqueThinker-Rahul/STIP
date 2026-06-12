@@ -70,6 +70,55 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
   }
 };
 
+// 🚨 NEW: Real-time Analytics Aggregation for KPA Category Chart
+// GET /api/v1/appraisals/analytics/category-averages
+router.get('/analytics/category-averages', async (req, res) => {
+  try {
+    // Only calculate averages from submitted/approved appraisals (ignore drafts)
+    let matchStage = {
+       'workflow.status': { $in: ['SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED'] }
+    };
+
+    // If a Line Manager explicitly requests team scope, filter by their ID
+    if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
+       matchStage.managerId = req.user.id || req.user._id;
+    }
+
+    // Mathematical average of all scores across the database
+    const aggregation = await Appraisal.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          JobCompetence: { $avg: "$scores.jobCompetence.rating" },
+          Dependability: { $avg: "$scores.dependability.rating" },
+          ExpectedResults: { $avg: "$scores.deliveredResults.rating" },
+          Adaptability: { $avg: "$scores.adaptability.rating" },
+          SafeWorking: { $avg: "$scores.safeWorking.rating" },
+          Initiative: { $avg: "$scores.behaviors.rating" }
+        }
+      }
+    ]);
+
+    const result = aggregation[0] || {};
+    
+    // Format perfectly for the Recharts frontend array (Order: Bottom to Top to match image rendering)
+    const data = [
+      { name: 'Job Competence', score: Number((result.JobCompetence || 0).toFixed(1)) },
+      { name: 'Dependability', score: Number((result.Dependability || 0).toFixed(1)) },
+      { name: 'Expected Results', score: Number((result.ExpectedResults || 0).toFixed(1)) },
+      { name: 'Adaptability/Flexibility', score: Number((result.Adaptability || 0).toFixed(1)) },
+      { name: 'Safe Working Environment', score: Number((result.SafeWorking || 0).toFixed(1)) },
+      { name: 'Initiative', score: Number((result.Initiative || 0).toFixed(1)) }
+    ];
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Aggregation error:", error);
+    res.status(500).json({ success: false, message: 'Failed to fetch analytics' });
+  }
+});
+
 // 1. GET /api/v1/appraisals
 router.get('/', async (req, res) => {
   try {
@@ -148,45 +197,46 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
       const emp = await User.findById(employeeId);
       const employeeName = emp ? `${emp.personalDetails?.firstName} ${emp.personalDetails?.lastName}` : 'Employee';
       
-      // 🚨 FIX: Dynamically fetch active manager from DB
       const actionUser = await User.findById(managerId);
       const mgrName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'Line Manager';
       
       const iprfScore = calculatedResults?.finalIprfScore || 0;
-      
-      // 🚨 FIX: Appended exact time to the date
       const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
       setImmediate(async () => {
-        console.log(`\n📧 [EMAIL TRIGGER 1] Manager Submitted Appraisal for ${employeeName}...`);
-        const hrTargets = await dispatchNotification({
-          senderId: managerId, recipientRole: 'HR_ADMIN', targetRoleContext: 'HR_ADMIN',
-          title: 'Appraisal Submitted for HR Review',
-          message: `The Line Manager has submitted the appraisal for ${employeeName}. It is now awaiting your review.`,
-          type: 'APPRAISAL_SUBMITTED', actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
-        });
+        try { 
+          console.log(`\n📧 [EMAIL TRIGGER 1] Manager Submitted Appraisal for ${employeeName}...`);
+          const hrTargets = await dispatchNotification({
+            senderId: managerId, recipientRole: 'HR_ADMIN', targetRoleContext: 'HR_ADMIN',
+            title: 'Appraisal Submitted for HR Review',
+            message: `The Line Manager has submitted the appraisal for ${employeeName}. It is now awaiting your review.`,
+            type: 'APPRAISAL_SUBMITTED', actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
+          });
 
-        for (const hr of hrTargets) {
-          console.log(`   -> Target: ${hr.firstName} | Extracted Email: "${hr.email}"`);
-          if (hr.email && hr.email.includes('@')) {
-             console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
-             await sendManagerSubmitEmail({
-               toEmail: hr.email, hrName: hr.firstName || 'HR Manager',
-               empName: employeeName, empId: emp?.employeeId || 'N/A',
-               empTitle: emp?.employmentDetails?.jobTitle || 'Staff',
-               empCompany: emp?.companyCode || 'FSM',
-               mgrName: mgrName, quarter: actualQuarter, year: actualYear,
-               iprfFactor: iprfScore.toFixed(1), iprfLabel: getIprfLabel(iprfScore),
-               submitDate: formattedDateTime
-             });
-             console.log(`   -> ✅ SUCCESS.`);
-          } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+          for (const hr of hrTargets) {
+            console.log(`   -> Target: ${hr.firstName} | Extracted Email: "${hr.email}"`);
+            if (hr.email && hr.email.includes('@')) {
+               console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
+               await sendManagerSubmitEmail({
+                 toEmail: hr.email, hrName: hr.firstName || 'HR Manager',
+                 empName: employeeName, empId: emp?.employeeId || 'N/A',
+                 empTitle: emp?.employmentDetails?.jobTitle || 'Staff',
+                 empCompany: emp?.companyCode || 'FSM',
+                 mgrName: mgrName, quarter: actualQuarter, year: actualYear,
+                 iprfFactor: iprfScore.toFixed(1), iprfLabel: getIprfLabel(iprfScore),
+                 submitDate: formattedDateTime
+               });
+               console.log(`   -> ✅ SUCCESS.`);
+            } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+          }
+        } catch (emailError) { 
+          console.error("📧 [EMAIL SYSTEM FAILURE]:", emailError.message);
         }
       });
     }
 
     res.status(201).json({ message: status === 'DRAFT' ? 'Draft saved successfully.' : 'Appraisal submitted successfully.', data: appraisal });
-  } catch (error) {
+  } catch (error) { 
     console.error("Database Save Error:", error);
     res.status(500).json({ message: 'Failed to save appraisal record.', error: error.message });
   }

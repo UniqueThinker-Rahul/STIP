@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
+import StipCategoryChart from '../../../components/charts/StipCategoryChart';
 
 export default function ManagerDashboard() {
   const router = useRouter();
@@ -12,7 +13,7 @@ export default function ManagerDashboard() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // 🚨 UPGRADE: Dynamic Quarters State
+  // Dynamic Quarters State
   const [dbQuarters, setDbQuarters] = useState([]);
   const [activeQuarter, setActiveQuarter] = useState(null);
 
@@ -45,9 +46,8 @@ export default function ManagerDashboard() {
         setDrafts(myAppraisals.filter(a => a.workflow?.status === 'DRAFT'));
         setSubmissions(myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT'));
 
-        // 🚨 UPGRADE: Configure Dynamic Quarters
+        // Configure Dynamic Quarters
         const fetchedQuarters = qtrRes.data?.data || [];
-        // Sort quarters by start date so they display chronologically
         fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         setDbQuarters(fetchedQuarters);
 
@@ -83,7 +83,6 @@ export default function ManagerDashboard() {
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
     .slice(0, 3);
 
-  // Calculate days remaining dynamically
   let daysRemainingText = "No active deadlines";
   if (activeQuarter) {
     const end = new Date(activeQuarter.endDate);
@@ -306,68 +305,6 @@ export default function ManagerDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[14px]">
         
-        {/* 🚨 UPGRADE: Dynamic DB Deadlines */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
-          <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
-            <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFF7ED] flex items-center justify-center text-[13px] shrink-0">&#128197;</div>
-            <div>
-              <div className="text-[13px] font-[700] text-[#0D2B55]">Live Appraisal Deadlines</div>
-              <div className="text-[11px] text-[#6b7280]">All quarters &middot; Submit before deadline date</div>
-            </div>
-          </div>
-          <div className="p-[14px_16px]">
-            <table className="w-full border-collapse text-[12px]">
-              <thead>
-                <tr>
-                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Quarter</th>
-                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Year</th>
-                  <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Deadline</th>
-                  <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dbQuarters.length === 0 ? (
-                  <tr><td colSpan="4" className="text-center p-4 text-gray-500">No timeline data available.</td></tr>
-                ) : (
-                  dbQuarters.map(q => {
-                    const now = new Date();
-                    const exp = now > new Date(q.endDate);
-                    const isActive = q._id === activeQuarter?._id;
-                    const isLocked = q.isLocked || (exp && !q.forceUnlock);
-                    
-                    let bgRow = '';
-                    let textClass = 'text-[#6b7280]';
-                    let statusBadge = <span className="bg-[#E2DDD4] text-[#6b7280] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">Upcoming</span>;
-                    
-                    if (isLocked) {
-                      bgRow = 'bg-[#F0FDF4]';
-                      textClass = 'text-[#065F46]';
-                      statusBadge = <span className="bg-[#D1FAE5] text-[#065F46] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#10003; Locked</span>;
-                    } else if (isActive || q.forceUnlock) {
-                      bgRow = 'bg-[#FFFBEB] outline outline-[1.5px] outline-[#FDE68A] outline-offset-[-1px] rounded-[6px]';
-                      textClass = 'text-[#92400E]';
-                      statusBadge = <span className="bg-[#FEF3C7] text-[#92400E] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#9200; {q.forceUnlock && exp ? 'Override' : 'Active'}</span>;
-                    }
-
-                    return (
-                      <tr key={q._id} className={bgRow}>
-                        <td className={`p-[9px_8px] font-[700] ${textClass} rounded-l-[6px]`}>{q.name}</td>
-                        <td className="p-[9px_8px] text-[#0f1923]">{q.year}</td>
-                        <td className={`p-[9px_8px] text-center font-[700] ${textClass}`}>{new Date(q.endDate).toLocaleDateString()}</td>
-                        <td className="p-[9px_8px] text-center rounded-r-[6px]">{statusBadge}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-            <div className="mt-[12px] bg-[#0D2B55] rounded-[9px] p-[10px_14px] flex items-center justify-between">
-              <span className="text-[12px] text-white/60">{activeQuarter ? `${activeQuarter.name} closes in` : 'System Status'}</span>
-              <span className="text-[14px] font-[700] text-[#e8c96a]">{daysRemainingText}</span>
-            </div>
-          </div>
-        </div>
-
         {/* My Appraisal Activity */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0 flex flex-col">
           <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center justify-between gap-[9px]">
@@ -442,7 +379,75 @@ export default function ManagerDashboard() {
           </div>
         </div>
 
+        {/* Dynamic DB Deadlines */}
+        <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
+          <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
+            <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFF7ED] flex items-center justify-center text-[13px] shrink-0">&#128197;</div>
+            <div>
+              <div className="text-[13px] font-[700] text-[#0D2B55]">Live Appraisal Deadlines</div>
+              <div className="text-[11px] text-[#6b7280]">All quarters &middot; Submit before deadline date</div>
+            </div>
+          </div>
+          <div className="p-[14px_16px]">
+            <table className="w-full border-collapse text-[12px]">
+              <thead>
+                <tr>
+                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Quarter</th>
+                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Year</th>
+                  <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Deadline</th>
+                  <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dbQuarters.length === 0 ? (
+                  <tr><td colSpan="4" className="text-center p-4 text-gray-500">No timeline data available.</td></tr>
+                ) : (
+                  dbQuarters.map(q => {
+                    const now = new Date();
+                    const exp = now > new Date(q.endDate);
+                    const isActive = q._id === activeQuarter?._id;
+                    const isLocked = q.isLocked || (exp && !q.forceUnlock);
+                    
+                    let bgRow = '';
+                    let textClass = 'text-[#6b7280]';
+                    let statusBadge = <span className="bg-[#E2DDD4] text-[#6b7280] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">Upcoming</span>;
+                    
+                    if (isLocked) {
+                      bgRow = 'bg-[#F0FDF4]';
+                      textClass = 'text-[#065F46]';
+                      statusBadge = <span className="bg-[#D1FAE5] text-[#065F46] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#10003; Locked</span>;
+                    } else if (isActive || q.forceUnlock) {
+                      bgRow = 'bg-[#FFFBEB] outline outline-[1.5px] outline-[#FDE68A] outline-offset-[-1px] rounded-[6px]';
+                      textClass = 'text-[#92400E]';
+                      statusBadge = <span className="bg-[#FEF3C7] text-[#92400E] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#9200; {q.forceUnlock && exp ? 'Override' : 'Active'}</span>;
+                    }
+
+                    return (
+                      <tr key={q._id} className={bgRow}>
+                        <td className={`p-[9px_8px] font-[700] ${textClass} rounded-l-[6px]`}>{q.name}</td>
+                        <td className="p-[9px_8px] text-[#0f1923]">{q.year}</td>
+                        <td className={`p-[9px_8px] text-center font-[700] ${textClass}`}>{new Date(q.endDate).toLocaleDateString()}</td>
+                        <td className="p-[9px_8px] text-center rounded-r-[6px]">{statusBadge}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+            <div className="mt-[12px] bg-[#0D2B55] rounded-[9px] p-[10px_14px] flex items-center justify-between">
+              <span className="text-[12px] text-white/60">{activeQuarter ? `${activeQuarter.name} closes in` : 'System Status'}</span>
+              <span className="text-[14px] font-[700] text-[#e8c96a]">{daysRemainingText}</span>
+            </div>
+          </div>
+        </div>
+
       </div>
+
+      {/* Full Width Bottom Chart */}
+      <div className="mt-6">
+         <StipCategoryChart scope="team" />
+      </div>
+
     </div>
   );
 }
