@@ -148,45 +148,46 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
       const emp = await User.findById(employeeId);
       const employeeName = emp ? `${emp.personalDetails?.firstName} ${emp.personalDetails?.lastName}` : 'Employee';
       
-      // 🚨 FIX: Dynamically fetch active manager from DB
       const actionUser = await User.findById(managerId);
       const mgrName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'Line Manager';
       
       const iprfScore = calculatedResults?.finalIprfScore || 0;
-      
-      // 🚨 FIX: Appended exact time to the date
       const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
       setImmediate(async () => {
-        console.log(`\n📧 [EMAIL TRIGGER 1] Manager Submitted Appraisal for ${employeeName}...`);
-        const hrTargets = await dispatchNotification({
-          senderId: managerId, recipientRole: 'HR_ADMIN', targetRoleContext: 'HR_ADMIN',
-          title: 'Appraisal Submitted for HR Review',
-          message: `The Line Manager has submitted the appraisal for ${employeeName}. It is now awaiting your review.`,
-          type: 'APPRAISAL_SUBMITTED', actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
-        });
+        try { // <--- MAKE SURE THIS IS HERE
+          console.log(`\n📧 [EMAIL TRIGGER 1] Manager Submitted Appraisal for ${employeeName}...`);
+          const hrTargets = await dispatchNotification({
+            senderId: managerId, recipientRole: 'HR_ADMIN', targetRoleContext: 'HR_ADMIN',
+            title: 'Appraisal Submitted for HR Review',
+            message: `The Line Manager has submitted the appraisal for ${employeeName}. It is now awaiting your review.`,
+            type: 'APPRAISAL_SUBMITTED', actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
+          });
 
-        for (const hr of hrTargets) {
-          console.log(`   -> Target: ${hr.firstName} | Extracted Email: "${hr.email}"`);
-          if (hr.email && hr.email.includes('@')) {
-             console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
-             await sendManagerSubmitEmail({
-               toEmail: hr.email, hrName: hr.firstName || 'HR Manager',
-               empName: employeeName, empId: emp?.employeeId || 'N/A',
-               empTitle: emp?.employmentDetails?.jobTitle || 'Staff',
-               empCompany: emp?.companyCode || 'FSM',
-               mgrName: mgrName, quarter: actualQuarter, year: actualYear,
-               iprfFactor: iprfScore.toFixed(1), iprfLabel: getIprfLabel(iprfScore),
-               submitDate: formattedDateTime
-             });
-             console.log(`   -> ✅ SUCCESS.`);
-          } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+          for (const hr of hrTargets) {
+            console.log(`   -> Target: ${hr.firstName} | Extracted Email: "${hr.email}"`);
+            if (hr.email && hr.email.includes('@')) {
+               console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
+               await sendManagerSubmitEmail({
+                 toEmail: hr.email, hrName: hr.firstName || 'HR Manager',
+                 empName: employeeName, empId: emp?.employeeId || 'N/A',
+                 empTitle: emp?.employmentDetails?.jobTitle || 'Staff',
+                 empCompany: emp?.companyCode || 'FSM',
+                 mgrName: mgrName, quarter: actualQuarter, year: actualYear,
+                 iprfFactor: iprfScore.toFixed(1), iprfLabel: getIprfLabel(iprfScore),
+                 submitDate: formattedDateTime
+               });
+               console.log(`   -> ✅ SUCCESS.`);
+            } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+          }
+        } catch (emailError) { // <--- MAKE SURE THE 'TRY' BLOCK IS CLOSED WITH } RIGHT BEFORE THIS
+          console.error("📧 [EMAIL SYSTEM FAILURE]:", emailError.message);
         }
       });
     }
 
     res.status(201).json({ message: status === 'DRAFT' ? 'Draft saved successfully.' : 'Appraisal submitted successfully.', data: appraisal });
-  } catch (error) {
+  } catch (error) { // <--- THIS IS YOUR EXISTING CATCH FOR THE MAIN ROUTE
     console.error("Database Save Error:", error);
     res.status(500).json({ message: 'Failed to save appraisal record.', error: error.message });
   }

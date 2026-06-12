@@ -2,17 +2,20 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 465, // Must be 465 for Railway
-  secure: process.env.SMTP_SECURE === 'true', // Must evaluate to true for port 465
+  port: 465, // Hardcoded to 465
+  secure: true, // FORCED TRUE: This prevents the ETIMEDOUT hang on port 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
+  },
+  tls: {
+    // Prevents arbitrary container certificate chain blocking
+    rejectUnauthorized: false
   }
-  // The global dns.setDefaultResultOrder('ipv4first') in server.js 
-  // safely handles IPv4 resolution for this connection.
 });
 
 const PORTAL_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://stipdash.vercel.app';
+// ... rest of your emailService.js file
 const createHTMLTemplate = (title, recipientName, content, linkUrl) => `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
   <div style="background-color: #0D2B55; padding: 20px; text-align: center;">
