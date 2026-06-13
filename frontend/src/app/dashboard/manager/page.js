@@ -119,14 +119,14 @@ export default function ManagerDashboard() {
           <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-[#6b7280]">My Direct Reports</div>
           <div className="text-[30px] font-[800] leading-[1] text-[#0D2B55]">{team.length}</div>
           <div className="text-[11px] mt-[5px] text-[#6b7280]">STIP-eligible employees assigned to you</div>
-          <div className="flex gap-[5px] mt-[8px] flex-wrap">
+          {/* <div className="flex gap-[5px] mt-[8px] flex-wrap">
             {['FSM', 'CDU', 'NAR', 'GUM'].map(code => {
                const count = team.filter(t => t.companyCode === code).length;
                if (count === 0) return null;
                const bg = code === 'FSM' ? 'bg-[#DBEAFE] text-[#1E40AF]' : code === 'CDU' ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEF3C7] text-[#92400E]';
                return <span key={code} className={`text-[10px] font-[700] px-[7px] py-[2px] rounded-full ${bg}`}>{code} {count}</span>
             })}
-          </div>
+          </div> */}
         </div>
 
         {/* White Card: EP Rated */}
