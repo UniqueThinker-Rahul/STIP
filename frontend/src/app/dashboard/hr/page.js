@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
+// 🚨 NEW: Import the StipCategoryChart
+import StipCategoryChart from '../../../components/charts/StipCategoryChart';
 
 // Fallback colors for dynamically generated company badges
 const BADGE_COLORS = [
@@ -14,6 +16,22 @@ const BADGE_COLORS = [
   'bg-teal-900/50 text-teal-300 border-teal-800'
 ];
 
+// 🚨 NEW: Universal Formatter (mm/dd/yy HH:mm 24h format)
+const formatToMMDDYY24h = (dateInput) => {
+  if (!dateInput) return 'N/A';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return 'N/A';
+  
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  
+  return `${mm}/${dd}/${yy} ${hh}:${min}`;
+};
+
 export default function HRDashboard() {
   const router = useRouter();
   
@@ -21,10 +39,10 @@ export default function HRDashboard() {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 🚨 UPGRADE: Dynamic Company Codes State
+  // Dynamic Company Codes State
   const [companyCodes, setCompanyCodes] = useState([]);
   
-  // 🚨 NEW: State for active quarter
+  // State for active quarter
   const [activeQuarter, setActiveQuarter] = useState(null);
 
   // State for the Balanced Scorecard
@@ -37,7 +55,6 @@ export default function HRDashboard() {
     try {
       if (isInitialLoad) setLoading(true);
       
-      // 🚨 UPGRADE: Added fetch for quarters
       const [appraisalsRes, staffRes, metricsRes, configRes, quartersRes] = await Promise.all([
         api.get('/appraisals').catch(() => ({ data: [] })), 
         api.get('/users').catch(() => ({ data: [] })),
@@ -59,7 +76,7 @@ export default function HRDashboard() {
         setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
       }
 
-      // 🚨 NEW: Logic to find the active quarter based on today's date
+      // Logic to find the active quarter based on today's date
       const allQuarters = quartersRes.data?.data || [];
       const now = new Date();
       let currentActive = allQuarters.find(q => {
@@ -203,6 +220,8 @@ export default function HRDashboard() {
 
       </div>
 
+      
+
       {/* Main Grid Area */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
@@ -211,7 +230,6 @@ export default function HRDashboard() {
           <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 bg-slate-50">
             <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-xl">📅</div>
             <div>
-              {/* 🚨 UPGRADED: Fully dynamic title based on the active database quarter */}
               <h2 className="text-base font-semibold text-slate-900">
                 {activeQuarter ? `${activeQuarter.name} ${activeQuarter.year}` : 'Active Quarter'} — Appraisal Progress
               </h2>
@@ -388,7 +406,8 @@ export default function HRDashboard() {
                     </div>
                     <div>
                      <div className="text-sm font-semibold text-slate-800">{empName} — {status.replace(/_/g, ' ')}</div>
-                      <div className="text-xs text-slate-500">{qtr} {activeQuarter ? activeQuarter.year : '2026'} · {new Date(a.updatedAt || a.createdAt).toLocaleDateString()}</div>
+                     {/* 🚨 UPGRADED: Forced explicit mm/dd/yy HH:mm 24h formatter here */}
+                      <div className="text-xs text-slate-500">{qtr} {activeQuarter ? activeQuarter.year : '2026'} · {formatToMMDDYY24h(a.updatedAt || a.createdAt)}</div>
                     </div>
                   </div>
                 );
@@ -403,6 +422,11 @@ export default function HRDashboard() {
           </div>
         </div>
 
+      </div>
+
+      {/* 🚨 NEW: Full Width Bottom Chart */}
+      <div className="mt-6">
+         <StipCategoryChart scope="org" />
       </div>
 
     </div>

@@ -49,8 +49,6 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
         actionUrl,
         targetRole: targetRoleContext || recipientRole || 'EMPLOYEE'
       });
-      
-      console.log(`🔔 [IN-APP] Saved DB notification for ${recipient.personalDetails?.firstName} (Routed to: ${targetRoleContext})`);
     }
 
     return recipients.map(r => {
@@ -68,47 +66,101 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
   }
 };
 
-// 🚨 UPGRADED: Real-time Analytics perfectly mapped to match your exact UI config
+// 🚨 UPGRADED: Real-time Analytics Aggregation with Bulletproof Date Filtering
 router.get('/analytics/category-averages', async (req, res) => {
   try {
-    // Only calculate averages from submitted/approved appraisals (ignore drafts)
+    // STRICT FILTER: ONLY calculate averages from fully APPROVED appraisals
     let matchStage = {
-       'workflow.status': { $in: ['SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED'] }
+       'workflow.status': 'APPROVED' 
     };
 
+    // If scope is explicitly team, filter by manager. Otherwise, process the entire company.
     if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
        matchStage.managerId = req.user.id || req.user._id;
     }
 
-    // Mathematical average of all scores across the database
-    const aggregation = await Appraisal.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: null,
-          JobCompetence: { $avg: "$scores.jobCompetence.rating" },
-          Dependability: { $avg: "$scores.dependability.rating" },
-          ExpectedResults: { $avg: "$scores.deliveredResults.rating" },
-          Adaptability: { $avg: "$scores.adaptability.rating" },
-          SafeWorking: { $avg: "$scores.safeWorking.rating" },
-          Behaviors: { $avg: "$scores.behaviors.rating" } // 🚨 Mapped perfectly to "Behaviors"
-        }
-      }
-    ]);
-
-    const result = aggregation[0] || {};
+    let pipeline = [];
     
-    // 🚨 Explicitly formatting keys to match your CATEGORY_CONFIG exactly
+    // Stage 1: Filter by Status and Manager
+    pipeline.push({ $match: matchStage });
+
+    // Stage 2: Bulletproof Date Filtering (Year & Quarter)
+    const yearFilter = req.query.year && req.query.year !== 'ALL';
+    const quarterFilter = req.query.quarter && req.query.quarter !== 'ALL';
+
+    if (yearFilter || quarterFilter) {
+      // ALWAYS join the Quarter document just in case the dates are stored there instead of the appraisal document
+      pipeline.push({
+        $lookup: {
+          from: 'quarters', // Ensure this matches your Quarters collection name in MongoDB
+          localField: 'appraisalQuarter',
+          foreignField: '_id',
+          as: 'quarterDoc'
+        }
+      });
+
+      let andConditions = [];
+
+      // 🚨 FIX: Check Number and String across all possible year fields (reviewYear, period.year, quarterDoc.year)
+      if (yearFilter) {
+        const yrNum = parseInt(req.query.year);
+        const yrStr = String(req.query.year);
+        andConditions.push({
+          $or: [
+            { reviewYear: yrNum },
+            { reviewYear: yrStr },
+            { 'period.year': yrNum },
+            { 'period.year': yrStr },
+            { 'quarterDoc.year': yrNum },
+            { 'quarterDoc.year': yrStr }
+          ]
+        });
+      }
+
+      // 🚨 FIX: Check across all possible quarter fields (period.quarter, quarterDoc.name)
+      if (quarterFilter) {
+        andConditions.push({
+          $or: [
+            { 'period.quarter': req.query.quarter },
+            { 'quarterDoc.name': req.query.quarter }
+          ]
+        });
+      }
+
+      // Apply the date filters
+      if (andConditions.length > 0) {
+        pipeline.push({ $match: { $and: andConditions } });
+      }
+    }
+
+    // Stage 3: The math group
+    pipeline.push({
+      $group: {
+        _id: null,
+        totalCount: { $sum: 1 }, 
+        JobCompetence: { $avg: "$scores.jobCompetence.rating" },
+        Dependability: { $avg: "$scores.dependability.rating" },
+        ExpectedResults: { $avg: "$scores.deliveredResults.rating" },
+        Adaptability: { $avg: "$scores.adaptability.rating" },
+        SafeWorking: { $avg: "$scores.safeWorking.rating" },
+        Initiative: { $avg: "$scores.behaviors.rating" } 
+      }
+    });
+
+    const aggregation = await Appraisal.aggregate(pipeline);
+
+    const result = aggregation[0] || { totalCount: 0 };
+    
     const data = [
-      { name: 'Job Competence', score: Number(result.JobCompetence || 0) },
-      { name: 'Behaviors', score: Number(result.Behaviors || 0) },
-      { name: 'Dependability', score: Number(result.Dependability || 0) },
-      { name: 'Adaptability/Flexibility', score: Number(result.Adaptability || 0) },
-      { name: 'Safe Working Environment', score: Number(result.SafeWorking || 0) },
-      { name: 'Expected Results', score: Number(result.ExpectedResults || 0) }
+      { name: 'Job Competence', score: Number((result.JobCompetence || 0).toFixed(2)) },
+      { name: 'Dependability', score: Number((result.Dependability || 0).toFixed(2)) },
+      { name: 'Expected Results', score: Number((result.ExpectedResults || 0).toFixed(2)) },
+      { name: 'Adaptability/Flexibility', score: Number((result.Adaptability || 0).toFixed(2)) },
+      { name: 'Safe Working Environment', score: Number((result.SafeWorking || 0).toFixed(2)) },
+      { name: 'Initiative', score: Number((result.Initiative || 0).toFixed(2)) }
     ];
 
-    res.status(200).json({ success: true, data });
+    res.status(200).json({ success: true, count: result.totalCount, data });
   } catch (error) {
     console.error("Aggregation error:", error);
     res.status(500).json({ success: false, message: 'Failed to fetch analytics' });
@@ -201,7 +253,6 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
 
       setImmediate(async () => {
         try { 
-          console.log(`\n📧 [EMAIL TRIGGER 1] Manager Submitted Appraisal for ${employeeName}...`);
           const hrTargets = await dispatchNotification({
             senderId: managerId, recipientRole: 'HR_ADMIN', targetRoleContext: 'HR_ADMIN',
             title: 'Appraisal Submitted for HR Review',
@@ -210,9 +261,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
           });
 
           for (const hr of hrTargets) {
-            console.log(`   -> Target: ${hr.firstName} | Extracted Email: "${hr.email}"`);
             if (hr.email && hr.email.includes('@')) {
-               console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
                await sendManagerSubmitEmail({
                  toEmail: hr.email, hrName: hr.firstName || 'HR Manager',
                  empName: employeeName, empId: emp?.employeeId || 'N/A',
@@ -222,8 +271,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
                  iprfFactor: iprfScore.toFixed(1), iprfLabel: getIprfLabel(iprfScore),
                  submitDate: formattedDateTime
                });
-               console.log(`   -> ✅ SUCCESS.`);
-            } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+            }
           }
         } catch (emailError) { 
           console.error("📧 [EMAIL SYSTEM FAILURE]:", emailError.message);
@@ -275,7 +323,6 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
     const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     setImmediate(async () => {
-      console.log(`\n📧 [EMAIL TRIGGER 2] HR Forwarded Appraisal to CEO for ${empName}...`);
       const ceoTargets = await dispatchNotification({
         senderId: req.user.id, recipientRole: 'CEO', targetRoleContext: 'CEO',
         title: 'Appraisal Ready for Final Approval',
@@ -284,9 +331,7 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
       });
 
       for (const ceo of ceoTargets) {
-        console.log(`   -> Target: ${ceo.firstName} | Extracted Email: "${ceo.email}"`);
         if (ceo.email && ceo.email.includes('@')) {
-           console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
            await sendHRForwardEmail({
              toEmail: ceo.email, ceoName: ceo.firstName || 'CEO',
              empName: empName, empId: appraisal.employeeId.employeeId,
@@ -297,8 +342,7 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
              awardPercent: (appraisal.stipAward || 0).toFixed(2),
              forwardDate: formattedDateTime, isEP: iprfScore >= 1.3
            });
-           console.log(`   -> ✅ SUCCESS.`);
-        } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+        }
       }
     });
 
@@ -334,7 +378,6 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
     const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     setImmediate(async () => {
-      console.log(`\n📧 [EMAIL TRIGGER 3A] CEO Approved Appraisal for ${empName}...`);
       let managerTargets = [];
       if (appraisal.managerId) {
         managerTargets = await dispatchNotification({
@@ -351,9 +394,7 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
 
       const allTargets = [...hrTargets, ...managerTargets];
       for (const target of allTargets) {
-        console.log(`   -> Target: ${target.firstName} | Extracted Email: "${target.email}"`);
         if (target.email && target.email.includes('@')) {
-           console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
            await sendCEOApproveEmail({
              toEmail: target.email, recipientName: target.firstName || 'User',
              empName: empName, empId: appraisal.employeeId.employeeId,
@@ -361,8 +402,7 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
              iprfFactor: iprfScore.toFixed(1), iprfLabel: getIprfLabel(iprfScore),
              ceoName: ceoName, decisionDate: formattedDateTime
            });
-           console.log(`   -> ✅ SUCCESS.`);
-        } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+        }
       }
     });
 
@@ -404,7 +444,6 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
     const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     setImmediate(async () => {
-      console.log(`\n📧 [EMAIL TRIGGER 3B] Appraisal Rejected for ${empName}...`);
       let managerTargets = [];
       if (appraisal.managerId) {
         managerTargets = await dispatchNotification({
@@ -421,9 +460,7 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
 
       const allTargets = req.user.role === 'CEO' ? [...hrTargets, ...managerTargets] : managerTargets;
       for (const target of allTargets) {
-        console.log(`   -> Target: ${target.firstName} | Extracted Email: "${target.email}"`);
         if (target.email && target.email.includes('@')) {
-           console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
            await sendCEORejectEmail({
              toEmail: target.email, recipientName: target.firstName || 'User',
              empName: empName, empId: appraisal.employeeId.employeeId,
@@ -432,8 +469,7 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
              ceoName: rejectorName, decisionDate: formattedDateTime,
              ceoComment: rejectionComment, mgrName: mgrName
            });
-           console.log(`   -> ✅ SUCCESS.`);
-        } else { console.log(`   -> 🔴 SKIPPED. Invalid email address.`); }
+        }
       }
     });
 

@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
+// 🚨 UPGRADED: Imported the chart component you requested
+import StipCategoryChart from '../../../components/charts/StipCategoryChart';
 
 // Fallback colors for dynamically generated company badges
 const BADGE_COLORS = [
@@ -13,6 +15,27 @@ const BADGE_COLORS = [
   'bg-[#FCE7F3] text-[#9D174D] border-[#FBCFE8]', // Pink
   'bg-[#CCFBF1] text-[#115E59] border-[#99F6E4]'  // Teal
 ];
+
+// 🚨 UPGRADED: Created a robust Date/Time formatter to enforce mm/dd/yy and 24-hour time
+const formatDateTime = (dateInput, includeTime = false) => {
+  if (!dateInput) return 'N/A';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return 'N/A';
+  
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  
+  let result = `${mm}/${dd}/${yy}`;
+  
+  if (includeTime) {
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    result += ` at ${hh}:${mins}`;
+  }
+  
+  return result;
+};
 
 export default function CEODashboard() {
   const router = useRouter();
@@ -25,7 +48,7 @@ export default function CEODashboard() {
   
   const [companyCodes, setCompanyCodes] = useState([]);
   
-  // 🚨 UPGRADE: Dynamic Quarters State
+  // Dynamic Quarters State
   const [dbQuarters, setDbQuarters] = useState([]);
   const [activeQuarter, setActiveQuarter] = useState(null);
   
@@ -42,7 +65,7 @@ export default function CEODashboard() {
       try {
         setLoading(true);
         
-        // 🚨 UPGRADE: Fetch quarters alongside other data
+        // Fetch quarters alongside other data
         const [appRes, usersRes, metricsRes, configRes, qtrRes] = await Promise.all([
            api.get('/appraisals').catch(() => ({ data: { data: [] } })),
            api.get('/users').catch(() => ({ data: { data: [] } })),
@@ -64,7 +87,7 @@ export default function CEODashboard() {
           setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
         }
 
-        // 🚨 UPGRADE: Configure Dynamic Quarters
+        // Configure Dynamic Quarters
         const fetchedQuarters = qtrRes.data?.data || [];
         fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         setDbQuarters(fetchedQuarters);
@@ -86,8 +109,9 @@ export default function CEODashboard() {
           setBscRaw(metricsData.bscRawScore);
           setCpPct(metricsData.cpPct);
           setLocked(metricsData.locked);
+          // 🚨 UPGRADED: Utilized the new mm/dd/yy formatter with 24-hr time
           if (metricsData.lockedAt) {
-            setLockedAt(new Date(metricsData.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+            setLockedAt(formatDateTime(metricsData.lockedAt, true));
           }
         }
       } catch (error) {
@@ -111,7 +135,7 @@ export default function CEODashboard() {
 
   const anyKpaEntered = kpaActuals.some(v => v !== null);
 
-  // 🚨 UPGRADE: Calculate days remaining dynamically
+  // Calculate days remaining dynamically
   let daysRemainingText = "No active deadlines";
   if (activeQuarter) {
     const end = new Date(activeQuarter.endDate);
@@ -319,7 +343,7 @@ export default function CEODashboard() {
       {/* Row 3 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
         
-        {/* 🚨 UPGRADED: Dynamic DB Deadlines */}
+        {/* Dynamic DB Deadlines */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
           <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
             <div className="w-[30px] h-[30px] rounded-[8px] bg-[#FFF7ED] flex items-center justify-center text-[14px]">&#128197;</div>
@@ -361,7 +385,8 @@ export default function CEODashboard() {
                     <div key={q._id} className={`grid grid-cols-[1fr_2fr_2fr_1fr] items-center py-[8px] border-b border-[#E2DDD4] ${bgRow}`}>
                       <strong className={`${textClass} rounded-l-[6px] px-2`}>{q.name}</strong>
                       <span className="text-[#0f1923] font-[500]">{q.year}</span>
-                      <span className={`font-[700] ${textClass}`}>{new Date(q.endDate).toLocaleDateString()}</span>
+                      {/* 🚨 UPGRADED: Display format is now mm/dd/yy with 24-hr time via formatter */}
+                      <span className={`font-[700] ${textClass}`}>{formatDateTime(q.endDate, true)}</span>
                       <span className="text-right px-2">{statusBadge}</span>
                     </div>
                   );
@@ -417,6 +442,12 @@ export default function CEODashboard() {
         </div>
 
       </div>
+
+      {/* 🚨 UPGRADED: Full Width Bottom Chart Integrated Here */}
+      <div className="mt-6">
+         <StipCategoryChart scope="team" />
+      </div>
+
     </div>
   );
 }

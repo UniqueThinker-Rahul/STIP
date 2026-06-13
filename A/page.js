@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-// 🚨 UPGRADE: Imported the 'Eye' icon from lucide-react
-import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye } from "lucide-react";
+import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle } from "lucide-react";
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -51,8 +50,6 @@ export default function StaffManagement() {
   const [managerFilter, setManagerFilter] = useState('');
   
   const [editingStaff, setEditingStaff] = useState(null);
-  // 🚨 UPGRADE: Added state for viewing staff details
-  const [viewingStaff, setViewingStaff] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [isRecycleBinView, setIsRecycleBinView] = useState(false); 
 
@@ -60,6 +57,7 @@ export default function StaffManagement() {
   const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '' });
   const dropdownRef = useRef(null);
 
+  // 🚨 NEW: State for mass delete loader
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const fetchData = async () => {
@@ -127,8 +125,6 @@ export default function StaffManagement() {
     try {
       await api.patch(`/users/${editingStaff._id}/hr-update`, {
         firstName: editingStaff.personalDetails?.firstName,
-        // 🚨 UPGRADE: Added middleName to the save payload
-        middleName: editingStaff.personalDetails?.middleName,
         lastName: editingStaff.personalDetails?.lastName,
         jobTitle: editingStaff.employmentDetails?.jobTitle,
         officeLocation: editingStaff.employmentDetails?.officeLocation,
@@ -159,6 +155,7 @@ export default function StaffManagement() {
     } catch (e) { alert("Failed to delete from database."); }
   };
 
+  // 🚨 NEW: Mass Delete Function
   const handleMassDelete = async () => {
     if (dbStaff.length === 0) return alert("No active staff to delete.");
     
@@ -172,6 +169,7 @@ export default function StaffManagement() {
 
     try {
       setIsDeletingAll(true);
+      // NOTE: You need to add this route to your backend user routes: router.delete('/mass-delete', ...)
       await api.delete('/users/mass-delete'); 
       setSuccessMsg(`All employees have been successfully moved to the Recycle Bin.`);
       fetchData();
@@ -433,6 +431,7 @@ export default function StaffManagement() {
           </div>
           
           <div className="flex gap-2">
+            {/* 🚨 NEW: Mass Delete Button (Only in active view) */}
             {!isRecycleBinView && (
               <button 
                 onClick={handleMassDelete} 
@@ -519,15 +518,9 @@ export default function StaffManagement() {
                         </button>
                       </div>
                     ) : (
-                      // 🚨 UPGRADE: Added the "View" button with Eye icon
-                      <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => setViewingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-slate-100 bg-white text-slate-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
-                          <Eye className="w-3 h-3" /> View
-                        </button>
-                        <button onClick={() => setEditingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-white bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
-                          <Edit2 className="w-3 h-3" /> Edit
-                        </button>
-                      </div>
+                      <button onClick={() => setEditingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-white bg-slate-50 flex items-center justify-center gap-1.5 mx-auto">
+                        <Edit2 className="w-3 h-3" /> Edit
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -536,117 +529,6 @@ export default function StaffManagement() {
           </tbody>
         </table>
       </div>
-
-      {/* 🚨 UPGRADE: New View Details Modal */}
-      {viewingStaff && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center px-6 py-4 border-b bg-slate-50 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                  {getInitials(`${viewingStaff.personalDetails?.firstName} ${viewingStaff.personalDetails?.lastName}`)}
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-[#0D2B55]">Employee Profile Details</h3>
-                  <div className="text-xs text-gray-500 font-mono">ID: {viewingStaff.employeeId}</div>
-                </div>
-              </div>
-              <button onClick={() => setViewingStaff(null)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
-            </div>
-            
-            <div className="p-6 space-y-6 overflow-y-auto flex-1 custom-scrollbar bg-white">
-              
-              {/* Personal Information */}
-              <div>
-                <h4 className="text-xs font-bold text-[#0D2B55] uppercase tracking-wider mb-3 border-b pb-1">Personal Information</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">First Name</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.personalDetails?.firstName || 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Middle Name</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.personalDetails?.middleName || 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Last Name</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.personalDetails?.lastName || 'N/A'}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Employment Details */}
-              <div>
-                <h4 className="text-xs font-bold text-[#0D2B55] uppercase tracking-wider mb-3 border-b pb-1">Employment Details</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Job Title</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.employmentDetails?.jobTitle || 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Office Location</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.employmentDetails?.officeLocation || 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Company Code</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.companyCode || 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Base Salary</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">${viewingStaff.employmentDetails?.salary?.toLocaleString() || '0'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Date of Hire</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.employmentDetails?.dateOfHire ? new Date(viewingStaff.employmentDetails.dateOfHire).toLocaleDateString() : 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Direct Manager</div>
-                    <div className="text-sm font-medium text-slate-800 mt-0.5">
-                      {viewingStaff.employmentDetails?.reportingTo?.personalDetails 
-                        ? `${viewingStaff.employmentDetails.reportingTo.personalDetails.firstName} ${viewingStaff.employmentDetails.reportingTo.personalDetails.lastName}` 
-                        : 'Unassigned / CEO'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* System Access */}
-              <div>
-                <h4 className="text-xs font-bold text-[#0D2B55] uppercase tracking-wider mb-3 border-b pb-1">System Access & Roles</h4>
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Primary Role</div>
-                    <div className="mt-1">
-                      <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-bold rounded-md">
-                        {ROLE_COLOURS[viewingStaff.security?.role]?.label || 'Staff'}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Secondary Roles</div>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {(!viewingStaff.security?.secondaryRoles || viewingStaff.security.secondaryRoles.length === 0) ? (
-                        <span className="text-sm text-slate-500 italic">No secondary roles</span>
-                      ) : (
-                        viewingStaff.security.secondaryRoles.map(r => (
-                          <span key={r} className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold rounded-md">
-                            {ROLE_COLOURS[r]?.label || r}
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-            </div>
-            
-            <div className="p-4 border-t border-gray-200 bg-slate-50 flex items-center justify-end shrink-0 rounded-b-xl">
-              <button onClick={() => setViewingStaff(null)} className="px-6 py-2.5 text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg shadow-sm transition-colors">Close Details</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {editingStaff && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -666,15 +548,10 @@ export default function StaffManagement() {
             
             <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar bg-[#FAF8F4]">
               
-              {/* 🚨 UPGRADE: Added Middle Name to the Edit Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">First Name</label>
                   <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#0D2B55] shadow-sm" value={editingStaff.personalDetails?.firstName || ''} onChange={e => setEditingStaff({...editingStaff, personalDetails: {...editingStaff.personalDetails, firstName: e.target.value}})} />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Middle Name</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#0D2B55] shadow-sm" placeholder="Optional" value={editingStaff.personalDetails?.middleName || ''} onChange={e => setEditingStaff({...editingStaff, personalDetails: {...editingStaff.personalDetails, middleName: e.target.value}})} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Last Name</label>
