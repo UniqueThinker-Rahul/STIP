@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator, Search, MessageSquare } from 'lucide-react';
+import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator, Search, MessageSquare, ShieldCheck, X } from 'lucide-react';
 import api from '../../../../lib/api'; 
 
 const CRITERIA = [
@@ -151,6 +151,31 @@ function NewAppraisalForm() {
   const [openDropdown, setOpenDropdown] = useState(null);
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
+
+  // 🚨 UPGRADE: Custom Modal State to lock page and center alerts
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'alert', 
+    title: '',
+    message: '',
+    onConfirm: null,
+    onCancel: null
+  });
+
+  const closeDialog = () => {
+    setModalConfig({ ...modalConfig, isOpen: false });
+  };
+
+  const showDialog = (type, title, message, onConfirm = closeDialog, onCancel = closeDialog) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      onCancel
+    });
+  };
 
   const parseComments = (combinedString) => {
     if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
@@ -400,15 +425,12 @@ function NewAppraisalForm() {
       }
   };
 
-  // 🚨 UPGRADED: Logic to determine if a specific criterion is complete based on score type
   const isCriterionComplete = (critId) => {
     const val = scores[critId];
     if (val === null) return false;
     
-    // If rating is 1.0, it's instantly complete (no comment needed)
     if (val === 1.0) return true;
     
-    // For 0.0, 0.7, and 1.3, we enforce the 5 char rule
     const comment = criterionComments[critId] || '';
     return comment.trim().length >= 5;
   };
@@ -422,7 +444,6 @@ function NewAppraisalForm() {
   const handleScore = (critId, val) => {
     if (isCurrentQuarterLocked) return;
     
-    // If switching TO 1.0, clear the comment
     if (val === 1.0) {
        setCriterionComments(prev => ({ ...prev, [critId]: '' }));
     }
@@ -460,15 +481,14 @@ function NewAppraisalForm() {
   };
 
   const handleSubmit = async (isDraft) => {
-    if (!selectedStaffId) return alert("Please select an employee.");
-    if (isCurrentQuarterLocked) return alert("This appraisal timeline is locked or has already been submitted to HR.");
-    if (!isDraft && ratedCount < 6) return alert("Please rate all 6 criteria before submitting.");
+    if (!selectedStaffId) return showDialog('alert', 'Validation Error', "Please select an employee.");
+    if (isCurrentQuarterLocked) return showDialog('alert', 'System Lock', "This appraisal timeline is locked or has already been submitted to HR.");
+    if (!isDraft && ratedCount < 6) return showDialog('alert', 'Validation Error', "Please rate all 6 criteria before submitting.");
     if (!isDraft && requiresEPJustification && formData.epJustification.trim().length < 10) {
-      return alert("A comprehensive EP Justification is mandatory.");
+      return showDialog('alert', 'Validation Error', "A comprehensive EP Justification is mandatory.");
     }
 
     if (!isDraft) {
-      // Find criteria that are NOT 1.0 but missing a 5+ char comment
       const missingComments = CRITERIA.filter(c => {
          const s = scores[c.id];
          if (s === 1.0) return false;
@@ -477,7 +497,7 @@ function NewAppraisalForm() {
       });
       
       if (missingComments.length > 0) {
-        return alert(`You must provide a mandatory justification comment (min. 5 chars) for: ${missingComments.map(c => c.short).join(', ')}`);
+        return showDialog('alert', 'Validation Error', `You must provide a mandatory justification comment (min. 5 chars) for: ${missingComments.map(c => c.short).join(', ')}`);
       }
     }
 
@@ -525,15 +545,20 @@ ${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
       const submissionDate = new Date().toLocaleDateString();
       const submissionTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+      // 🚨 UPGRADE: Custom Success Modal with Routing embedded
       if (isDraft) {
-        alert(`Draft saved successfully on ${submissionDate} at ${submissionTime}!`);
-        router.push('/dashboard/manager/drafts');
+        showDialog('alert', 'Draft Saved', `Draft saved successfully on ${submissionDate} at ${submissionTime}!`, () => {
+          closeDialog();
+          router.push('/dashboard/manager/drafts');
+        });
       } else {
-        alert(`Appraisal successfully submitted to HR Manager on ${submissionDate} at ${submissionTime}!`);
-        router.push('/dashboard/manager/submissions'); 
+        showDialog('alert', 'Submission Successful', `Appraisal successfully submitted to HR Manager on ${submissionDate} at ${submissionTime}!`, () => {
+          closeDialog();
+          router.push('/dashboard/manager/submissions'); 
+        });
       }
     } catch (err) {
-      alert(err.response?.data?.message || "An error occurred while saving.");
+      showDialog('alert', 'Server Error', err.response?.data?.message || "An error occurred while saving.");
     } finally {
       setIsSubmitting(false);
     }
@@ -631,7 +656,7 @@ ${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-[#0D2B55] w-10 h-10" /></div>;
 
   return (
-    <div className="max-w-6xl mx-auto pb-20 font-sans">
+    <div className="max-w-6xl mx-auto pb-20 font-sans relative">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-[#0D2B55]">
           {draftId ? 'Resume Appraisal Draft' : 'New Staff Appraisal'}
@@ -858,7 +883,6 @@ ${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
                     const val = scores[crit.id];
                     const isRated = val !== null;
                     
-                    // 🚨 UPGRADED: 1.0 does not require a comment to be considered "unlocked" for the next section
                     const unlocked = isCriterionUnlocked(idx);
 
                     return (
@@ -922,7 +946,6 @@ ${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
                               ))}
                             </div>
                             
-                            {/* 🚨 UPGRADED: The comment box only renders if the rating is NOT 1.0 */}
                             {isRated && val !== 1.0 && (
                               <div className="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
                                 <div className="flex items-center gap-1.5 mb-2">
@@ -1204,6 +1227,52 @@ ${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
           )}
         </div>
       </div>
+
+      {/* 🚨 NEW: Centered Screen-Locking Custom Modal */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-[24px]">
+              <div className="flex items-center gap-[10px] mb-[12px]">
+                {modalConfig.title.includes('Error') || modalConfig.title.includes('System Lock') ? (
+                  <AlertTriangle className="w-[20px] h-[20px] text-red-600" />
+                ) : (
+                  <ShieldCheck className="w-[20px] h-[20px] text-blue-600" />
+                )}
+                <h3 className="text-[18px] font-[800] text-slate-800">{modalConfig.title}</h3>
+              </div>
+              
+              <p className="text-[14px] text-slate-600 mb-[24px] whitespace-pre-wrap leading-relaxed">
+                {modalConfig.message}
+              </p>
+
+              <div className="flex justify-end gap-[12px]">
+                {modalConfig.type === 'confirm' && (
+                  <button 
+                    type="button"
+                    onClick={modalConfig.onCancel}
+                    className="px-[16px] py-[10px] text-slate-600 font-[700] text-[13px] hover:bg-slate-100 rounded-[8px] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button 
+                  type="button"
+                  onClick={() => modalConfig.onConfirm()}
+                  className={`px-[20px] py-[10px] text-white font-[800] text-[13px] rounded-[8px] shadow-sm transition-colors ${
+                    modalConfig.title.includes('Error') || modalConfig.title.includes('System Lock')
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-[#0D2B55] hover:bg-[#1a3d6e]'
+                  }`}
+                >
+                  {modalConfig.type === 'alert' ? 'Acknowledge' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

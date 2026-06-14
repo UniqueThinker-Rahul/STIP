@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, Filter } from 'lucide-react';
+import { Loader2, Filter, Download } from 'lucide-react';
 import api from '../../lib/api'; 
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const CATEGORY_CONFIG = [
   { apiName: 'Job Competence', label: 'Job Competence', weight: 10, color: '#8B5CF6', bg: '#F5F3FF', track: '#E2D8FE' },
@@ -22,16 +24,18 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
   const [selectedYear, setSelectedYear] = useState('ALL');
   const [selectedQuarter, setSelectedQuarter] = useState('ALL');
   
-  // 🚨 UPGRADE: Both dropdowns now have state to store dynamic DB results
   const [availableYears, setAvailableYears] = useState([new Date().getFullYear()]);
   const [availableQuarters, setAvailableQuarters] = useState([]);
+
+  // 🚨 NEW: Download state
+  const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
         setLoading(true);
         
-        let queryParams = `scope=org`; // Always enforce organization scope to bypass MongoDB string/ObjectId conflicts
+        let queryParams = `scope=org`; 
         if (selectedYear !== 'ALL') queryParams += `&year=${selectedYear}`;
         if (selectedQuarter !== 'ALL') queryParams += `&quarter=${selectedQuarter}`;
 
@@ -67,7 +71,6 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
     fetchAnalytics();
   }, [scope, selectedYear, selectedQuarter]); 
 
-  // 🚨 UPGRADE: Fetch BOTH years and quarters dynamically from the database
   useEffect(() => {
     const fetchDynamicFilters = async () => {
       try {
@@ -75,11 +78,9 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
         if (qRes.data?.data) {
           const quartersData = qRes.data.data;
           
-          // Extract unique years and sort descending (newest first)
           const years = [...new Set(quartersData.map(q => q.year))];
           if (years.length > 0) setAvailableYears(years.sort((a,b) => b-a));
 
-          // Extract unique quarter names and sort ascending
           const quarters = [...new Set(quartersData.map(q => q.name))];
           if (quarters.length > 0) setAvailableQuarters(quarters.sort());
         }
@@ -87,6 +88,68 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
     };
     fetchDynamicFilters();
   }, []);
+
+  // 🚨 NEW: PDF Download Logic
+  const handleDownloadPDF = () => {
+    setIsDownloading(true);
+    try {
+      const doc = new jsPDF();
+      
+      const timeContext = selectedYear === 'ALL' && selectedQuarter === 'ALL' 
+        ? 'All Time' 
+        : `${selectedQuarter !== 'ALL' ? selectedQuarter + ' ' : ''}${selectedYear !== 'ALL' ? selectedYear : ''}`;
+        
+      const reportTitle = `STIP Category Analytics - ${timeContext}`;
+
+      // Header
+      doc.setFontSize(16);
+      doc.setTextColor(13, 43, 85); // #0D2B55
+      doc.text(reportTitle, 14, 20);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Total Approved Appraisals Analyzed: ${totalAppraisals}`, 14, 28);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 34);
+
+      // Table Data
+      const tableColumns = ["Category", "Weight (%)", "Average Score (Out of 3.0)", "Contribution to IPRF"];
+      const tableRows = data.map(item => {
+        const contribution = (item.score * item.weight) / 100;
+        return [
+          item.label,
+          `${item.weight}%`,
+          item.score.toFixed(2),
+          `+${contribution.toFixed(3)}`
+        ];
+      });
+
+      // Calculate Totals for Footer
+      let totalIprf = 0;
+      data.forEach(item => { totalIprf += (item.score * item.weight) / 100; });
+
+      tableRows.push([
+        { content: 'PROJECTED TOTAL IPRF SCORE', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } },
+        { content: totalIprf.toFixed(3), styles: { fontStyle: 'bold', textColor: [22, 163, 74] } } // Green
+      ]);
+
+      autoTable(doc, {
+        startY: 42,
+        head: [tableColumns],
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { fillColor: [13, 43, 85], textColor: 255, fontSize: 10, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 10, textColor: 50 },
+        alternateRowStyles: { fillColor: [245, 248, 250] },
+      });
+
+      doc.save(`STIP_Category_Analytics_${timeContext.replace(/\s+/g, '_')}.pdf`);
+    } catch (error) {
+      console.error("PDF Generation Failed", error);
+      alert("Failed to generate PDF. Please try again.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   if (loading && data.length === 0) {
     return (
@@ -103,7 +166,7 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
          <div className="absolute top-4 right-4"><Loader2 className="w-4 h-4 text-slate-300 animate-spin" /></div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-[#E2DDD4]/60">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6 pb-4 border-b border-[#E2DDD4]/60">
         <div className="flex items-center gap-3">
           <div className="bg-[#F8FAFC] border border-[#E2DDD4] p-1.5 rounded-lg flex items-end justify-center gap-0.5 h-9 w-9 shrink-0">
             <div className="w-1 bg-[#8B5CF6] h-3.5 rounded-sm"></div>
@@ -118,28 +181,39 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-[#FAF8F4] p-1.5 rounded-lg border border-[#E2DDD4] shrink-0">
-          <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
-          
-          {/* Dynamic Year Dropdown */}
-          <select 
-            value={selectedYear} 
-            onChange={(e) => setSelectedYear(e.target.value)}
-            className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors"
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Filters */}
+          <div className="flex items-center gap-2 bg-[#FAF8F4] p-1.5 rounded-lg border border-[#E2DDD4] shrink-0">
+            <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
+            
+            <select 
+              value={selectedYear} 
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors"
+            >
+              <option value="ALL">All Years</option>
+              {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            
+            <select 
+              value={selectedQuarter} 
+              onChange={(e) => setSelectedQuarter(e.target.value)}
+              className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors"
+            >
+              <option value="ALL">All Quarters</option>
+              {availableQuarters.map(q => <option key={q} value={q}>{q}</option>)}
+            </select>
+          </div>
+
+          {/* 🚨 NEW: Download Button */}
+          <button 
+            onClick={handleDownloadPDF}
+            disabled={isDownloading || totalAppraisals === 0}
+            className="flex items-center gap-1.5 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white text-[11px] font-[700] py-2 px-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
-            <option value="ALL">All Years</option>
-            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          
-          {/* 🚨 UPGRADE: Dynamic Quarter Dropdown */}
-          <select 
-            value={selectedQuarter} 
-            onChange={(e) => setSelectedQuarter(e.target.value)}
-            className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors"
-          >
-            <option value="ALL">All Quarters</option>
-            {availableQuarters.map(q => <option key={q} value={q}>{q}</option>)}
-          </select>
+            {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            Export PDF
+          </button>
         </div>
       </div>
       

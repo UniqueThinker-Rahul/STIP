@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShieldAlert, User, Mail, CheckCircle, Loader2, ArrowLeft } from 'lucide-react';
 
-// 🚨 FIX: Adjusted the API import path to match your folder structure
 import api from '../../lib/api';
 
 export default function ForgotPassword() {
@@ -12,17 +11,34 @@ export default function ForgotPassword() {
   const [formData, setFormData] = useState({ employeeId: '', contactData: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(''); // 🚨 NEW: Error state for debugging
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setErrorMessage('');
+    
     try {
-      // Fire to the public request route
-      await api.post('/auth/forgot-password', formData);
-      setSuccess(true);
+      // 🚨 FIX 1: Strip accidental spaces from the input before sending to the backend
+      const cleanPayload = {
+        employeeId: formData.employeeId.trim(),
+        contactData: formData.contactData.trim()
+      };
+
+      const res = await api.post('/auth/forgot-password', cleanPayload);
+      
+      // 🚨 FIX 2: Check if the backend explicitly returned a failure message
+      if (res.data && res.data.success === false) {
+         setErrorMessage(res.data.message || 'Database rejected the request.');
+      } else {
+         setSuccess(true);
+      }
+      
     } catch (error) {
-      // We show success even on error to prevent hackers from guessing active employee IDs
-      setSuccess(true); 
+      // 🚨 FIX 3: Temporarily expose the exact backend error to the screen so you can debug!
+      const errorText = error.response?.data?.message || error.message || 'Network or Server Error';
+      setErrorMessage(`Backend Error: ${errorText}`);
+      console.error("FORGOT PASSWORD CRASH:", error);
     } finally {
       setIsSubmitting(false);
     }
@@ -48,7 +64,6 @@ export default function ForgotPassword() {
               <p className="text-[13px] text-[#6b7280] leading-relaxed mb-[24px]">
                 If the provided details match our records, your request has been added to the ICT Admin verification queue. Please contact the IT Helpdesk directly if you require immediate assistance.
               </p>
-              {/* 🚨 FIX: Changed from '/login' to '/' */}
               <button onClick={() => router.push('/')} className="w-full py-[12px] bg-[#0D2B55] text-white rounded-[8px] text-[13px] font-[800] hover:bg-[#1a3d6e] transition-colors">
                 Return to Login
               </button>
@@ -59,6 +74,13 @@ export default function ForgotPassword() {
               <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-[8px] p-[12px] text-[12px] text-[#991B1B] leading-relaxed">
                 <strong>Important:</strong> For security reasons, password resets must be manually verified. Submitting this form alerts the administration team to securely override your credentials.
               </div>
+
+              {/* 🚨 NEW: Error Banner Display */}
+              {errorMessage && (
+                <div className="bg-red-100 border border-red-300 text-red-800 rounded-[8px] p-[12px] text-[12px] font-bold">
+                  {errorMessage}
+                </div>
+              )}
 
               <div>
                 <label className="block text-[12px] font-[800] text-[#0D2B55] mb-[6px]">Your Employee ID</label>
@@ -73,11 +95,11 @@ export default function ForgotPassword() {
               </div>
 
               <div>
-                <label className="block text-[12px] font-[800] text-[#0D2B55] mb-[6px]">Login Username or Email</label>
+                <label className="block text-[12px] font-[800] text-[#0D2B55] mb-[6px]">Login Username (Not Email)</label>
                 <div className="relative">
                   <Mail className="absolute left-[12px] top-[10px] w-[16px] h-[16px] text-[#6b7280]" />
                   <input 
-                    type="text" required placeholder="Enter the username used to log in"
+                    type="text" required placeholder="Enter the exact username used to log in"
                     value={formData.contactData} onChange={(e) => setFormData({...formData, contactData: e.target.value})}
                     className="w-full pl-[40px] pr-[14px] py-[10px] bg-[#FAF8F4] border border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
                   />
@@ -91,7 +113,6 @@ export default function ForgotPassword() {
                 {isSubmitting ? <Loader2 className="w-[16px] h-[16px] animate-spin" /> : 'Submit Verification Request'}
               </button>
               
-              {/* 🚨 FIX: Changed from '/login' to '/' */}
               <button type="button" onClick={() => router.push('/')} className="text-[12px] font-[700] text-[#6b7280] hover:text-[#0D2B55] transition-colors flex items-center justify-center gap-[4px]">
                 <ArrowLeft className="w-[12px] h-[12px]" /> Back to login page
               </button>

@@ -170,7 +170,7 @@ export default function UnifiedLogin() {
                 <input 
                   type="text" required value={username} onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0D2B55]/20 focus:border-[#0D2B55] transition-all text-slate-800" 
-                  placeholder="e.g. 1282008"
+                  placeholder="e.g. 9992020"
                 />
               </div>
               <div>

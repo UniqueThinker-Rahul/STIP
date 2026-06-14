@@ -1,6 +1,7 @@
 'use client';
 
-import { Menu, LogOut, Bell, ChevronDown, Lock, Unlock, Clock, BarChart2, CheckCircle, Info } from 'lucide-react';
+// 🚨 UPGRADE: Added 'X' to the imports for the clear button icon
+import { Menu, LogOut, Bell, ChevronDown, Lock, Unlock, Clock, BarChart2, CheckCircle, Info, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import Cookies from 'js-cookie';
@@ -81,7 +82,7 @@ export default function Header({ setIsOpen, user }) {
         const [metricsRes, quartersRes, notifsRes] = await Promise.all([
           api.get(`/company-metrics/${currentYear}`).catch(() => ({ data: { data: null } })),
           api.get('/quarters').catch(() => ({ data: { data: [] } })),
-          api.get('/notifications').catch(() => ({ data: { data: [] } })) // 🚨 Fetching notifications
+          api.get('/notifications').catch(() => ({ data: { data: [] } }))
         ]);
 
         if (metricsRes.data?.data) {
@@ -108,7 +109,6 @@ export default function Header({ setIsOpen, user }) {
           setActiveQuarterData({ name: 'Status:', deadline: 'No Active Quarters' });
         }
 
-        // 🚨 Process Notifications
         const fetchedNotifs = notifsRes.data?.data || [];
         setNotifications(fetchedNotifs);
         setUnreadCount(fetchedNotifs.filter(n => !n.isRead).length);
@@ -120,7 +120,6 @@ export default function Header({ setIsOpen, user }) {
     
     fetchHeaderData();
     
-    // Optional: Auto-refresh notifications every 60 seconds to make it feel real-time without websockets
     const interval = setInterval(() => {
       api.get('/notifications').then(res => {
         const fetchedNotifs = res.data?.data || [];
@@ -132,7 +131,7 @@ export default function Header({ setIsOpen, user }) {
     return () => clearInterval(interval);
   }, []); 
 
-  // 🚨 Handle clicking a single notification
+  // Handle clicking a single notification
   const handleNotificationClick = async (notif) => {
     if (!notif.isRead) {
       try {
@@ -143,9 +142,7 @@ export default function Header({ setIsOpen, user }) {
     }
     setShowNotifs(false);
     
-    // If an actionUrl exists, navigate the user there seamlessly
     if (notif.actionUrl) {
-      // Handle absolute URLs vs relative paths
       const path = notif.actionUrl.startsWith('http') 
           ? new URL(notif.actionUrl).pathname 
           : notif.actionUrl;
@@ -153,7 +150,7 @@ export default function Header({ setIsOpen, user }) {
     }
   };
 
-  // 🚨 Handle marking all as read
+  // Handle marking all as read
   const handleMarkAllRead = async (e) => {
     e.stopPropagation();
     try {
@@ -161,6 +158,32 @@ export default function Header({ setIsOpen, user }) {
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
       setUnreadCount(0);
     } catch (err) { console.error("Failed to mark all as read", err); }
+  };
+
+  // 🚨 UPGRADE: Handle CLEAR ALL notifications
+  const handleClearAll = async (e) => {
+    e.stopPropagation();
+    try {
+      await api.delete('/notifications/clear-all');
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch (err) { console.error("Failed to clear notifications", err); }
+  };
+
+  // 🚨 UPGRADE: Handle CLEAR INDIVIDUAL notification
+  const handleClearNotification = async (e, id) => {
+    e.stopPropagation(); // Prevent the notification click event from firing
+    try {
+      await api.delete(`/notifications/${id}`);
+      
+      setNotifications(prev => {
+        const updatedNotifs = prev.filter(n => n._id !== id);
+        // Recalculate unread count locally
+        setUnreadCount(updatedNotifs.filter(n => !n.isRead).length);
+        return updatedNotifs;
+      });
+      
+    } catch (err) { console.error("Failed to clear notification", err); }
   };
 
   // BULLETPROOF NAME EXTRACTION
@@ -260,15 +283,24 @@ export default function Header({ setIsOpen, user }) {
 
           {/* Notification Menu */}
           {showNotifs && (
-            <div className="absolute right-0 mt-3 w-[320px] bg-white border border-[#E2DDD4] rounded-[12px] shadow-[0_10px_40px_rgba(0,0,0,0.12)] flex flex-col animate-in fade-in slide-in-from-top-2 z-50 overflow-hidden">
+            <div className="absolute right-0 mt-3 w-[350px] bg-white border border-[#E2DDD4] rounded-[12px] shadow-[0_10px_40px_rgba(0,0,0,0.12)] flex flex-col animate-in fade-in slide-in-from-top-2 z-50 overflow-hidden">
               
               <div className="px-[16px] py-[12px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
                 <div className="text-[13px] font-[800] text-[#0D2B55]">Notifications</div>
-                {unreadCount > 0 && (
-                  <button onClick={handleMarkAllRead} className="text-[10px] font-[700] text-[#1E40AF] hover:underline bg-[#DBEAFE] px-[8px] py-[3px] rounded-full">
-                    Mark all read
-                  </button>
-                )}
+                
+                {/* 🚨 UPGRADE: Added Clear All Button */}
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button onClick={handleMarkAllRead} className="text-[10px] font-[700] text-[#1E40AF] hover:underline bg-[#DBEAFE] px-[8px] py-[3px] rounded-full">
+                      Mark all read
+                    </button>
+                  )}
+                  {notifications.length > 0 && (
+                    <button onClick={handleClearAll} className="text-[10px] font-[700] text-[#991B1B] hover:underline bg-[#FEE2E2] px-[8px] py-[3px] rounded-full">
+                      Clear all
+                    </button>
+                  )}
+                </div>
               </div>
               
               <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
@@ -301,9 +333,23 @@ export default function Header({ setIsOpen, user }) {
                             {timeAgo(notif.createdAt)}
                           </div>
                         </div>
-                        {!notif.isRead && (
-                           <div className="w-[8px] h-[8px] bg-[#3B82F6] rounded-full mt-[4px] shrink-0 shadow-sm"></div>
-                        )}
+                        
+                        {/* 🚨 UPGRADE: Added Individual Clear X Button */}
+                        <div className="flex flex-col items-end justify-between shrink-0 h-full py-1">
+                          {!notif.isRead ? (
+                            <div className="w-[8px] h-[8px] bg-[#3B82F6] rounded-full shadow-sm mb-2"></div>
+                          ) : (
+                            <div className="w-[8px] h-[8px] mb-2"></div> // Spacer
+                          )}
+                          <button 
+                            onClick={(e) => handleClearNotification(e, notif._id)}
+                            className="text-[#94a3b8] hover:text-[#DC2626] hover:bg-red-50 p-1 rounded-md transition-colors"
+                            title="Delete Notification"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+
                       </div>
                     ))}
                   </div>

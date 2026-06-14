@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-// 🚨 UPGRADE: Imported the 'Eye' icon from lucide-react
-import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye } from "lucide-react";
+import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye, ChevronLeft, ChevronRight } from "lucide-react";
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -29,29 +28,103 @@ const ALL_ROLES = [
   { id: 'ICT_ADMIN', label: 'ICT Admin' }
 ];
 
+// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
+const SearchableFilterDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [wrapperRef]);
+
+  const filteredOptions = options.filter(opt => 
+    opt.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div ref={wrapperRef} className={`relative ${widthClass}`}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full py-[8px] px-[12px] bg-white border rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer flex justify-between items-center transition-colors shadow-sm ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-slate-300 hover:border-slate-400'}`}
+      >
+        <span className="truncate pr-2 font-medium text-slate-700">{selectedOption ? selectedOption.label : placeholder}</span>
+        <ChevronDown className={`w-[14px] h-[14px] text-[#6b7280] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-[60] top-[calc(100%+4px)] left-0 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="p-[8px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
+            <div className="relative">
+              <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[12px] h-[12px] text-[#6b7280]" />
+              <input 
+                type="text"
+                autoFocus
+                placeholder="Search..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-[26px] pr-[8px] py-[6px] text-[12px] border border-[#E2DDD4] rounded-[6px] outline-none focus:border-[#0D2B55]"
+              />
+            </div>
+          </div>
+          
+          <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
+            <div 
+              onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
+              className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors ${value === '' ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#6b7280] hover:bg-[#FAF8F4]'}`}
+            >
+              {placeholder}
+            </div>
+            
+            {filteredOptions.length === 0 ? (
+              <div className="px-[12px] py-[10px] text-[12px] text-[#6b7280] text-center italic">No matches found</div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <div 
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
+                  className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#0f1923] hover:bg-[#FAF8F4]'}`}
+                >
+                  {opt.label}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+// ----------------------------------------------
+
+
 export default function StaffManagement() {
   const router = useRouter();
   
-  // Real-time Database State
   const [dbStaff, setDbStaff] = useState([]);
   const [dbRecycleBin, setDbRecycleBin] = useState([]); 
   const [dbManagers, setDbManagers] = useState([]);
   
-  // Dynamic Config States
   const [companyCodes, setCompanyCodes] = useState([]);
   const [officeLocations, setOfficeLocations] = useState([]);
   const [jobTitles, setJobTitles] = useState([]);
   
   const [loading, setLoading] = useState(true);
 
-  // UI State
   const [search, setSearch] = useState('');
   const [coFilter, setCoFilter] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [managerFilter, setManagerFilter] = useState('');
   
   const [editingStaff, setEditingStaff] = useState(null);
-  // 🚨 UPGRADE: Added state for viewing staff details
   const [viewingStaff, setViewingStaff] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [isRecycleBinView, setIsRecycleBinView] = useState(false); 
@@ -61,6 +134,38 @@ export default function StaffManagement() {
   const dropdownRef = useRef(null);
 
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  // 🚨 NEW: Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // 🚨 NEW: Custom Modal State to lock page and center alerts
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'alert', 
+    title: '',
+    message: '',
+    onConfirm: null,
+    onCancel: null
+  });
+  const [modalInput, setModalInput] = useState('');
+
+  const closeDialog = () => {
+    setModalConfig({ ...modalConfig, isOpen: false });
+    setModalInput('');
+  };
+
+  const showDialog = (type, title, message, onConfirm = closeDialog, onCancel = closeDialog) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      onCancel
+    });
+    setModalInput('');
+  };
 
   const fetchData = async () => {
     try {
@@ -89,6 +194,10 @@ export default function StaffManagement() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, coFilter, roleFilter, managerFilter, isRecycleBinView]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -122,12 +231,17 @@ export default function StaffManagement() {
     }
   }
 
+  // 🚨 NEW: Pagination Logic Extraction
+  const totalPages = Math.ceil(data.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = data.slice(indexOfFirstItem, indexOfLastItem);
+
   const handleSaveEdit = async () => {
     if (!editingStaff) return;
     try {
       await api.patch(`/users/${editingStaff._id}/hr-update`, {
         firstName: editingStaff.personalDetails?.firstName,
-        // 🚨 UPGRADE: Added middleName to the save payload
         middleName: editingStaff.personalDetails?.middleName,
         lastName: editingStaff.personalDetails?.lastName,
         jobTitle: editingStaff.employmentDetails?.jobTitle,
@@ -145,43 +259,62 @@ export default function StaffManagement() {
       setOpenDropdown(null); 
       fetchData();
       setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (e) { alert("Failed to update to database."); }
-  };
-
-  const handleDelete = async () => {
-    if (!editingStaff || !window.confirm("Are you sure you want to move this employee to the Recycle Bin?")) return;
-    try {
-      await api.delete(`/users/${editingStaff._id}`); 
-      setSuccessMsg("Employee moved to Recycle Bin.");
-      setEditingStaff(null);
-      fetchData();
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (e) { alert("Failed to delete from database."); }
-  };
-
-  const handleMassDelete = async () => {
-    if (dbStaff.length === 0) return alert("No active staff to delete.");
-    
-    const confirm1 = window.confirm(`WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`);
-    if (!confirm1) return;
-
-    const confirm2 = window.prompt(`To confirm this mass deletion, please type "DELETE ALL" below:`);
-    if (confirm2 !== "DELETE ALL") {
-      return alert("Mass deletion cancelled.");
-    }
-
-    try {
-      setIsDeletingAll(true);
-      await api.delete('/users/mass-delete'); 
-      setSuccessMsg(`All employees have been successfully moved to the Recycle Bin.`);
-      fetchData();
-      setTimeout(() => setSuccessMsg(''), 5000);
     } catch (e) { 
-      console.error(e);
-      alert("Failed to execute mass deletion. Make sure the backend route exists."); 
-    } finally {
-      setIsDeletingAll(false);
+      showDialog('alert', 'Error', "Failed to update to database."); 
     }
+  };
+
+  const handleDelete = () => {
+    if (!editingStaff) return;
+    
+    showDialog('confirm', 'Confirm Deletion', `Are you sure you want to move ${editingStaff.personalDetails?.firstName} to the Recycle Bin?`, async () => {
+      closeDialog();
+      try {
+        await api.delete(`/users/${editingStaff._id}`); 
+        setSuccessMsg("Employee moved to Recycle Bin.");
+        setEditingStaff(null);
+        fetchData();
+        setTimeout(() => setSuccessMsg(''), 3000);
+      } catch (e) { 
+        showDialog('alert', 'Error', "Failed to delete from database."); 
+      }
+    });
+  };
+
+  const handleMassDelete = () => {
+    if (dbStaff.length === 0) return showDialog('alert', 'Notice', "No active staff to delete.");
+    
+    showDialog(
+      'confirm', 
+      'Mass Deletion Warning', 
+      `WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`, 
+      () => {
+        showDialog(
+          'prompt',
+          'Confirm MASSIVE Action',
+          'To confirm this mass deletion, please type "DELETE ALL" below:',
+          async (inputValue) => {
+            if (inputValue !== "DELETE ALL") {
+              showDialog('alert', 'Action Cancelled', 'Mass deletion cancelled.');
+              return;
+            }
+            
+            closeDialog();
+            try {
+              setIsDeletingAll(true);
+              await api.delete('/users/mass-delete'); 
+              setSuccessMsg(`All employees have been successfully moved to the Recycle Bin.`);
+              fetchData();
+              setTimeout(() => setSuccessMsg(''), 5000);
+            } catch (e) { 
+              showDialog('alert', 'Error', "Failed to execute mass deletion. Make sure the backend route exists."); 
+            } finally {
+              setIsDeletingAll(false);
+            }
+          }
+        );
+      }
+    );
   };
 
   const handleRestore = async (userId) => {
@@ -190,21 +323,32 @@ export default function StaffManagement() {
       setSuccessMsg("Employee successfully restored to active directory.");
       fetchData();
       setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (e) { alert("Failed to restore user."); }
+    } catch (e) { 
+      showDialog('alert', 'Error', "Failed to restore user."); 
+    }
   };
 
-  const handlePermanentDelete = async (userId) => {
-    if (!window.confirm("WARNING: This will permanently erase the employee from the database. This action cannot be undone. Are you sure?")) return;
-    try {
-      await api.delete(`/users/${userId}/permanent`);
-      setSuccessMsg("Employee permanently deleted from the system.");
-      fetchData();
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (e) { alert("Failed to permanently delete user."); }
+  const handlePermanentDelete = (userId) => {
+    showDialog(
+      'confirm', 
+      'Permanent Deletion', 
+      "WARNING: This will permanently erase the employee from the database. This action cannot be undone. Are you sure?", 
+      async () => {
+        closeDialog();
+        try {
+          await api.delete(`/users/${userId}/permanent`);
+          setSuccessMsg("Employee permanently deleted from the system.");
+          fetchData();
+          setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (e) { 
+          showDialog('alert', 'Error', "Failed to permanently delete user."); 
+        }
+      }
+    );
   };
 
   const handleDownloadCSV = () => {
-    if (data.length === 0) return alert("No data to download.");
+    if (data.length === 0) return showDialog('alert', 'Notice', "No data to download.");
     
     const headers = ['Employee ID', 'First Name', 'Last Name', 'Company', 'Office Location', 'Job Title', 'Base Salary', 'Hire Date', 'Primary Role', 'Secondary Roles', 'Reporting Manager'];
     const csvRows = [headers.join(',')];
@@ -360,7 +504,7 @@ export default function StaffManagement() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-6 max-w-7xl mx-auto space-y-6 relative">
       
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200 gap-4">
@@ -402,29 +546,38 @@ export default function StaffManagement() {
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..." className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none bg-white" />
           </div>
           
-          <select value={coFilter} onChange={e => setCoFilter(e.target.value)} className="w-full md:w-40 px-3 py-2 border rounded-lg text-sm outline-none bg-white">
-            <option value="">All Companies</option>
-            {companyCodes.map(code => (
-              <option key={`filter-co-${code}`} value={code}>{code}</option>
-            ))}
-          </select>
+          <SearchableFilterDropdown 
+            value={coFilter}
+            onChange={setCoFilter}
+            placeholder="All Companies"
+            widthClass="w-full md:w-40"
+            options={companyCodes.map(code => ({ value: code, label: code }))}
+          />
           
-          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="w-full md:w-48 px-3 py-2 border rounded-lg text-sm outline-none bg-white">
-            <option value="">All Roles</option>
-            <option value="EMPLOYEE">Staff / Employee</option>
-            <option value="MANAGER">Line Manager</option>
-            <option value="HR_ADMIN">HR Admin</option>
-            <option value="CEO">CEO</option>
-            <option value="ICT_ADMIN">ICT Admin</option>
-          </select>
+          <SearchableFilterDropdown 
+            value={roleFilter}
+            onChange={setRoleFilter}
+            placeholder="All Roles"
+            widthClass="w-full md:w-48"
+            options={[
+              { value: 'EMPLOYEE', label: 'Staff / Employee' },
+              { value: 'MANAGER', label: 'Line Manager' },
+              { value: 'HR_ADMIN', label: 'HR Admin' },
+              { value: 'CEO', label: 'CEO' },
+              { value: 'ICT_ADMIN', label: 'ICT Admin' }
+            ]}
+          />
 
-          <select value={managerFilter} onChange={e => setManagerFilter(e.target.value)} className="w-full md:w-64 px-3 py-2 border rounded-lg text-sm outline-none bg-white">
-            <option value="">All Managers (Any)</option>
-            <option value="unassigned">-- Unassigned / CEO --</option>
-            {dbManagers.map(m => (
-               <option key={m._id} value={m._id}>{m.personalDetails?.firstName} {m.personalDetails?.lastName}</option>
-            ))}
-          </select>
+          <SearchableFilterDropdown 
+            value={managerFilter}
+            onChange={setManagerFilter}
+            placeholder="All Managers (Any)"
+            widthClass="w-full md:w-64"
+            options={[
+              { value: 'unassigned', label: '-- Unassigned / CEO --' },
+              ...dbManagers.map(m => ({ value: m._id, label: `${m.personalDetails?.firstName} ${m.personalDetails?.lastName}` }))
+            ]}
+          />
         </div>
         
         <div className="flex justify-between items-center pt-3 border-t border-slate-100">
@@ -452,92 +605,124 @@ export default function StaffManagement() {
       </div>
 
       {/* Real-time Table */}
-      <div className={`rounded-xl shadow-sm border overflow-hidden ${isRecycleBinView ? 'bg-red-50/10 border-red-200' : 'bg-white border-slate-200'}`}>
-        <table className="w-full text-left">
-          <thead className={isRecycleBinView ? 'bg-red-50/50 border-b border-red-100' : 'bg-slate-50 border-b'}>
-            <tr className="text-xs text-slate-500 uppercase tracking-wider">
-              <th className="px-6 py-4 font-bold">Employee</th>
-              <th className="px-6 py-4 font-bold">Job Title</th>
-              <th className="px-6 py-4 font-bold text-center">ID</th>
-              <th className="px-6 py-4 font-bold text-center">Roles</th>
-              <th className="px-6 py-4 font-bold">Manager</th>
-              <th className="px-6 py-4 font-bold text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {loading ? (
-              <tr><td colSpan="6" className="py-12 text-center text-slate-400">Syncing with database...</td></tr>
-            ) : data.length === 0 ? (
-              <tr><td colSpan="6" className="py-12 text-center text-slate-400">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching filters.'}</td></tr>
-            ) : data.map((e) => {
-              const roleKey = e.security?.role || 'EMPLOYEE';
-              const roleInfo = ROLE_COLOURS[roleKey];
-              const secondaryRoles = e.security?.secondaryRoles || [];
-              const mgr = e.employmentDetails?.reportingTo?.personalDetails;
-              const mgrName = mgr ? `${mgr.firstName} ${mgr.lastName}` : 'Unassigned';
+      <div className={`rounded-xl shadow-sm border overflow-hidden flex flex-col ${isRecycleBinView ? 'bg-red-50/10 border-red-200' : 'bg-white border-slate-200'}`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className={isRecycleBinView ? 'bg-red-50/50 border-b border-red-100' : 'bg-slate-50 border-b'}>
+              <tr className="text-xs text-slate-500 uppercase tracking-wider">
+                <th className="px-6 py-4 font-bold">Employee</th>
+                <th className="px-6 py-4 font-bold">Job Title</th>
+                <th className="px-6 py-4 font-bold text-center">ID</th>
+                <th className="px-6 py-4 font-bold text-center">Roles</th>
+                <th className="px-6 py-4 font-bold">Manager</th>
+                <th className="px-6 py-4 font-bold text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr><td colSpan="6" className="py-12 text-center text-slate-400">Syncing with database...</td></tr>
+              ) : data.length === 0 ? (
+                <tr><td colSpan="6" className="py-12 text-center text-slate-400">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching filters.'}</td></tr>
+              ) : currentItems.map((e) => {
+                const roleKey = e.security?.role || 'EMPLOYEE';
+                const roleInfo = ROLE_COLOURS[roleKey];
+                const secondaryRoles = e.security?.secondaryRoles || [];
+                const mgr = e.employmentDetails?.reportingTo?.personalDetails;
+                const mgrName = mgr ? `${mgr.firstName} ${mgr.lastName}` : 'Unassigned';
 
-              return (
-                <tr key={e._id} className={isRecycleBinView ? 'hover:bg-red-50/30' : 'hover:bg-slate-50'}>
-                  <td className="px-6 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold ${isRecycleBinView ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'}`}>
-                        {getInitials(`${e.personalDetails?.firstName} ${e.personalDetails?.lastName}`)}
+                return (
+                  <tr key={e._id} className={isRecycleBinView ? 'hover:bg-red-50/30' : 'hover:bg-slate-50'}>
+                    <td className="px-6 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold ${isRecycleBinView ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'}`}>
+                          {getInitials(`${e.personalDetails?.firstName} ${e.personalDetails?.lastName}`)}
+                        </div>
+                        <div>
+                          <div className={`font-bold text-sm ${isRecycleBinView ? 'text-red-900 line-through opacity-70' : 'text-slate-900'}`}>{e.personalDetails?.firstName} {e.personalDetails?.lastName}</div>
+                          <div className="text-[10px] text-slate-500">{e.companyCode} • {e.employmentDetails?.officeLocation || 'No Office'}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className={`font-bold text-sm ${isRecycleBinView ? 'text-red-900 line-through opacity-70' : 'text-slate-900'}`}>{e.personalDetails?.firstName} {e.personalDetails?.lastName}</div>
-                        <div className="text-[10px] text-slate-500">{e.companyCode} • {e.employmentDetails?.officeLocation || 'No Office'}</div>
+                    </td>
+                    <td className={`px-6 py-3 text-xs font-medium ${isRecycleBinView ? 'text-red-700/70' : 'text-slate-700'}`}>{e.employmentDetails?.jobTitle}</td>
+                    <td className="px-6 py-3 text-center text-xs font-mono text-slate-500">{e.employeeId}</td>
+                    <td className="px-6 py-3">
+                      <div className="flex flex-col items-center gap-1.5">
+                        <span style={{ backgroundColor: roleInfo.bg, color: roleInfo.fg }} className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`}>
+                          {roleInfo.label}
+                        </span>
+                        {secondaryRoles.length > 0 && (
+                          <div className="flex gap-1">
+                            {secondaryRoles.map(r => (
+                              <div key={r} style={{ backgroundColor: ROLE_COLOURS[r].bg, color: ROLE_COLOURS[r].fg }} className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`} title={`Also has ${ROLE_COLOURS[r].label} access`}>
+                                {ROLE_COLOURS[r].label.charAt(0)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  </td>
-                  <td className={`px-6 py-3 text-xs font-medium ${isRecycleBinView ? 'text-red-700/70' : 'text-slate-700'}`}>{e.employmentDetails?.jobTitle}</td>
-                  <td className="px-6 py-3 text-center text-xs font-mono text-slate-500">{e.employeeId}</td>
-                  <td className="px-6 py-3">
-                    <div className="flex flex-col items-center gap-1.5">
-                      <span style={{ backgroundColor: roleInfo.bg, color: roleInfo.fg }} className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`}>
-                        {roleInfo.label}
-                      </span>
-                      {secondaryRoles.length > 0 && (
-                        <div className="flex gap-1">
-                           {secondaryRoles.map(r => (
-                             <div key={r} style={{ backgroundColor: ROLE_COLOURS[r].bg, color: ROLE_COLOURS[r].fg }} className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`} title={`Also has ${ROLE_COLOURS[r].label} access`}>
-                               {ROLE_COLOURS[r].label.charAt(0)}
-                             </div>
-                           ))}
+                    </td>
+                    <td className="px-6 py-3 text-[11px] font-medium text-slate-600">{mgrName}</td>
+                    <td className="px-6 py-3 text-center">
+                      {isRecycleBinView ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <button onClick={() => handleRestore(e._id)} className="px-3 py-1.5 text-xs font-bold border border-green-200 text-green-700 hover:bg-green-50 rounded-md flex items-center gap-1.5 transition-colors bg-white shadow-sm">
+                            <RotateCcw className="w-3 h-3" /> Restore
+                          </button>
+                          <button onClick={() => handlePermanentDelete(e._id)} className="p-1.5 border border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors bg-white shadow-sm" title="Permanently Delete">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2">
+                          <button onClick={() => setViewingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-slate-100 bg-white text-slate-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
+                            <Eye className="w-3 h-3" /> View
+                          </button>
+                          <button onClick={() => setEditingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-white bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
+                            <Edit2 className="w-3 h-3" /> Edit
+                          </button>
                         </div>
                       )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-3 text-[11px] font-medium text-slate-600">{mgrName}</td>
-                  <td className="px-6 py-3 text-center">
-                    {isRecycleBinView ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => handleRestore(e._id)} className="px-3 py-1.5 text-xs font-bold border border-green-200 text-green-700 hover:bg-green-50 rounded-md flex items-center gap-1.5 transition-colors bg-white shadow-sm">
-                          <RotateCcw className="w-3 h-3" /> Restore
-                        </button>
-                        <button onClick={() => handlePermanentDelete(e._id)} className="p-1.5 border border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors bg-white shadow-sm" title="Permanently Delete">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      // 🚨 UPGRADE: Added the "View" button with Eye icon
-                      <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => setViewingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-slate-100 bg-white text-slate-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
-                          <Eye className="w-3 h-3" /> View
-                        </button>
-                        <button onClick={() => setEditingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-white bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
-                          <Edit2 className="w-3 h-3" /> Edit
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 🚨 NEW: Table Pagination Footer */}
+        {data.length > itemsPerPage && (
+          <div className="p-3 border-t border-slate-200 bg-white flex items-center justify-between mt-auto">
+            <div className="text-xs text-slate-500 font-semibold">
+              Showing <span className="text-slate-900">{indexOfFirstItem + 1}</span> to <span className="text-slate-900">{Math.min(indexOfLastItem, data.length)}</span> of <span className="text-slate-900">{data.length}</span> entries
+            </div>
+            
+            <div className="flex gap-1.5">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              
+              <div className="flex items-center px-2 text-xs font-bold text-slate-800">
+                Page {currentPage} of {totalPages}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 🚨 UPGRADE: New View Details Modal */}
+      {/* View Details Modal */}
       {viewingStaff && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95 duration-200">
@@ -648,6 +833,7 @@ export default function StaffManagement() {
         </div>
       )}
 
+      {/* Edit Staff Modal */}
       {editingStaff && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[95vh]">
@@ -666,7 +852,6 @@ export default function StaffManagement() {
             
             <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar bg-[#FAF8F4]">
               
-              {/* 🚨 UPGRADE: Added Middle Name to the Edit Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">First Name</label>
@@ -783,6 +968,69 @@ export default function StaffManagement() {
           </div>
         </div>
       )}
+
+      {/* 🚨 NEW: Centered Screen-Locking Custom Modal */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-[24px]">
+              <div className="flex items-center gap-[10px] mb-[12px]">
+                {modalConfig.title.includes('Error') || modalConfig.title.includes('Warning') || modalConfig.title.includes('Deletion') ? (
+                  <AlertTriangle className="w-[20px] h-[20px] text-red-600" />
+                ) : (
+                  <Shield className="w-[20px] h-[20px] text-blue-600" />
+                )}
+                <h3 className="text-[18px] font-[800] text-slate-800">{modalConfig.title}</h3>
+              </div>
+              
+              <p className="text-[14px] text-slate-600 mb-[24px] whitespace-pre-wrap leading-relaxed">
+                {modalConfig.message}
+              </p>
+              
+              {modalConfig.type === 'prompt' && (
+                <input 
+                  type="text"
+                  autoFocus
+                  value={modalInput}
+                  onChange={(e) => setModalInput(e.target.value)}
+                  className="w-full p-[12px_16px] mb-[24px] bg-slate-50 border border-slate-300 rounded-[8px] text-[13px] outline-none focus:border-slate-800 transition-colors font-mono"
+                  placeholder="Type here to confirm..."
+                />
+              )}
+
+              <div className="flex justify-end gap-[12px]">
+                {(modalConfig.type === 'confirm' || modalConfig.type === 'prompt') && (
+                  <button 
+                    type="button"
+                    onClick={modalConfig.onCancel}
+                    className="px-[16px] py-[10px] text-slate-600 font-[700] text-[13px] hover:bg-slate-100 rounded-[8px] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button 
+                  type="button"
+                  onClick={() => {
+                    if (modalConfig.type === 'prompt') {
+                      modalConfig.onConfirm(modalInput);
+                    } else {
+                      modalConfig.onConfirm();
+                    }
+                  }}
+                  className={`px-[20px] py-[10px] text-white font-[800] text-[13px] rounded-[8px] shadow-sm transition-colors ${
+                    modalConfig.title.includes('Error') || modalConfig.title.includes('Warning') || modalConfig.title.includes('Deletion')
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-slate-800 hover:bg-slate-900'
+                  }`}
+                >
+                  {modalConfig.type === 'alert' ? 'Acknowledge' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

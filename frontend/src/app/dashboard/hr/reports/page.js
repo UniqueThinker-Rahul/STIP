@@ -66,15 +66,24 @@ export default function Reports() {
         return setSuccess({ show: true, icon: '⚠️', title: 'Action Required', detail: 'Please select a reporting quarter first.' });
     }
 
-    const qLockStatus = activeQuarterData?.isLocked;
+    // 🚨 DEBUGGING: Print the exact quarter object from the database to your browser console
+    console.log("QUARTER DATA FROM DB:", activeQuarterData);
+
+    // 🚨 FIX: Make the lock check more resilient. 
+    // It will check for 'isLocked: true', OR 'status: "LOCKED"', OR if the word "lock" appears anywhere.
+    const isActuallyLocked = 
+      activeQuarterData?.isLocked === true || 
+      activeQuarterData?.status === 'LOCKED' ||
+      activeQuarterData?.isLocked === 'true' ||
+      JSON.stringify(activeQuarterData).toLowerCase().includes('"islocked":true');
 
     // Security Check
-    if ((reportType === 'awards' || reportType === 'board') && !qLockStatus) {
+    if ((reportType === 'awards' || reportType === 'board') && !isActuallyLocked) {
       return setSuccess({
         show: true,
         icon: '🔒',
         title: 'Scorecard Not Locked',
-        detail: `This report is highly sensitive. It is only available after the CEO locks the KPA scorecard for the ${activeQuarterData?.name} quarter.`
+        detail: `This report is highly sensitive. It is only available after the CEO locks the KPA scorecard for the ${activeQuarterData?.name} quarter. If you believe this is an error, please check the browser console.`
       });
     }
     
@@ -178,7 +187,6 @@ export default function Reports() {
         });
       }
 
-      // 🚨 NEW: Report by Office Station (Missing Appraisals)
       if (reportType === 'office_missing') {
         title = `Unappraised Staff - ${selectedOffice || 'All Offices'} - ${activeQuarterData?.name}`;
         columns = ['Employee ID', 'Employee Name', 'Job Title', 'Office Station', 'Manager Name'];

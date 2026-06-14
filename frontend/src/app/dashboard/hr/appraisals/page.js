@@ -1,7 +1,87 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
+import { Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+
+// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
+const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [wrapperRef]);
+
+  const filteredOptions = options.filter(opt => 
+    opt.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div ref={wrapperRef} className={`relative ${widthClass}`}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full py-[10px] px-[12px] bg-white border rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer flex justify-between items-center transition-colors ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-[#E2DDD4]'}`}
+      >
+        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
+        <ChevronDown className={`w-[14px] h-[14px] text-[#6b7280] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 top-[calc(100%+4px)] left-0 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="p-[8px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
+            <div className="relative">
+              <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[12px] h-[12px] text-[#6b7280]" />
+              <input 
+                type="text"
+                autoFocus
+                placeholder="Search..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-[26px] pr-[8px] py-[6px] text-[12px] border border-[#E2DDD4] rounded-[6px] outline-none focus:border-[#0D2B55]"
+              />
+            </div>
+          </div>
+          
+          {/* Max height calculated to show approx 5 items before scrolling */}
+          <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
+            <div 
+              onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
+              className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors ${value === '' ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#6b7280] hover:bg-[#FAF8F4]'}`}
+            >
+              {placeholder}
+            </div>
+            
+            {filteredOptions.length === 0 ? (
+              <div className="px-[12px] py-[10px] text-[12px] text-[#6b7280] text-center italic">No matches found</div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <div 
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
+                  className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#0f1923] hover:bg-[#FAF8F4]'}`}
+                >
+                  {opt.label}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+// ----------------------------------------------
+
 
 export default function HRAllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
@@ -11,23 +91,21 @@ export default function HRAllAppraisals() {
   const [dbQuarters, setDbQuarters] = useState([]);
   const [companyCodes, setCompanyCodes] = useState([]);
   const [managerList, setManagerList] = useState([]);
-  
-  // 🚨 UPGRADED: Added state to store dynamically fetched Office Stations
   const [availableOffices, setAvailableOffices] = useState([]);
 
   const [search, setSearch] = useState('');
-  
   const [filterYear, setFilterYear] = useState(''); 
   const [qtr, setQtr] = useState(''); 
-  
   const [statusFilter, setStatusFilter] = useState('');
   const [co, setCo] = useState('');
   const [mgrFilter, setMgrFilter] = useState('');
-  
-  // 🚨 UPGRADED: Added state for Office Station Filter
   const [officeFilter, setOfficeFilter] = useState('');
   
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
+
+  // 🚨 NEW: Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -46,7 +124,6 @@ export default function HRAllAppraisals() {
         const allUsers = usersRes.data?.data || [];
         setStaff(allUsers);
         
-        // 🚨 UPGRADED: Dynamically extract all unique Office Stations from the live user base securely
         const extractedOffices = allUsers
             .map(u => u?.employmentDetails?.officeLocation)
             .filter(location => location && typeof location === 'string' && location.trim() !== '');
@@ -103,6 +180,11 @@ export default function HRAllAppraisals() {
     };
     fetchData();
   }, []);
+
+  // 🚨 NEW: Reset pagination to page 1 whenever ANY filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterYear, qtr, statusFilter, co, mgrFilter, officeFilter]);
 
   const handleYearChange = (e) => {
     setFilterYear(e.target.value);
@@ -182,7 +264,6 @@ export default function HRAllAppraisals() {
     const matchesCo = co === '' || a.employeeId?.companyCode === co;
     const matchesMgr = mgrFilter === '' || mgrInfo.id === mgrFilter;
     
-    // 🚨 UPGRADED: Connect Office Station Filter 
     const matchesOffice = officeFilter === '' || a.employeeId?.employmentDetails?.officeLocation === officeFilter;
     
     let matchesStatus = true;
@@ -196,19 +277,24 @@ export default function HRAllAppraisals() {
     
     return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
   }).sort((a, b) => {
-    // 🚨 UPGRADED: Core Sorting Logic (CEO Activity First -> Then Recent Date/Time)
     const ceoStatuses = ['WITH_CEO', 'APPROVED'];
     const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
     const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
 
     if (isACeo !== isBCeo) {
-      return isBCeo - isACeo; // Push CEO activity to top
+      return isBCeo - isACeo; 
     }
 
     const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
     const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-    return dateB - dateA; // Most recent on top
+    return dateB - dateA; 
   });
+
+  // 🚨 NEW: Pagination Logic Extraction
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filtered.slice(indexOfFirstItem, indexOfLastItem);
 
   const getQuarterName = (qId) => {
     if (!qId) return 'N/A';
@@ -219,10 +305,10 @@ export default function HRAllAppraisals() {
   const availableYears = [...new Set(dbQuarters.map(q => q.year))].sort((a, b) => b - a);
   const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
 
-  // 🚨 UPGRADED: CSV Download Generator Function
   const handleDownloadReport = () => {
     let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Status,Last Updated Date & Time\n";
     
+    // Always download the FULL filtered list, not just the current page
     filtered.forEach(a => {
       const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
       const empId = `"${a.employeeId?.employeeId || ''}"`;
@@ -262,7 +348,6 @@ export default function HRAllAppraisals() {
           <p className="text-[13px] text-[#6b7280]">View submitted appraisals or track missing submissions by Line Manager</p>
         </div>
         
-        {/* 🚨 UPGRADED: Download Report Button tied directly to active filters */}
         <button 
           onClick={handleDownloadReport} 
           disabled={loading || filtered.length === 0}
@@ -273,6 +358,7 @@ export default function HRAllAppraisals() {
       </div>
 
       <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm p-[16px] mb-[20px] flex flex-wrap gap-[12px]">
+        
         <div className="flex-1 min-w-[200px] relative">
           <input 
             type="text" 
@@ -283,20 +369,23 @@ export default function HRAllAppraisals() {
           <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
         </div>
         
-        {/* 🚨 UPGRADED: New Office Station Dropdown */}
-        <select value={officeFilter} onChange={e => setOfficeFilter(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
-          <option value="">All Offices</option>
-          {availableOffices.map(off => (
-             <option key={`off-${off}`} value={off}>{off}</option>
-          ))}
-        </select>
+        {/* 🚨 UPGRADED: Custom Searchable Dropdown for Office */}
+        <SearchableDropdown 
+          value={officeFilter}
+          onChange={setOfficeFilter}
+          placeholder="All Offices"
+          widthClass="w-[180px]"
+          options={availableOffices.map(o => ({ value: o, label: o }))}
+        />
 
-        <select value={mgrFilter} onChange={e => setMgrFilter(e.target.value)} className="py-[10px] px-[12px] bg-[#F8FAFC] border border-[#E2DDD4] rounded-[8px] text-[13px] font-[600] text-[#0f1923] outline-none cursor-pointer w-[180px]">
-          <option value="">All Managers</option>
-          {managerList.map(mgr => (
-             <option key={`mgr-${mgr.id}`} value={mgr.id}>{mgr.name}</option>
-          ))}
-        </select>
+        {/* 🚨 UPGRADED: Custom Searchable Dropdown for Managers */}
+        <SearchableDropdown 
+          value={mgrFilter}
+          onChange={setMgrFilter}
+          placeholder="All Managers"
+          widthClass="w-[200px]"
+          options={managerList.map(m => ({ value: m.id, label: m.name }))}
+        />
         
         <div className="flex gap-[6px]">
           <select value={filterYear} onChange={handleYearChange} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[100px]">
@@ -319,14 +408,20 @@ export default function HRAllAppraisals() {
           </select>
         </div>
 
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[160px]">
-          <option value="">Appraisal Status</option>
-          <option value="SUBMITTED">Submitted to HR</option>
-          <option value="APPROVED_BY_HR">Approved by HR</option>
-          <option value="WITH_CEO">With CEO</option>
-          <option value="APPROVED">CEO Approved</option>
-          <option value="NOT_SUBMITTED" className="font-bold text-red-700">Not Submitted (Missing)</option>
-        </select>
+        {/* 🚨 UPGRADED: Custom Searchable Dropdown for Status */}
+        <SearchableDropdown 
+          value={statusFilter}
+          onChange={setStatusFilter}
+          placeholder="All Statuses"
+          widthClass="w-[180px]"
+          options={[
+            { value: 'SUBMITTED', label: 'Submitted to HR' },
+            { value: 'APPROVED_BY_HR', label: 'Approved by HR' },
+            { value: 'WITH_CEO', label: 'With CEO' },
+            { value: 'APPROVED', label: 'CEO Approved' },
+            { value: 'NOT_SUBMITTED', label: 'Not Submitted (Missing)' },
+          ]}
+        />
         
         <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
           <option value="">All Co.</option>
@@ -336,7 +431,7 @@ export default function HRAllAppraisals() {
         </select>
       </div>
 
-      <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm overflow-hidden">
+      <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[800px]">
             <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.06em]">
@@ -356,7 +451,8 @@ export default function HRAllAppraisals() {
               ) : filtered.length === 0 ? (
                 <tr><td colSpan="7" className="p-[32px] text-center text-[#6b7280] font-[600]">No records match your filters.</td></tr>
               ) : (
-                filtered.map(a => {
+                // 🚨 UPGRADED: Replaced 'filtered.map' with 'currentItems.map' for Pagination
+                currentItems.map(a => {
                   const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`;
                   const mgrInfo = getManagerInfo(a.managerId);
                   const coCode = a.employeeId?.companyCode || 'FSM';
@@ -368,7 +464,6 @@ export default function HRAllAppraisals() {
                         <div className="font-[700] text-[#0D2B55]">{empName}</div>
                         <div className="text-[11px] text-[#6b7280]">
                           {a.employeeId?.employmentDetails?.jobTitle} 
-                          {/* 🚨 UPGRADED: Accurate Time & Date display for modifications */}
                           {!a.isMissing && a.updatedAt && ` · ${new Date(a.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}
                         </div>
                       </td>
@@ -409,8 +504,40 @@ export default function HRAllAppraisals() {
             </tbody>
           </table>
         </div>
+
+        {/* 🚨 NEW: Table Pagination Footer */}
+        {filtered.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-white flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filtered.length)}</span> of <span className="text-[#0f1923]">{filtered.length}</span> entries
+            </div>
+            
+            <div className="flex gap-[6px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] hover:bg-[#FAF8F4] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex items-center px-[8px] text-[12px] font-[700] text-[#0D2B55]">
+                Page {currentPage} of {totalPages}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] hover:bg-[#FAF8F4] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Audit Modal */}
       {selectedAppraisal && !selectedAppraisal.isMissing && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
@@ -420,7 +547,7 @@ export default function HRAllAppraisals() {
               <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">&times;</button>
             </div>
             
-            <div className="p-[24px] overflow-y-auto">
+            <div className="p-[24px] overflow-y-auto custom-scrollbar">
               
               <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
                 <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
