@@ -8,6 +8,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
+// 🚨 UPGRADE: INITIALIZE EVENT LISTENERS FOR BACKGROUND TASKS (EMAILS)
+// This must be required early so it starts listening before routes are hit
+require('./events/emailListeners'); 
+
 // 1. Import your route files
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes'); 

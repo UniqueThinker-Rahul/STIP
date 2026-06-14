@@ -26,24 +26,12 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
     }
 
     for (const recipient of recipients) {
-      await Notification.create({ recipient: recipient._id, sender: senderId, title, message, type, actionUrl });
+      await Notification.create({ recipient: recipient._id, sender: senderId, title, message, type, actionUrl, targetRole: targetRoleContext });
       console.log(`🔔 [IN-APP NOTIFICATION] Saved to database for ${recipient.personalDetails?.firstName} (${recipient.security?.role})`);
     }
     
-    return recipients.map(r => {
-       let email = null;
-       if (r.personalDetails?.notificationEmails?.get) {
-         email = r.personalDetails.notificationEmails.get(targetRoleContext) || r.username;
-       } else {
-         email = r.username; 
-       }
-       
-       return {
-         email,
-         firstName: r.personalDetails?.firstName,
-         lastName: r.personalDetails?.lastName
-       };
-    });
+    // Return the raw Mongoose objects, we will extract the email carefully in the route
+    return recipients;
 
   } catch (error) { 
     console.error("Notification Error:", error); 
@@ -151,12 +139,26 @@ exports.createAppraisal = async (req, res) => {
           console.log(`📧 [EMAIL SYSTEM] Found ${hrTargets.length} HR_ADMIN users to notify.`);
 
           for (const hr of hrTargets) {
-            console.log(`   -> Target: ${hr.firstName} | Extracted Email String: "${hr.email}"`);
-            if (hr.email && hr.email.includes('@')) {
+            // 🚨 THE FIX: Bulletproof Email Extraction
+            let adminEmail = null;
+            if (hr.personalDetails && hr.personalDetails.notificationEmails) {
+              if (typeof hr.personalDetails.notificationEmails.get === 'function') {
+                adminEmail = hr.personalDetails.notificationEmails.get('HR_ADMIN');
+              } else {
+                adminEmail = hr.personalDetails.notificationEmails['HR_ADMIN'];
+              }
+            }
+            if (!adminEmail) {
+              adminEmail = hr.username; 
+            }
+
+            console.log(`   -> Target: ${hr.personalDetails?.firstName} | Extracted Email String: "${adminEmail}"`);
+            
+            if (adminEmail && adminEmail.includes('@')) {
                console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
                await sendManagerSubmitEmail({
-                 toEmail: hr.email,
-                 hrName: hr.firstName || 'HR Manager',
+                 toEmail: adminEmail,
+                 hrName: hr.personalDetails?.firstName || 'HR Manager',
                  empName: empName,
                  empId: employeeData?.employeeId || 'N/A',
                  empTitle: employeeData?.employmentDetails?.jobTitle || 'Staff',
@@ -168,7 +170,7 @@ exports.createAppraisal = async (req, res) => {
                  iprfLabel: getIprfLabel(iprfScore),
                  submitDate: new Date().toLocaleDateString('en-GB')
                });
-               console.log(`   -> ✅ SUCCESS. Email delivered to ${hr.email}`);
+               console.log(`   -> ✅ SUCCESS. Email delivered to ${adminEmail}`);
             } else {
                console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
             }
@@ -235,12 +237,26 @@ exports.forwardToCEO = async (req, res) => {
         console.log(`📧 [EMAIL SYSTEM] Found ${ceoTargets.length} CEO users to notify.`);
 
         for (const ceo of ceoTargets) {
-          console.log(`   -> Target: ${ceo.firstName} | Extracted Email String: "${ceo.email}"`);
-          if (ceo.email && ceo.email.includes('@')) {
+          // 🚨 THE FIX: Bulletproof Email Extraction
+          let adminEmail = null;
+          if (ceo.personalDetails && ceo.personalDetails.notificationEmails) {
+            if (typeof ceo.personalDetails.notificationEmails.get === 'function') {
+              adminEmail = ceo.personalDetails.notificationEmails.get('CEO');
+            } else {
+              adminEmail = ceo.personalDetails.notificationEmails['CEO'];
+            }
+          }
+          if (!adminEmail) {
+            adminEmail = ceo.username; 
+          }
+
+          console.log(`   -> Target: ${ceo.personalDetails?.firstName} | Extracted Email String: "${adminEmail}"`);
+          
+          if (adminEmail && adminEmail.includes('@')) {
             console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
             await sendHRForwardEmail({
-              toEmail: ceo.email,
-              ceoName: ceo.firstName || 'CEO',
+              toEmail: adminEmail,
+              ceoName: ceo.personalDetails?.firstName || 'CEO',
               empName: empName,
               empId: appraisal.employeeId.employeeId,
               empTitle: appraisal.employeeId.employmentDetails?.jobTitle,
@@ -255,7 +271,7 @@ exports.forwardToCEO = async (req, res) => {
               forwardDate: new Date().toLocaleDateString('en-GB'),
               isEP: isEP
             });
-            console.log(`   -> ✅ SUCCESS. Email delivered to ${ceo.email}`);
+            console.log(`   -> ✅ SUCCESS. Email delivered to ${adminEmail}`);
           } else {
              console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
           }
@@ -281,7 +297,7 @@ exports.approveRejectAppraisal = async (req, res) => {
 
     const appraisal = await Appraisal.findById(req.params.id)
       .populate('employeeId', 'personalDetails employeeId')
-      .populate('managerId', 'personalDetails')
+      .populate('managerId', 'personalDetails username notificationEmails')
       .populate('appraisalQuarter', 'name year');
 
     if (!appraisal) return res.status(404).json({ success: false, message: 'Appraisal not found.' });
@@ -305,7 +321,6 @@ exports.approveRejectAppraisal = async (req, res) => {
       try {
         console.log(`\n📧 [EMAIL SYSTEM] Initializing CEO Decision sequence (${status})...`);
         
-        // 🚨 UPGRADED: Collect BOTH the Manager AND the HR Admin as targets for the CEO's decision
         let managerTargets = [];
         if (appraisal.managerId) {
           managerTargets = await dispatchNotification({
@@ -333,48 +348,121 @@ exports.approveRejectAppraisal = async (req, res) => {
           actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
         }); 
 
-        // Combine them so they both receive the rich email!
-        const allTargets = [...hrTargets, ...managerTargets];
-        console.log(`📧 [EMAIL SYSTEM] Found ${allTargets.length} targets (HR & Line Managers) to notify of decision.`);
+        // Note: managerTargets and hrTargets contain the role context they were queried with
+        // We will process them sequentially to ensure the role context is correct for extraction
+        
+        // --- Process Line Managers ---
+        if (managerTargets.length > 0) {
+            for (const target of managerTargets) {
+              // 🚨 THE FIX: Bulletproof Email Extraction
+              let adminEmail = null;
+              if (target.personalDetails && target.personalDetails.notificationEmails) {
+                if (typeof target.personalDetails.notificationEmails.get === 'function') {
+                  adminEmail = target.personalDetails.notificationEmails.get('MANAGER');
+                } else {
+                  adminEmail = target.personalDetails.notificationEmails['MANAGER'];
+                }
+              }
+              if (!adminEmail) {
+                adminEmail = target.username; 
+              }
 
-        for (const target of allTargets) {
-          console.log(`   -> Target: ${target.firstName} | Extracted Email String: "${target.email}"`);
-          if (target.email && target.email.includes('@')) {
-            console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
-            if (isApproved) {
-               await sendCEOApproveEmail({
-                 toEmail: target.email,
-                 recipientName: target.firstName || 'User', // Passed generic so it says "Dear John (Manager)" or "Dear Jane (HR)"
-                 empName: empName,
-                 empId: appraisal.employeeId.employeeId,
-                 quarter: quarterName,
-                 year: quarterYear,
-                 iprfFactor: iprfScore.toFixed(1),
-                 iprfLabel: getIprfLabel(iprfScore),
-                 ceoName: ceoName,
-                 decisionDate: new Date().toLocaleDateString('en-GB')
-               });
-            } else {
-               await sendCEORejectEmail({
-                 toEmail: target.email,
-                 recipientName: target.firstName || 'User',
-                 empName: empName,
-                 empId: appraisal.employeeId.employeeId,
-                 quarter: quarterName,
-                 year: quarterYear,
-                 iprfFactor: iprfScore.toFixed(1),
-                 iprfLabel: getIprfLabel(iprfScore),
-                 ceoName: ceoName,
-                 decisionDate: new Date().toLocaleDateString('en-GB'),
-                 ceoComment: comments || 'No comment provided.',
-                 mgrName: mgrName
-               });
+              console.log(`   -> Target: ${target.personalDetails?.firstName} (Manager) | Extracted Email String: "${adminEmail}"`);
+              
+              if (adminEmail && adminEmail.includes('@')) {
+                console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
+                if (isApproved) {
+                   await sendCEOApproveEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'Manager', 
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB')
+                   });
+                } else {
+                   await sendCEORejectEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'Manager',
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB'),
+                     ceoComment: comments || 'No comment provided.',
+                     mgrName: mgrName
+                   });
+                }
+                console.log(`   -> ✅ SUCCESS. Email delivered to ${adminEmail}`);
+              } else {
+                console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
+              }
             }
-            console.log(`   -> ✅ SUCCESS. Email delivered to ${target.email}`);
-          } else {
-            console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
-          }
         }
+
+        // --- Process HR Admins ---
+        if (hrTargets.length > 0) {
+            for (const target of hrTargets) {
+              // 🚨 THE FIX: Bulletproof Email Extraction
+              let adminEmail = null;
+              if (target.personalDetails && target.personalDetails.notificationEmails) {
+                if (typeof target.personalDetails.notificationEmails.get === 'function') {
+                  adminEmail = target.personalDetails.notificationEmails.get('HR_ADMIN');
+                } else {
+                  adminEmail = target.personalDetails.notificationEmails['HR_ADMIN'];
+                }
+              }
+              if (!adminEmail) {
+                adminEmail = target.username; 
+              }
+
+              console.log(`   -> Target: ${target.personalDetails?.firstName} (HR) | Extracted Email String: "${adminEmail}"`);
+              
+              if (adminEmail && adminEmail.includes('@')) {
+                console.log(`   -> 🟢 VALID EMAIL. Firing SMTP request...`);
+                if (isApproved) {
+                   await sendCEOApproveEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'HR Manager', 
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB')
+                   });
+                } else {
+                   await sendCEORejectEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'HR Manager',
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB'),
+                     ceoComment: comments || 'No comment provided.',
+                     mgrName: mgrName
+                   });
+                }
+                console.log(`   -> ✅ SUCCESS. Email delivered to ${adminEmail}`);
+              } else {
+                console.log(`   -> 🔴 SKIPPED. Invalid email address (No '@' symbol found).`);
+              }
+            }
+        }
+
       } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
     });
 

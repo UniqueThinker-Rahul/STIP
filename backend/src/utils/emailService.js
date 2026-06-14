@@ -1,3 +1,4 @@
+// backend/src/utils/emailService.js
 const nodemailer = require('nodemailer');
 const mongoose = require('mongoose');
 
@@ -184,4 +185,80 @@ exports.sendCEORejectEmail = async ({ toEmail, recipientName, empName, empId, qu
     subject, 
     html: createHTMLTemplate('STIP Appraisal Not Approved', recipientName, content, `${PORTAL_BASE_URL}`) 
   });
+};
+
+// 🚨 THE FIX: I have properly awaited createDynamicTransporter() here to fix the ReferenceError
+exports.sendAdminPasswordAlertEmail = async ({
+  toEmail,
+  adminName,
+  empName,
+  empId,
+  empTitle,
+  empCompany,
+  empOffice,
+  requestDate,
+  contactDataProvided
+}) => {
+  const subject = `🚨 [SECURITY ALERT] Password Reset Requested: ${empId}`;
+  
+  const content = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2DDD4; border-radius: 8px; overflow: hidden;">
+      <div style="background-color: #DC2626; padding: 20px; text-align: center;">
+        <h2 style="color: #ffffff; margin: 0; font-size: 20px;">Secure Reset Request</h2>
+      </div>
+      <div style="padding: 30px; background-color: #ffffff; color: #333333;">
+        <p style="font-size: 14px;">Hello <strong>${adminName}</strong>,</p>
+        <p style="font-size: 14px; line-height: 1.6;">
+          A user has submitted a request from the public portal to reset their account credentials. 
+          The system successfully verified their identity against the employee database.
+        </p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px; margin-bottom: 20px;">
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; width: 40%; color: #6b7280; font-size: 12px; text-transform: uppercase;">Employee Name</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; font-size: 14px;">${empName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #6b7280; font-size: 12px; text-transform: uppercase;">Employee ID</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-family: monospace; font-size: 14px;">${empId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #6b7280; font-size: 12px; text-transform: uppercase;">Login Attempted</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 14px;">${contactDataProvided}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #6b7280; font-size: 12px; text-transform: uppercase;">Job Title</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 14px;">${empTitle}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #6b7280; font-size: 12px; text-transform: uppercase;">Location</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 14px;">${empCompany} — ${empOffice}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #6b7280; font-size: 12px; text-transform: uppercase;">Timestamp</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 14px;">${requestDate}</td>
+          </tr>
+        </table>
+
+        <p style="font-size: 13px; color: #6b7280; margin-top: 30px;">
+          Please log in to your ICT Admin dashboard to verify this user's identity and securely execute the override.
+        </p>
+        <div style="text-align: center; margin-top: 30px;">
+          <a href="${PORTAL_BASE_URL}/dashboard/ict/reset-password" style="background-color: #0D2B55; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">Review in ICT Dashboard</a>
+        </div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const { transporter, fromLine } = await createDynamicTransporter();
+    return transporter.sendMail({ 
+      from: fromLine, 
+      to: toEmail, 
+      subject, 
+      html: content 
+    });
+  } catch (error) {
+    console.error('Error sending ICT Admin alert email:', error);
+  }
 };

@@ -21,13 +21,13 @@ const notificationSchema = new mongoose.Schema({
   },
   type: { 
     type: String, 
-    enum: ['APPRAISAL_SUBMITTED', 'APPRAISAL_FORWARDED', 'APPRAISAL_APPROVED', 'APPRAISAL_REJECTED', 'SYSTEM_ALERT'],
+    // 🚨 THE FIX: Added 'SECURITY_ALERT' to the allowed Mongoose enum list!
+    enum: ['APPRAISAL_SUBMITTED', 'APPRAISAL_FORWARDED', 'APPRAISAL_APPROVED', 'APPRAISAL_REJECTED', 'SYSTEM_ALERT', 'SECURITY_ALERT'],
     default: 'SYSTEM_ALERT'
   },
   actionUrl: { 
     type: String 
   },
-  // 🚨 UPGRADED: Added targetRole to segregate multi-role user alerts
   targetRole: {
     type: String,
     enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'],
