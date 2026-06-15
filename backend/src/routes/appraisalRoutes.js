@@ -5,6 +5,9 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { authGuard, roleGuard } = require('../middleware/auth');
 
+// 🚨 UPGRADE: Imported the logger system to track workflow actions
+const { logAudit } = require('../utils/logger');
+
 const { 
   sendManagerSubmitEmail, 
   sendHRForwardEmail, 
@@ -66,7 +69,7 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
   }
 };
 
-// 🚨 UPGRADED: Real-time Analytics Aggregation with Bulletproof Date Filtering
+// Real-time Analytics Aggregation with Bulletproof Date Filtering
 router.get('/analytics/category-averages', async (req, res) => {
   try {
     // STRICT FILTER: ONLY calculate averages from fully APPROVED appraisals
@@ -101,7 +104,7 @@ router.get('/analytics/category-averages', async (req, res) => {
 
       let andConditions = [];
 
-      // 🚨 FIX: Check Number and String across all possible year fields (reviewYear, period.year, quarterDoc.year)
+      // Check Number and String across all possible year fields (reviewYear, period.year, quarterDoc.year)
       if (yearFilter) {
         const yrNum = parseInt(req.query.year);
         const yrStr = String(req.query.year);
@@ -117,7 +120,7 @@ router.get('/analytics/category-averages', async (req, res) => {
         });
       }
 
-      // 🚨 FIX: Check across all possible quarter fields (period.quarter, quarterDoc.name)
+      // Check across all possible quarter fields (period.quarter, quarterDoc.name)
       if (quarterFilter) {
         andConditions.push({
           $or: [
@@ -241,6 +244,21 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
     appraisal.workflow.lastUpdatedBy = managerId;
     await appraisal.save();
 
+    // 🚨 UPGRADE: Fetch employee name for Audit Log
+    const empForLog = await User.findById(employeeId).select('personalDetails');
+    const empNameLog = empForLog ? `${empForLog.personalDetails?.firstName} ${empForLog.personalDetails?.lastName}` : 'Employee';
+
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, 
+      role: req.user.role, 
+      action: status === 'DRAFT' ? 'APPRAISAL_DRAFT_SAVED' : 'APPRAISAL_SUBMITTED', 
+      category: 'APPRAISAL_WORKFLOW', 
+      severity: status === 'DRAFT' ? 'LOW' : 'MEDIUM',
+      details: `${status === 'DRAFT' ? 'Manager saved draft' : 'Manager submitted'} appraisal for ${empNameLog} (${actualQuarter} ${actualYear}).`, 
+      req
+    });
+
     if (status === 'SUBMITTED' || status === 'UNDER_HR_REVIEW') {
       const emp = await User.findById(employeeId);
       const employeeName = emp ? `${emp.personalDetails?.firstName} ${emp.personalDetails?.lastName}` : 'Employee';
@@ -289,7 +307,14 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
 // 3. Move to HR Review
 router.patch('/:id/review', roleGuard('HR_ADMIN'), async (req, res) => {
   try {
-    await Appraisal.findByIdAndUpdate(req.params.id, { $set: { 'workflow.status': 'UNDER_HR_REVIEW', 'workflow.lastUpdatedBy': req.user.id || req.user._id } }, { returnDocument: 'after' });
+    const updatedApp = await Appraisal.findByIdAndUpdate(req.params.id, { $set: { 'workflow.status': 'UNDER_HR_REVIEW', 'workflow.lastUpdatedBy': req.user.id || req.user._id } }, { returnDocument: 'after' });
+    
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_UNDER_REVIEW', category: 'APPRAISAL_WORKFLOW', severity: 'LOW',
+      details: `HR initiated review for appraisal record: ${updatedApp.appraisalRef || req.params.id}.`, req
+    });
+
     res.json({ message: 'Appraisal is now under HR review.' });
   } catch (error) { res.status(500).json({ message: 'Workflow state transition failure.' }); }
 });
@@ -313,6 +338,12 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     const mgrName = appraisal.managerId ? `${appraisal.managerId.personalDetails?.firstName} ${appraisal.managerId.personalDetails?.lastName}` : 'Line Manager';
     
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_HR_APPROVED', category: 'APPRAISAL_WORKFLOW', severity: 'MEDIUM',
+      details: `HR approved appraisal for ${empName} and forwarded to CEO.`, req
+    });
+
     const actionUser = await User.findById(req.user.id || req.user._id);
     const hrName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'HR Manager';
     
@@ -368,6 +399,12 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
 
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_CEO_APPROVED', category: 'APPRAISAL_WORKFLOW', severity: 'HIGH',
+      details: `CEO officially approved the appraisal for ${empName}.`, req
+    });
+
     const actionUser = await User.findById(req.user.id || req.user._id);
     const ceoName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'CEO';
     
@@ -437,6 +474,12 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
     const actionUser = await User.findById(req.user.id || req.user._id);
     const rejectorName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : (req.user.role === 'CEO' ? 'CEO' : 'HR');
     
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_REJECTED', category: 'APPRAISAL_WORKFLOW', severity: 'HIGH',
+      details: `${rejectorName} returned the appraisal for ${empName} back to the Line Manager.`, req
+    });
+
     const qName = appraisal.appraisalQuarter?.name || appraisal.period?.quarter || 'Q3';
     const qYear = appraisal.appraisalQuarter?.year || appraisal.period?.year || new Date().getFullYear();
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
@@ -480,14 +523,23 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
 // 7. Delete a draft
 router.delete('/:id', roleGuard('MANAGER', 'HR_ADMIN'), async (req, res) => {
   try {
-    const appraisal = await Appraisal.findById(req.params.id);
+    const appraisal = await Appraisal.findById(req.params.id).populate('employeeId', 'personalDetails');
     if (!appraisal) return res.status(404).json({ message: 'Appraisal not found.' });
 
     if (appraisal.workflow.status !== 'DRAFT' && req.user.role !== 'HR_ADMIN') {
       return res.status(403).json({ message: 'You can only delete DRAFT appraisals.' });
     }
+    
+    const empName = appraisal.employeeId ? `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}` : 'Unknown Employee';
 
     await Appraisal.findByIdAndDelete(req.params.id);
+    
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_DELETED', category: 'APPRAISAL_WORKFLOW', severity: 'MEDIUM',
+      details: `Deleted draft appraisal for ${empName}.`, req
+    });
+
     res.json({ message: 'Draft deleted successfully.' });
   } catch (error) { res.status(500).json({ message: 'Error deleting appraisal.' }); }
 });

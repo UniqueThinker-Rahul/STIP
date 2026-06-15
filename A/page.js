@@ -1,344 +1,343 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Download, Check, FileX, Calendar, Eye, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Search, Filter, AlertTriangle, ShieldCheck, FileText, ChevronLeft, ChevronRight, Loader2, Clock, User, Activity, Download, Calendar } from 'lucide-react';
 import api from '../../../../lib/api';
 
-const getInitials = (name) => {
-  if (!name) return '';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-};
-
-// Map backend API score keys to readable labels
-const SCORE_LABELS = {
-  jobCompetence: "Job Competence",
-  dependability: "Dependability",
-  deliveredResults: "Delivered Results",
-  adaptability: "Adaptability/Flexibility",
-  safeWorking: "Safe Working Environment",
-  behaviors: "Behaviors & Initiative"
-};
-
-export default function MySubmissions() {
-  const [submissions, setSubmissions] = useState([]);
+export default function SystemAuditTrail() {
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   
-  const [team, setTeam] = useState([]);
-  const [quarters, setQuarters] = useState([]);
-  const [selectedQuarterId, setSelectedQuarterId] = useState('');
-  const [reportType, setReportType] = useState('ALL'); 
+  // Pagination & Filtering State
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalLogs, setTotalLogs] = useState(0);
+  
+  // Calculate 6 Months Ago for Date Limits
+  const today = new Date();
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(today.getMonth() - 6);
+  
+  const formatDateForInput = (date) => date.toISOString().split('T')[0];
 
-  const [selectedAppraisal, setSelectedAppraisal] = useState(null);
+  const [filters, setFilters] = useState({
+    category: 'ALL',
+    severity: 'ALL',
+    search: '',
+    startDate: formatDateForInput(sixMonthsAgo),
+    endDate: formatDateForInput(today)
+  });
 
-  const cpPct = 13.01;
+  const fetchLogs = async () => {
+    try {
+      setLoading(true);
+      const queryParams = new URLSearchParams({
+        page,
+        limit: 50,
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        ...(filters.category !== 'ALL' && { category: filters.category }),
+        ...(filters.severity !== 'ALL' && { severity: filters.severity }),
+        ...(filters.search && { search: filters.search }),
+      });
+
+      const response = await api.get(`/audit?${queryParams}`);
+      setLogs(response.data?.data || []);
+      setTotalPages(response.data?.pagination?.pages || 1);
+      setTotalLogs(response.data?.pagination?.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch audit logs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchSubmissionsAndContext = async () => {
-      try {
-        setLoading(true);
-        const [appRes, teamRes, quarterRes] = await Promise.all([
-          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
-          api.get('/users/my-team').catch(() => ({ data: { data: [] } })),
-          api.get('/quarters').catch(() => ({ data: { data: [] } }))
-        ]);
-        
-        const myAppraisals = appRes.data?.data || [];
-        const myTeam = teamRes.data?.data || [];
-        const activeQuarters = quarterRes.data?.data || [];
-        
-        const submitted = myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT');
-        submitted.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-        
-        setSubmissions(submitted);
-        setTeam(myTeam);
-        setQuarters(activeQuarters);
-        
-        const now = new Date();
-        const activeQ = activeQuarters.find(q => {
-          const start = new Date(q.startDate); start.setHours(0,0,0,0);
-          const end = new Date(q.endDate); end.setHours(23,59,59,999);
-          return now >= start && now <= end;
-        });
-        
-        if (activeQ) setSelectedQuarterId(activeQ._id);
-        else if (activeQuarters.length > 0) setSelectedQuarterId(activeQuarters[0]._id);
+    const delayDebounceFn = setTimeout(() => { fetchLogs(); }, 400);
+    return () => clearTimeout(delayDebounceFn);
+  }, [page, filters.category, filters.severity, filters.search, filters.startDate, filters.endDate]);
 
-      } catch (error) {
-        console.error('Failed to load submissions context', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSubmissionsAndContext();
-  }, []);
+  // 🚨 UPGRADED: Log Exporter
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const queryParams = new URLSearchParams({
+        export: 'true',
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        ...(filters.category !== 'ALL' && { category: filters.category }),
+        ...(filters.severity !== 'ALL' && { severity: filters.severity }),
+        ...(filters.search && { search: filters.search }),
+      });
 
-  const getStatusConfig = (status) => {
-    switch(status) {
-      case 'SUBMITTED': return { text: 'Submitted to HR', badgeClass: 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]' };
-      case 'UNDER_HR_REVIEW': return { text: 'Under HR Review', badgeClass: 'bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE]' };
-      case 'APPROVED_BY_HR': return { text: 'HR Approved', badgeClass: 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' };
-      case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
-      case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
-      case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
-      default: return { text: status?.replace(/_/g, ' ') || 'Unknown', badgeClass: 'bg-[#E2DDD4] text-[#6b7280]' };
+      const response = await api.get(`/audit?${queryParams}`);
+      const exportData = response.data?.data || [];
+
+      if (exportData.length === 0) return alert('No logs found to export in this range.');
+
+      const headers = ['Timestamp', 'Actor ID', 'Actor Name', 'Role', 'Event Type', 'Category', 'Severity', 'Details', 'IP Address'];
+      const csvRows = [headers.join(',')];
+
+      exportData.forEach(log => {
+        const date = new Date(log.createdAt || log.timestamp).toLocaleString();
+        const empId = log.user?.employeeId || 'System';
+        const fName = log.user?.personalDetails?.firstName || '';
+        const lName = log.user?.personalDetails?.lastName || '';
+        const actorName = fName || lName ? `${fName} ${lName}` : (log.user?.username || 'System Execution');
+        
+        csvRows.push([
+          `"${date}"`,
+          `"${empId}"`,
+          `"${actorName}"`,
+          log.role || 'SYSTEM',
+          log.action,
+          log.category,
+          log.severity,
+          `"${log.details?.replace(/"/g, '""') || ''}"`,
+          log.ipAddress || 'Unknown'
+        ].join(','));
+      });
+
+      const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `ICT_Security_Audit_${filters.startDate}_to_${filters.endDate}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      alert('Error generating export file.');
+    } finally {
+      setExporting(false);
     }
   };
 
-  const handleDownloadTeamReport = () => {
-    if (!selectedQuarterId) return alert('Please select a quarter first.');
-    
-    const targetQuarter = quarters.find(q => q._id === selectedQuarterId);
-    if (!targetQuarter) return;
-
-    const quarterAppraisals = submissions.filter(app => (app.appraisalQuarter?._id || app.appraisalQuarter) === selectedQuarterId);
-    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
-
-    let csvRows = [];
-    let filename = '';
-
-    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
-      const headers = ['Employee Name', 'Job Title', 'Appraisal Reference', 'Final IPRF Score', 'Calculated Award %', 'Status', 'Submission Date'];
-      if (reportType === 'ALL') csvRows.push('--- STAFF WHO HAVE SUBMITTED ---');
-      csvRows.push(headers.join(','));
-
-      quarterAppraisals.forEach(record => {
-        const empName = `${record.employeeId?.personalDetails?.firstName || ''} ${record.employeeId?.personalDetails?.lastName || ''}`;
-        const jobTitle = record.employeeId?.employmentDetails?.jobTitle || 'Staff';
-        const iprf = record.calculatedResults?.finalIprfScore || 0;
-        const prorate = (record.employeeId?.employmentDetails?.prorateValue || 12) / 12;
-        const awardPct = (cpPct * iprf * prorate).toFixed(2);
-        
-        csvRows.push([
-          `"${empName}"`,
-          `"${jobTitle}"`,
-          record.appraisalRef || 'N/A',
-          iprf.toFixed(2),
-          `${awardPct}%`,
-          record.workflow?.status || 'UNKNOWN',
-          record.createdAt ? new Date(record.createdAt).toLocaleDateString() : 'N/A'
-        ].join(','));
-      });
-      filename = `My_Team_Submitted_Report_${targetQuarter.name}.csv`;
+  // UI Helpers
+  const getSeverityBadge = (severity) => {
+    switch (severity?.toUpperCase()) {
+      case 'HIGH':
+      case 'CRITICAL':
+        return <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">HIGH</span>;
+      case 'MEDIUM':
+      case 'WARNING':
+        return <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">MEDIUM</span>;
+      default:
+        return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">LOW</span>;
     }
-
-    if (reportType === 'MISSING' || reportType === 'ALL') {
-      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
-      
-      if (reportType === 'ALL') {
-        csvRows.push(''); 
-        csvRows.push('--- STAFF WITH PENDING SUBMISSIONS ---');
-      }
-      
-      const missingHeaders = ['Employee ID', 'Employee Name', 'Job Title', 'Company Code', 'Action Required'];
-      csvRows.push(missingHeaders.join(','));
-
-      missingStaff.forEach(u => {
-        const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`;
-        csvRows.push([
-           u.employeeId || 'N/A',
-           `"${empName}"`,
-           `"${u.employmentDetails?.jobTitle || 'N/A'}"`,
-           u.companyCode || 'FSM',
-           'Awaiting Manager Rating'
-        ].join(','));
-      });
-      
-      if (reportType === 'MISSING') filename = `My_Team_Pending_Report_${targetQuarter.name}.csv`;
-      else filename = `My_Team_Complete_Status_Report_${targetQuarter.name}.csv`;
-    }
-
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', filename.replace(/\s+/g, '_'));
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
-  if (loading) return <div className="p-10 text-center text-slate-500">Loading submissions...</div>;
+  const getCategoryBadge = (category) => {
+    const catStr = category?.replace(/_/g, ' ') || 'SYSTEM';
+    return <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">{catStr}</span>;
+  };
 
   return (
-    <div className="w-full max-w-full pb-[60px] relative">
+    <div className="max-w-[1400px] mx-auto pb-20 font-sans text-[#0F172A] px-4 xl:px-0">
       
-      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E2DDD4] pb-4">
+      {/* Header */}
+      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">&#128228; My Submissions</div>
-          <div className="text-[13px] text-[#6b7280]">Appraisals sent to HR for review and approval</div>
+          <div className="flex items-center gap-2 mb-1 text-[#0D2B55]">
+            <Shield className="w-7 h-7" strokeWidth={1.5} />
+            <h1 className="text-2xl font-bold tracking-tight">System Audit Trail</h1>
+          </div>
+          <p className="text-sm text-gray-500 font-medium">
+            Immutable security log. System auto-deletes records older than 180 days.
+          </p>
         </div>
-
-        {team.length > 0 && quarters.length > 0 && (
-          <div className="bg-white p-3 rounded-lg border border-[#E2DDD4] flex flex-col sm:flex-row items-center gap-2 shadow-sm">
-            <div className="flex items-center gap-2 text-[11px] font-bold text-[#0D2B55]">
-              <Calendar className="w-4 h-4 text-[#C9A84C]" />
-              Download Team Report:
-            </div>
-            
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <select 
-                value={selectedQuarterId}
-                onChange={(e) => setSelectedQuarterId(e.target.value)}
-                className="p-1.5 border border-gray-200 rounded text-xs font-medium outline-none bg-slate-50 min-w-[120px]"
-              >
-                {quarters.map(q => <option key={q._id} value={q._id}>{q.name}</option>)}
-              </select>
-
-              <select 
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
-                className="p-1.5 border border-gray-200 rounded text-xs font-medium outline-none bg-slate-50"
-              >
-                <option value="ALL">All Team Status</option>
-                <option value="SUBMITTED">Submitted Only</option>
-                <option value="MISSING">Pending Only</option>
-              </select>
-
-              <button 
-                onClick={handleDownloadTeamReport}
-                className="p-1.5 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white rounded text-xs font-bold transition-colors flex items-center justify-center min-w-[32px]"
-                title="Download CSV Report"
-              >
-                <Download className="w-4 h-4" />
-              </button>
+        
+        {/* KPI Badges */}
+        <div className="flex items-center gap-3">
+          <div className="bg-white px-4 py-2 border border-gray-200 rounded-lg shadow-sm flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center"><Activity className="w-4 h-4 text-blue-600"/></div>
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Current View Records</div>
+              <div className="text-sm font-black text-[#0D2B55] leading-none">{totalLogs.toLocaleString()}</div>
             </div>
           </div>
-        )}
+          <button 
+            onClick={handleExport}
+            disabled={exporting || totalLogs === 0}
+            className="flex items-center gap-2 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-4 py-3 rounded-lg shadow-sm font-bold text-xs transition-colors disabled:opacity-50"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Export CSV
+          </button>
+        </div>
       </div>
-      
-      {submissions.length === 0 ? (
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[40px] text-center">
-          <div className="text-[40px] mb-[10px]">&#128194;</div>
-          <div className="text-[15px] font-[700] text-[#0D2B55] mb-[5px]">No Submissions Yet</div>
-          <div className="text-[13px] text-[#6b7280]">You haven't submitted any appraisals to HR.</div>
+
+      {/* Control Panel (Filters & Search) */}
+      <div className="bg-white border border-gray-200 rounded-t-xl shadow-sm p-4 flex flex-col xl:flex-row items-center gap-4">
+        
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input 
+            type="text" placeholder="Search action or details..." 
+            value={filters.search} onChange={(e) => { setFilters({...filters, search: e.target.value}); setPage(1); }}
+            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-[#0D2B55] transition-colors"
+          />
         </div>
-      ) : (
-        <div className="flex flex-col gap-[12px]">
-          {submissions.map((a) => {
-            const statusConfig = getStatusConfig(a.workflow?.status);
-            
-            const fName = a.employeeId?.personalDetails?.firstName || 'Unknown';
-            const lName = a.employeeId?.personalDetails?.lastName || '';
-            const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
-            const quarter = a.appraisalQuarter?.name || a.period?.quarter || 'CY2026';
-            
-            const iprf = a.calculatedResults?.finalIprfScore || 0;
-            const prorate = (a.employeeId?.employmentDetails?.prorateValue || 12) / 12;
-            const awardPct = (cpPct * iprf * prorate).toFixed(2);
 
-            return (
-              <div key={a._id} className="bg-white border border-[#E2DDD4] rounded-[12px] p-[16px_20px] flex flex-col sm:flex-row sm:items-center justify-between gap-[14px] hover:border-[#0D2B55]/30 transition-colors shadow-sm">
-                <div className="flex-1">
-                  <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
-                  <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} &middot; Submitted {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &middot; IPRF: {iprf.toFixed(1)} &mdash; Award: {awardPct}%
-                  </div>
-                  
-                  {a.narrative?.generalComments && a.workflow?.status === 'REOPENED' && (
-                    <div className="mt-[8px] bg-[#FEE2E2] p-[8px_12px] rounded-[6px] text-[11px] text-[#991B1B] border border-[#FECACA]">
-                      <strong>HR Feedback:</strong> "{a.narrative.generalComments}"
-                    </div>
-                  )}
-                </div>
-                
-                <div className="flex items-center gap-[10px] flex-wrap shrink-0">
-                  <span className={`text-[11px] font-[700] p-[4px_12px] rounded-full whitespace-nowrap ${statusConfig.badgeClass} hidden sm:block`}>
-                    {statusConfig.text}
-                  </span>
-                  <div className="text-[11px] text-[#6b7280] bg-[#FAF8F4] border border-[#E2DDD4] px-[10px] py-[5px] rounded-full font-mono">
-                    ID: {a.appraisalRef || a._id.toString().slice(-6).toUpperCase()}
-                  </div>
-                  
-                  <button 
-                    onClick={() => setSelectedAppraisal(a)} 
-                    className="px-[12px] py-[5px] bg-white border border-[#E2DDD4] hover:border-[#0D2B55] hover:text-[#0D2B55] text-[#0f1923] text-[11px] font-[700] rounded-[6px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* 🚨 UPGRADE: View Details Modal with Score Breakdown */}
-      {selectedAppraisal && (
-        <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
-          <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
-            
-            <div className="p-[20px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] relative">
-              <h2 className="text-[18px] font-[800] text-[#0D2B55]">&#128269; Submission Details</h2>
-              <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            
-            <div className="p-[24px] overflow-y-auto custom-scrollbar">
-              
-              <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
-                <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
-                  {selectedAppraisal.employeeId?.personalDetails?.firstName?.[0] || ''}{selectedAppraisal.employeeId?.personalDetails?.lastName?.[0] || ''}
-                </div>
-                <div>
-                  <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
-                    {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
-                  </h3>
-                  <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Submitted {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-[12px] mb-[24px]">
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Final IPRF</div>
-                  <div className="text-[22px] font-[800] text-[#1E40AF]">{selectedAppraisal.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0'}</div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
-                  <div className="text-[22px] font-[800] text-[#059669]">{selectedAppraisal.stipAward ? `${selectedAppraisal.stipAward.toFixed(2)}%` : '—'}</div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>
-                  <div className="text-[18px] font-[800] text-[#0f1923] truncate">{selectedAppraisal.appraisalQuarter?.name || selectedAppraisal.period?.quarter || 'N/A'}</div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Company</div>
-                  <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.employeeId?.companyCode || 'FSM'}</div>
-                </div>
-              </div>
-
-              {/* 🚨 UPGRADE: Expanded KPA Rating Details */}
-              <div className="mb-[24px]">
-                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-[10px]">
-                  {Object.entries(SCORE_LABELS).map(([key, label]) => {
-                    const rating = selectedAppraisal.scores?.[key]?.rating;
-                    return (
-                      <div key={key} className="flex justify-between items-center bg-white border border-[#E2DDD4] p-[10px_14px] rounded-[8px] shadow-sm">
-                        <span className="text-[13px] font-[600] text-[#475569]">{label}</span>
-                        <span className={`text-[14px] font-[800] ${!rating ? 'text-slate-300' : rating >= 3 ? 'text-[#059669]' : rating >= 2 ? 'text-[#D97706]' : 'text-[#DC2626]'}`}>
-                          {rating ? rating.toFixed(1) : '-'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
-                <div className={`text-[11px] font-[700] p-[4px_12px] rounded-full whitespace-nowrap ${getStatusConfig(selectedAppraisal.workflow?.status).badgeClass}`}>
-                  {getStatusConfig(selectedAppraisal.workflow?.status).text}
-                </div>
-                <div className="text-[11px] text-[#6b7280] font-mono font-[600]">REF: {selectedAppraisal.appraisalRef || selectedAppraisal._id}</div>
-              </div>
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+          
+          {/* Date Range Restrictors */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
+            <Calendar className="w-3.5 h-3.5 text-gray-500 ml-1" />
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                min={formatDateForInput(sixMonthsAgo)} 
+                max={formatDateForInput(today)}
+                value={filters.startDate} 
+                onChange={(e) => { setFilters({...filters, startDate: e.target.value}); setPage(1); }}
+                className="bg-transparent text-xs font-bold text-gray-700 outline-none w-[110px]"
+              />
+              <span className="text-gray-400 text-xs">to</span>
+              <input 
+                type="date" 
+                min={filters.startDate} 
+                max={formatDateForInput(today)}
+                value={filters.endDate} 
+                onChange={(e) => { setFilters({...filters, endDate: e.target.value}); setPage(1); }}
+                className="bg-transparent text-xs font-bold text-gray-700 outline-none w-[110px]"
+              />
             </div>
           </div>
+
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2">
+            <Filter className="w-3 h-3 text-gray-400 ml-1" />
+            <select 
+              value={filters.severity} 
+              onChange={(e) => { setFilters({...filters, severity: e.target.value}); setPage(1); }}
+              className="py-2 bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer border-none focus:ring-0"
+            >
+              <option value="ALL">All Severities</option>
+              <option value="HIGH">High Risk</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="LOW">Low / Info</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2">
+            <FileText className="w-3 h-3 text-gray-400 ml-1" />
+            <select 
+              value={filters.category} 
+              onChange={(e) => { setFilters({...filters, category: e.target.value}); setPage(1); }}
+              className="py-2 bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer border-none focus:ring-0 w-[140px]"
+            >
+              <option value="ALL">All Categories</option>
+              <option value="AUTH">Authentication</option>
+              <option value="ADMIN_ACTION">Admin Actions</option>
+              <option value="APPRAISAL_WORKFLOW">Appraisals</option>
+              <option value="SECURITY">Security</option>
+              <option value="USER_MANAGEMENT">User Mgmt</option>
+            </select>
+          </div>
         </div>
-      )}
+      </div>
+
+      {/* Audit Log Table */}
+      <div className="bg-white border-x border-b border-gray-200 rounded-b-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto min-h-[400px]">
+          {loading && logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[300px] text-slate-400">
+              <Loader2 className="w-8 h-8 animate-spin mb-3 text-[#0D2B55]" />
+              <span className="text-sm font-bold">Decrypting system logs...</span>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[300px] text-slate-400">
+              <ShieldCheck className="w-12 h-12 mb-3 text-slate-200" />
+              <span className="text-sm font-bold">No audit records found matching your filters.</span>
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse whitespace-nowrap">
+              <thead>
+                <tr className="bg-[#FAF8F4] border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  <th className="p-4 w-[180px]">Timestamp</th>
+                  <th className="p-4 w-[200px]">Actor / User</th>
+                  <th className="p-4 w-[140px]">Event Type</th>
+                  <th className="p-4">Action Details</th>
+                  <th className="p-4 text-center w-[100px]">Severity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-xs">
+                {logs.map((log) => {
+                  const date = new Date(log.createdAt || log.timestamp);
+                  const fName = log.user?.personalDetails?.firstName || '';
+                  const lName = log.user?.personalDetails?.lastName || '';
+                  const actorName = fName || lName ? `${fName} ${lName}` : (log.user?.username || 'System Execution');
+                  const role = log.role?.replace(/_/g, ' ') || 'SYSTEM';
+
+                  return (
+                    <tr key={log._id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 font-mono text-[11px] text-gray-500">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3 h-3" />
+                          {date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          <span className="ml-1 text-gray-400">{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                            <User className="w-3 h-3" />
+                          </div>
+                          <div className="overflow-hidden">
+                            <div className="font-bold text-[#0D2B55] truncate">{actorName}</div>
+                            <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest truncate">{role}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <div className="font-bold text-gray-700 text-[11px] uppercase tracking-wide">{log.action}</div>
+                          {getCategoryBadge(log.category)}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="text-gray-600 truncate max-w-[400px] whitespace-normal line-clamp-2" title={log.details}>
+                          {log.details}
+                        </div>
+                        {log.ipAddress && (
+                          <div className="text-[9px] text-gray-400 font-mono mt-1">IP: {log.ipAddress}</div>
+                        )}
+                      </td>
+                      <td className="p-4 text-center">
+                        {getSeverityBadge(log.severity)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination Footer */}
+        <div className="px-4 py-3 border-t border-gray-100 bg-[#FAF8F4] flex items-center justify-between">
+          <div className="text-[11px] font-bold text-gray-500">
+            Showing Page {page} of {totalPages || 1}
+          </div>
+          <div className="flex gap-1">
+            <button 
+              onClick={() => setPage(p => Math.max(1, p - 1))} 
+              disabled={page === 1 || loading}
+              className="p-1.5 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+              disabled={page === totalPages || totalPages === 0 || loading}
+              className="p-1.5 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
 
     </div>
   );

@@ -22,32 +22,74 @@ export default function ICTDashboard() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 🚨 UPGRADE: Dynamic Company Codes State
+  // Dynamic States
   const [companyCodes, setCompanyCodes] = useState([]);
-
-  // Dynamically tracks the real database count
-  const [auditLogCount, setAuditLogCount] = useState(0); 
+  const [auditLogCountToday, setAuditLogCountToday] = useState(0); 
+  const [activeQuarterName, setActiveQuarterName] = useState('Loading...');
+  const [formulaConfig, setFormulaConfig] = useState(null);
+  const [roleCounts, setRoleCounts] = useState({ LM: 0, HR: 0, CEO: 0, Staff: 0, ICT: 0 });
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [usersRes, metricsRes, auditRes, configRes] = await Promise.all([
+        const [usersRes, metricsRes, auditRes, configRes, quarterRes, formulaRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
-          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
-          api.get('/audit').catch(() => ({ data: { data: [] } })), // Fetch real logs
-          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) // 🚨 Fetch config
+          api.get(`/company-metrics/${new Date().getFullYear()}`).catch(() => ({ data: { data: null } })),
+          api.get('/audit?limit=500').catch(() => ({ data: { data: [] } })), // Fetch logs
+          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })), 
+          api.get('/quarters').catch(() => ({ data: { data: [] } })),
+          api.get('/settings/formula').catch(() => ({ data: { data: null } }))
         ]);
 
-        setStaff(usersRes.data?.data || []);
+        const fetchedStaff = usersRes.data?.data || [];
+        setStaff(fetchedStaff);
         setMetrics(metricsRes.data?.data || null);
-        setAuditLogCount(auditRes.data?.data?.length || 0);
+        setFormulaConfig(formulaRes.data?.data?.formula || null);
 
-        // 🚨 UPGRADE: Set the dynamic company codes from the DB
-        if (configRes.data?.data?.companyCodes) {
+        // 🚨 UPGRADE: Calculate exact role counts dynamically
+        let lm = 0, hr = 0, ceo = 0, staffCount = 0, ict = 0;
+        fetchedStaff.forEach(u => {
+           if (u.employmentDetails?.isActive === false) return;
+           const roles = [u.security?.role, ...(u.security?.secondaryRoles || [])];
+           if (roles.includes('MANAGER')) lm++;
+           if (roles.includes('HR_ADMIN')) hr++;
+           if (roles.includes('CEO')) ceo++;
+           if (roles.includes('EMPLOYEE')) staffCount++;
+           if (roles.includes('ICT_ADMIN')) ict++;
+        });
+        setRoleCounts({ LM: lm, HR: hr, CEO: ceo, Staff: staffCount, ICT: ict });
+
+        // 🚨 UPGRADE: Filter audit logs for TODAY only
+        const allLogs = auditRes.data?.data || [];
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        
+        const todayLogs = allLogs.filter(log => {
+          const logDate = new Date(log.createdAt || log.timestamp);
+          return logDate >= startOfToday;
+        });
+        setAuditLogCountToday(todayLogs.length);
+
+        // 🚨 UPGRADE: Dynamically resolve active quarter
+        const quarters = quarterRes.data?.data || [];
+        const now = new Date();
+        const activeQ = quarters.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return now >= start && now <= end && !q.isLocked;
+        });
+        if (activeQ) {
+          setActiveQuarterName(`${activeQ.name} (${activeQ.year})`);
+        } else {
+           setActiveQuarterName('No Active Quarter');
+        }
+
+        // Set dynamic company codes from DB
+        if (configRes.data?.data?.companyCodes && configRes.data.data.companyCodes.length > 0) {
           setCompanyCodes(configRes.data.data.companyCodes);
         } else {
-          // Fallback just in case the DB is empty
+          // Fallback just in case the DB is completely empty
           setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
         }
 
@@ -61,10 +103,13 @@ export default function ICTDashboard() {
     fetchDashboardData();
   }, []);
 
-  const activeUsers = staff.length; 
+  const activeUsers = staff.filter(s => s.employmentDetails?.isActive !== false).length; 
 
   const scorecardLocked = metrics?.locked || false;
   const lockedBy = metrics?.lockedBy ? `${metrics.lockedBy.personalDetails?.firstName} ${metrics.lockedBy.personalDetails?.lastName}` : 'CEO';
+
+  const epCapPercentage = formulaConfig?.epCapPercent || 5.0;
+  const maxEpAllowed = Math.floor(activeUsers * (epCapPercentage / 100));
 
   if (loading) {
     return <div className="p-10 text-center text-slate-500 font-[600] animate-pulse">Loading ICT Dashboard...</div>;
@@ -79,7 +124,7 @@ export default function ICTDashboard() {
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
             &#128187; ICT Admin Dashboard
           </div>
-          <div className="text-[13px] text-[#6b7280]">System administration & STIP platform monitoring — CY2026</div>
+          <div className="text-[13px] text-[#6b7280]">System administration & STIP platform monitoring — CY{new Date().getFullYear()}</div>
         </div>
         <div className="flex gap-[10px]">
           <button 
@@ -104,9 +149,9 @@ export default function ICTDashboard() {
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-white/50 mb-[4px]">Total Staff</div>
             <div className="text-[32px] font-[800] text-[#e8c96a] leading-none mb-[6px]">{staff.length}</div>
-            <div className="text-[12px] font-[600] text-white/40">STIP-eligible employees</div>
+            <div className="text-[12px] font-[600] text-white/40">Registered in Database</div>
           </div>
-          {/* 🚨 UPGRADE: Dynamic Map for Company Code Badges with Auto-Scroll */}
+          {/* Dynamic Map for Company Code Badges with Auto-Scroll */}
           <div className="flex gap-[6px] mt-[14px] overflow-x-auto pb-1 custom-scrollbar whitespace-nowrap">
             {companyCodes.map((code, index) => {
               const count = staff.filter(s => s.companyCode === code).length || 0;
@@ -124,14 +169,14 @@ export default function ICTDashboard() {
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Active Users</div>
             <div className="text-[32px] font-[800] text-[#1E40AF] leading-none mb-[6px]">{activeUsers}</div>
-            <div className="text-[12px] font-[600] text-[#6b7280]">Portal roles configured</div>
+            <div className="text-[12px] font-[600] text-[#6b7280]">Portal access unlocked</div>
           </div>
           <div className="flex gap-[6px] mt-[14px] flex-wrap">
-            <span className="bg-[#DBEAFE] text-[#1E40AF] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">LM</span>
-            <span className="bg-[#D1FAE5] text-[#065F46] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">HR</span>
-            <span className="bg-[#FEF3C7] text-[#92400E] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">CEO</span>
-            <span className="bg-[#EDE9FE] text-[#4C1D95] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">Staff</span>
-            <span className="bg-[#F3E8FF] text-[#7E22CE] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]">ICT</span>
+            <span className="bg-[#DBEAFE] text-[#1E40AF] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]" title="Line Managers">LM {roleCounts.LM}</span>
+            <span className="bg-[#D1FAE5] text-[#065F46] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]" title="HR Admins">HR {roleCounts.HR}</span>
+            <span className="bg-[#FEF3C7] text-[#92400E] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]" title="CEO">CEO {roleCounts.CEO}</span>
+            <span className="bg-[#EDE9FE] text-[#4C1D95] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]" title="General Staff">Staff {roleCounts.Staff}</span>
+            <span className="bg-[#F3E8FF] text-[#7E22CE] px-[6px] py-[2px] rounded-[4px] text-[10px] font-[800]" title="ICT Admins">ICT {roleCounts.ICT}</span>
           </div>
         </div>
 
@@ -158,15 +203,15 @@ export default function ICTDashboard() {
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Audit Events Today</div>
-            <div className="text-[32px] font-[800] text-[#0D2B55] leading-none mb-[6px]">{auditLogCount}</div>
-            <div className="text-[12px] font-[600] text-[#6b7280]">System actions logged</div>
+            <div className="text-[32px] font-[800] text-[#0D2B55] leading-none mb-[6px]">{auditLogCountToday}</div>
+            <div className="text-[12px] font-[600] text-[#6b7280]">System actions logged today</div>
           </div>
           <div className="mt-[14px]">
             <button 
               className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] px-[12px] py-[6px] rounded-[6px] text-[11px] font-[700] transition-colors"
               onClick={() => router.push('/dashboard/ict/audit')}
             >
-              View Log
+              View Daily Log
             </button>
           </div>
         </div>
@@ -208,7 +253,7 @@ export default function ICTDashboard() {
                   <span className="text-[14px] font-[700] text-[#0f1923]">Database</span>
                 </div>
                 <div className="flex items-center gap-[12px]">
-                  <span className="text-[12px] text-[#059669] font-[600]">{staff.length} records active</span>
+                  <span className="text-[12px] text-[#059669] font-[600]">{staff.length} records connected</span>
                   <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[2px] rounded-[4px] text-[10px] font-[800]">&#9679; Healthy</span>
                 </div>
               </div>
@@ -230,7 +275,7 @@ export default function ICTDashboard() {
                   <span className="text-[14px] font-[700] text-[#0f1923]">Authentication Service</span>
                 </div>
                 <div className="flex items-center gap-[12px]">
-                  <span className="text-[12px] text-[#059669] font-[600]">5 roles active</span>
+                  <span className="text-[12px] text-[#059669] font-[600]">JWT Secure</span>
                   <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[2px] rounded-[4px] text-[10px] font-[800]">&#9679; Secure</span>
                 </div>
               </div>
@@ -278,10 +323,10 @@ export default function ICTDashboard() {
                 &#128203; Staff Records
               </button>
               <button 
-                className="w-full bg-white hover:bg-[#FAF8F4] border border-[#E2DDD4] hover:border-[#0D2B55] text-[#0f1923] font-[700] text-[13px] py-[10px] rounded-[8px] transition-colors"
-                onClick={() => router.push('/dashboard/ict/audit')}
+                className="w-full bg-[#0D2B55] hover:bg-[#1a3d6e] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px]"
+                onClick={() => router.push('/dashboard/ict/formula')}
               >
-                &#128203; Full Audit Trail
+                &#129662; Formula Configuration
               </button>
             </div>
           </div>
@@ -294,10 +339,9 @@ export default function ICTDashboard() {
             <div className="p-[20px]">
               <div className="text-[12px] text-[#6b7280] leading-[1.8]">
                 &#128274; <strong className="text-[#0D2B55] font-[800]">Scorecard Lock:</strong> <span>{scorecardLocked ? `Locked — ${lockedBy}` : 'Unlocked — editable by CEO'}</span><br/>
-                &#11088; <strong className="text-[#0D2B55] font-[800]">EP Cap:</strong> Max 9 employees (5% of 190)<br/>
-                &#128197; <strong className="text-[#0D2B55] font-[800]">Active Quarter:</strong> Q3 (Jul–Sep 2026)<br/>
-                &#127919; <strong className="text-[#0D2B55] font-[800]">CP%:</strong> <span>{scorecardLocked ? 'Locked in' : 'Not yet locked'}</span><br/>
-                &#128101; <strong className="text-[#0D2B55] font-[800]">Staff Count:</strong> {staff.length} employees
+                &#11088; <strong className="text-[#0D2B55] font-[800]">EP Cap:</strong> Max {maxEpAllowed} employees ({epCapPercentage}% of {activeUsers})<br/>
+                &#128197; <strong className="text-[#0D2B55] font-[800]">Active Quarter:</strong> {activeQuarterName}<br/>
+                &#127919; <strong className="text-[#0D2B55] font-[800]">CP%:</strong> <span>{metrics?.cpFactor ? `${(metrics.cpFactor * 100).toFixed(2)}%` : 'Not configured'}</span><br/>
               </div>
             </div>
           </div>

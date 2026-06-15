@@ -48,14 +48,23 @@ const logAudit = async ({ user, role, action, category, severity, details, req =
       formattedDetails = `${formattedDetails} | Meta: ${JSON.stringify(metadata)}`;
     }
 
+    // 🚨 UPGRADE: Bulletproof IP Address Extraction for Cloud/Proxy Environments
+    let clientIp = 'unknown';
+    if (req) {
+      clientIp = req.headers?.['x-forwarded-for']?.split(',')[0].trim() || 
+                 req.ip || 
+                 req.connection?.remoteAddress || 
+                 'unknown';
+    }
+
     const newLog = new AuditLog({
-      user: extractedUserId, // 🚨 FIX: Changed field from 'userId' to 'user' to align with standard reference fields
+      user: extractedUserId, // Aligns with standard reference fields
       role: role || 'SYSTEM',
       action: action || 'UNKNOWN_ACTION',
       category: category || 'SYSTEM',
       severity: severity || 'LOW',
       details: formattedDetails, // Contains strings of user descriptions and metadata
-      ipAddress: req ? (req.ip || req.connection?.remoteAddress || 'unknown') : 'unknown'
+      ipAddress: clientIp
     });
     
     await newLog.save();

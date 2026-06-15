@@ -7,7 +7,7 @@ import Cookies from 'js-cookie';
 import { 
   Home, Activity, CheckCircle, FileText, Users, BarChart, 
   UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
-  Lock, Shield, Database, Calendar, Mail
+  Lock, Shield, Database, Calendar, Mail, Calculator
 } from 'lucide-react';
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
@@ -160,13 +160,14 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'System Controls',
         items: [
+          // 🚨 UPGRADE: Added Formula Config 
+          { name: 'Formula Config', href: '/dashboard/ict/formula', icon: Calculator },
           { name: 'Scorecard Lock', href: '/dashboard/ict/scorecard', icon: Lock },
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
           { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
           { name: 'Update Password', href: '/dashboard/ict/reset-password', icon: Lock },
           { name: 'System Status & E-mail Config', href: '/dashboard/ict/system', icon: Database },
           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar },
-          // 🚨 UPGRADE: Added the new Notification Email Routing page here
           { name: 'Email Routing', href: '/dashboard/ict/notification-emails', icon: Mail }
         ]
       },

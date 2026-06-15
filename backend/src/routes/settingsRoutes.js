@@ -6,7 +6,7 @@ const SystemSettings = require('../models/SystemSettings');
 const AppConfig = require('../models/AppConfig'); 
 
 const { authGuard, roleGuard } = require('../middleware/auth');
-const { logAudit } = require('../utils/logger'); // Needed for Matrix Audit Logging
+const { logAudit } = require('../utils/logger'); // Needed for Matrix & Formula Audit Logging
 
 router.use(authGuard);
 
@@ -62,8 +62,8 @@ router.patch('/toggle-override', roleGuard('HR_ADMIN'), async (req, res) => {
 // Fetches the live permission matrix from MongoDB
 router.get('/roles-matrix', async (req, res) => {
   try {
-    let config = await AppConfig.findOne();
-    if (!config) config = await AppConfig.create({});
+    let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' }); // Explicit type to prevent collision
+    if (!config) config = await AppConfig.create({ configType: 'SYSTEM_DROPDOWNS' });
     res.json({ data: config.rolesMatrix || {} });
   } catch (error) {
     console.error('Error fetching roles matrix:', error);
@@ -81,8 +81,8 @@ router.put('/roles-matrix', roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN'
       return res.status(400).json({ message: 'Matrix data is required.' });
     }
 
-    let config = await AppConfig.findOne();
-    if (!config) config = new AppConfig();
+    let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
+    if (!config) config = new AppConfig({ configType: 'SYSTEM_DROPDOWNS' });
 
     config.rolesMatrix = matrix;
     config.markModified('rolesMatrix'); // Tells MongoDB the mixed object changed
@@ -103,6 +103,88 @@ router.put('/roles-matrix', roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN'
   } catch (error) {
     console.error('Error saving roles matrix:', error);
     res.status(500).json({ message: 'Server error while saving matrix.' });
+  }
+});
+
+// ----------------------------------------------------
+// 🚨 SECTION 3: FORMULA CONFIGURATION ENGINE (NEW)
+// ----------------------------------------------------
+
+// GET /api/v1/settings/formula - Fetch the live formula configuration
+router.get('/formula', async (req, res) => {
+  try {
+    let config = await AppConfig.findOne({ configType: 'STIP_FORMULA' });
+    
+    // If no config exists in DB yet, return a null payload so frontend uses defaults
+    if (!config) {
+      return res.status(200).json({ success: true, data: null });
+    }
+
+    res.status(200).json({ success: true, data: config });
+  } catch (error) {
+    console.error("Formula Fetch Error:", error);
+    res.status(500).json({ success: false, message: 'Server error fetching formula configuration.' });
+  }
+});
+
+// PATCH /api/v1/settings/formula - Update the formula configuration
+// Restricted to ICT Admin
+router.patch('/formula', roleGuard('ICT_ADMIN'), async (req, res) => {
+  try {
+    const { formula, reason } = req.body;
+
+    if (!formula || !reason) {
+      return res.status(400).json({ success: false, message: 'Formula data and a reason for change are required.' });
+    }
+
+    let config = await AppConfig.findOne({ configType: 'STIP_FORMULA' });
+
+    const changedByName = req.user.personalDetails 
+      ? `${req.user.personalDetails.firstName} ${req.user.personalDetails.lastName} (ICT)`
+      : 'ICT Administrator';
+
+    if (!config) {
+      // Create new config if it doesn't exist
+      config = new AppConfig({
+        configType: 'STIP_FORMULA',
+        formula: formula,
+        history: [{
+          id: Date.now().toString(),
+          effectiveFrom: new Date(),
+          changedBy: changedByName,
+          reason: reason,
+          previous: null,
+          next: formula
+        }]
+      });
+    } else {
+      // Update existing config and push to history array
+      const previousFormula = config.formula;
+      
+      config.history.unshift({
+        id: Date.now().toString(),
+        effectiveFrom: new Date(),
+        changedBy: changedByName,
+        reason: reason,
+        previous: previousFormula,
+        next: formula
+      });
+
+      config.formula = formula;
+    }
+
+    await config.save();
+
+    // Log to system audit trail
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'FORMULA_UPDATED', category: 'SYSTEM_CONFIG', severity: 'CRITICAL',
+      details: `ICT Admin updated STIP calculation formula. Reason: ${reason}`, req
+    });
+
+    res.status(200).json({ success: true, message: 'Formula updated successfully.', data: config });
+  } catch (error) {
+    console.error("Formula Update Error:", error);
+    res.status(500).json({ success: false, message: 'Server error updating formula.' });
   }
 });
 

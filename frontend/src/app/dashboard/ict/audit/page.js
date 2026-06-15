@@ -9,6 +9,19 @@ export default function SystemAuditTrail() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   
+  // Custom Screen-Locking Modal State
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    title: '',
+    message: ''
+  });
+
+  const closeDialog = () => setModalConfig({ isOpen: false, title: '', message: '' });
+
+  const showDialog = (title, message) => {
+    setModalConfig({ isOpen: true, title, message });
+  };
+  
   // Pagination & Filtering State
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -48,6 +61,7 @@ export default function SystemAuditTrail() {
       setTotalLogs(response.data?.pagination?.total || 0);
     } catch (error) {
       console.error('Failed to fetch audit logs:', error);
+      showDialog('System Error', 'Failed to retrieve the audit logs from the database. Please check your network connection.');
     } finally {
       setLoading(false);
     }
@@ -58,7 +72,7 @@ export default function SystemAuditTrail() {
     return () => clearTimeout(delayDebounceFn);
   }, [page, filters.category, filters.severity, filters.search, filters.startDate, filters.endDate]);
 
-  // 🚨 UPGRADED: Log Exporter
+  // 🚨 UPGRADED: Log Exporter with Custom Modals and MM/DD/YYYY
   const handleExport = async () => {
     try {
       setExporting(true);
@@ -74,20 +88,25 @@ export default function SystemAuditTrail() {
       const response = await api.get(`/audit?${queryParams}`);
       const exportData = response.data?.data || [];
 
-      if (exportData.length === 0) return alert('No logs found to export in this range.');
+      if (exportData.length === 0) {
+        return showDialog('Export Notice', 'No audit logs found matching the current filters for the selected date range.');
+      }
 
       const headers = ['Timestamp', 'Actor ID', 'Actor Name', 'Role', 'Event Type', 'Category', 'Severity', 'Details', 'IP Address'];
       const csvRows = [headers.join(',')];
 
       exportData.forEach(log => {
-        const date = new Date(log.createdAt || log.timestamp).toLocaleString();
+        const dateObj = new Date(log.createdAt || log.timestamp);
+        // MM/DD/YYYY HH:MM:SS (24-hour) format as requested
+        const formattedDate = `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}/${dateObj.getFullYear()} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}:${String(dateObj.getSeconds()).padStart(2, '0')}`;
+        
         const empId = log.user?.employeeId || 'System';
         const fName = log.user?.personalDetails?.firstName || '';
         const lName = log.user?.personalDetails?.lastName || '';
         const actorName = fName || lName ? `${fName} ${lName}` : (log.user?.username || 'System Execution');
         
         csvRows.push([
-          `"${date}"`,
+          `"${formattedDate}"`,
           `"${empId}"`,
           `"${actorName}"`,
           log.role || 'SYSTEM',
@@ -108,7 +127,7 @@ export default function SystemAuditTrail() {
       link.click();
       document.body.removeChild(link);
     } catch (error) {
-      alert('Error generating export file.');
+      showDialog('Export Failed', 'An error occurred while generating the CSV export file.');
     } finally {
       setExporting(false);
     }
@@ -264,7 +283,14 @@ export default function SystemAuditTrail() {
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
                 {logs.map((log) => {
-                  const date = new Date(log.createdAt || log.timestamp);
+                  const dateObj = new Date(log.createdAt || log.timestamp);
+                  
+                  // 🚨 MM/DD/YYYY Format
+                  const formattedDate = `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}/${dateObj.getFullYear()}`;
+                  
+                  // 🚨 24-Hour Format
+                  const formattedTime = `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}:${String(dateObj.getSeconds()).padStart(2, '0')}`;
+
                   const fName = log.user?.personalDetails?.firstName || '';
                   const lName = log.user?.personalDetails?.lastName || '';
                   const actorName = fName || lName ? `${fName} ${lName}` : (log.user?.username || 'System Execution');
@@ -275,8 +301,8 @@ export default function SystemAuditTrail() {
                       <td className="p-4 font-mono text-[11px] text-gray-500">
                         <div className="flex items-center gap-1.5">
                           <Clock className="w-3 h-3" />
-                          {date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                          <span className="ml-1 text-gray-400">{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                          {formattedDate}
+                          <span className="ml-1 text-gray-400">{formattedTime}</span>
                         </div>
                       </td>
                       <td className="p-4">
@@ -338,6 +364,42 @@ export default function SystemAuditTrail() {
           </div>
         </div>
       </div>
+
+      {/* 🚨 Universal Custom Modal for System Alerts */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-[24px]">
+              <div className="flex items-center gap-[10px] mb-[12px]">
+                {modalConfig.title.includes('Error') || modalConfig.title.includes('Failed') ? (
+                  <AlertTriangle className="w-[20px] h-[20px] text-red-600" />
+                ) : (
+                  <ShieldCheck className="w-[20px] h-[20px] text-blue-600" />
+                )}
+                <h3 className="text-[18px] font-[800] text-slate-800">{modalConfig.title}</h3>
+              </div>
+              
+              <p className="text-[14px] text-slate-600 mb-[24px] whitespace-pre-wrap leading-relaxed">
+                {modalConfig.message}
+              </p>
+
+              <div className="flex justify-end gap-[12px]">
+                <button 
+                  type="button"
+                  onClick={closeDialog}
+                  className={`px-[20px] py-[10px] text-white font-[800] text-[13px] rounded-[8px] shadow-sm transition-colors ${
+                    modalConfig.title.includes('Error') || modalConfig.title.includes('Failed')
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-[#0D2B55] hover:bg-[#1a3d6e]'
+                  }`}
+                >
+                  Acknowledge
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

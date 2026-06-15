@@ -5,7 +5,7 @@ const AuditLog = require('../models/AuditLog');
 const { authGuard, roleGuard } = require('../middleware/auth');
 
 router.use(authGuard);
-router.use(roleGuard('ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'));
+router.use(roleGuard('ICT_ADMIN'));
 
 router.get('/', async (req, res) => {
   try {
@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    // 🚨 Dynamic Date Filtering (Restricted to max 6 months history)
+    // 🚨 NEW: Dynamic Date Filtering (Restricted to max 6 months history)
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     filter.createdAt = { $gte: sixMonthsAgo }; // Absolute baseline limit

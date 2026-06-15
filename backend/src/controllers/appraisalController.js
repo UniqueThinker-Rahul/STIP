@@ -1,8 +1,13 @@
-// backend/src/controllers/appraisalController.js
+const express = require('express');
+const router = express.Router();
 const Appraisal = require('../models/Appraisal');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
-const AppraisalQuarter = require('../models/AppraisalQuarter'); 
+const { authGuard, roleGuard } = require('../middleware/auth');
+
+// 🚨 UPGRADE: Imported the logger system to track workflow actions
+const { logAudit } = require('../utils/logger');
+
 const { 
   sendManagerSubmitEmail, 
   sendHRForwardEmail, 
@@ -10,34 +15,7 @@ const {
   sendCEORejectEmail 
 } = require('../utils/emailService');
 
-// --- HELPER FUNCTION: Trigger Dual Notification ---
-const dispatchNotification = async ({ senderId, recipientRole, recipientId, targetRoleContext, title, message, type, actionUrl }) => {
-  try {
-    let recipients = [];
-    if (recipientId) {
-      const user = await User.findById(recipientId);
-      if (user) recipients.push(user);
-    } else if (recipientRole) {
-      recipients = await User.find({ 
-        'employmentDetails.isDeleted': { $ne: true },
-        'employmentDetails.isActive': true,
-        $or: [{ 'security.role': recipientRole }, { 'security.secondaryRoles': recipientRole }]
-      });
-    }
-
-    for (const recipient of recipients) {
-      await Notification.create({ recipient: recipient._id, sender: senderId, title, message, type, actionUrl, targetRole: targetRoleContext });
-      console.log(`🔔 [IN-APP NOTIFICATION] Saved to database for ${recipient.personalDetails?.firstName} (${recipient.security?.role})`);
-    }
-    
-    // Return the raw Mongoose objects, we will extract the email carefully in the route
-    return recipients;
-
-  } catch (error) { 
-    console.error("Notification Error:", error); 
-    return [];
-  }
-};
+router.use(authGuard);
 
 const getIprfLabel = (score) => {
     if (score >= 1.3) return 'Exceeds Performance';
@@ -47,81 +25,249 @@ const getIprfLabel = (score) => {
     return 'Not Graded';
 };
 
-// 1. Create a new appraisal
-exports.createAppraisal = async (req, res) => {
+const dispatchNotification = async ({ senderId, recipientRole, recipientId, targetRoleContext, title, message, type, actionUrl }) => {
   try {
-    const quarterId = req.body.appraisalQuarter;
-    if (!quarterId) return res.status(400).json({ success: false, message: 'Appraisal Quarter ID is required.' });
+    let recipients = [];
+    if (recipientId) {
+      const user = await User.findById(recipientId);
+      if (user) recipients.push(user);
+    } else if (recipientRole) {
+      const foundUsers = await User.find({ 
+        'employmentDetails.isDeleted': { $ne: true },
+        'employmentDetails.isActive': true,
+        $or: [ { 'security.role': recipientRole }, { 'security.secondaryRoles': recipientRole } ]
+      });
+      if (foundUsers) recipients = foundUsers;
+    }
 
-    const quarter = await AppraisalQuarter.findById(quarterId);
-    if (!quarter) return res.status(404).json({ success: false, message: 'Quarter not found in database.' });
+    for (const recipient of recipients) {
+      if (!recipient || !recipient._id) continue;
+      
+      await Notification.create({ 
+        recipient: recipient._id, 
+        sender: senderId, 
+        title, 
+        message, 
+        type, 
+        actionUrl,
+        targetRole: targetRoleContext || recipientRole || 'EMPLOYEE'
+      });
+    }
 
-    const currentDate = new Date();
-    const startDate = new Date(quarter.startDate); startDate.setHours(0,0,0,0);
-    const endDate = new Date(quarter.endDate); endDate.setHours(23,59,59,999);
+    return recipients.map(r => {
+       let email = null;
+       if (r.personalDetails?.notificationEmails?.get) {
+         email = r.personalDetails.notificationEmails.get(targetRoleContext) || r.username;
+       } else {
+         email = r.username; 
+       }
+       return { email, firstName: r.personalDetails?.firstName, lastName: r.personalDetails?.lastName };
+    });
+  } catch (error) {
+    console.error("Notification Dispatch Error:", error);
+    return [];
+  }
+};
 
-    const isFuture = currentDate < startDate;
-    const isPastDeadline = currentDate > endDate;
-    const isLocked = quarter.isLocked || isFuture || (isPastDeadline && !quarter.forceUnlock);
+// Real-time Analytics Aggregation with Bulletproof Date Filtering
+router.get('/analytics/category-averages', async (req, res) => {
+  try {
+    // STRICT FILTER: ONLY calculate averages from fully APPROVED appraisals
+    let matchStage = {
+       'workflow.status': 'APPROVED' 
+    };
 
-    if (isLocked) {
-      if (isFuture) {
-         return res.status(403).json({ success: false, message: `Submissions for ${quarter.name} have not opened yet. They will open on ${startDate.toDateString()}.` });
-      } else {
-         return res.status(403).json({ success: false, message: `Submissions for ${quarter.name} are locked. The deadline was ${endDate.toDateString()}. Contact HR to request an ICT override.` });
+    // If scope is explicitly team, filter by manager. Otherwise, process the entire company.
+    if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
+       matchStage.managerId = req.user.id || req.user._id;
+    }
+
+    let pipeline = [];
+    
+    // Stage 1: Filter by Status and Manager
+    pipeline.push({ $match: matchStage });
+
+    // Stage 2: Bulletproof Date Filtering (Year & Quarter)
+    const yearFilter = req.query.year && req.query.year !== 'ALL';
+    const quarterFilter = req.query.quarter && req.query.quarter !== 'ALL';
+
+    if (yearFilter || quarterFilter) {
+      // ALWAYS join the Quarter document just in case the dates are stored there instead of the appraisal document
+      pipeline.push({
+        $lookup: {
+          from: 'quarters', // Ensure this matches your Quarters collection name in MongoDB
+          localField: 'appraisalQuarter',
+          foreignField: '_id',
+          as: 'quarterDoc'
+        }
+      });
+
+      let andConditions = [];
+
+      // Check Number and String across all possible year fields (reviewYear, period.year, quarterDoc.year)
+      if (yearFilter) {
+        const yrNum = parseInt(req.query.year);
+        const yrStr = String(req.query.year);
+        andConditions.push({
+          $or: [
+            { reviewYear: yrNum },
+            { reviewYear: yrStr },
+            { 'period.year': yrNum },
+            { 'period.year': yrStr },
+            { 'quarterDoc.year': yrNum },
+            { 'quarterDoc.year': yrStr }
+          ]
+        });
+      }
+
+      // Check across all possible quarter fields (period.quarter, quarterDoc.name)
+      if (quarterFilter) {
+        andConditions.push({
+          $or: [
+            { 'period.quarter': req.query.quarter },
+            { 'quarterDoc.name': req.query.quarter }
+          ]
+        });
+      }
+
+      // Apply the date filters
+      if (andConditions.length > 0) {
+        pipeline.push({ $match: { $and: andConditions } });
       }
     }
 
-    const existing = await Appraisal.findOne({ 
-      employeeId: req.body.employeeId, 
-      appraisalQuarter: quarterId 
-    }).populate('employeeId', 'personalDetails employeeId companyCode employmentDetails')
-      .populate('managerId', 'personalDetails');
+    // Stage 3: The math group
+    pipeline.push({
+      $group: {
+        _id: null,
+        totalCount: { $sum: 1 }, 
+        JobCompetence: { $avg: "$scores.jobCompetence.rating" },
+        Dependability: { $avg: "$scores.dependability.rating" },
+        ExpectedResults: { $avg: "$scores.deliveredResults.rating" },
+        Adaptability: { $avg: "$scores.adaptability.rating" },
+        SafeWorking: { $avg: "$scores.safeWorking.rating" },
+        Initiative: { $avg: "$scores.behaviors.rating" } 
+      }
+    });
 
-    if (existing && existing.workflow.status !== 'DRAFT') {
-      return res.status(400).json({ success: false, message: 'Appraisal already submitted for this quarter.' });
+    const aggregation = await Appraisal.aggregate(pipeline);
+
+    const result = aggregation[0] || { totalCount: 0 };
+    
+    const data = [
+      { name: 'Job Competence', score: Number((result.JobCompetence || 0).toFixed(2)) },
+      { name: 'Dependability', score: Number((result.Dependability || 0).toFixed(2)) },
+      { name: 'Expected Results', score: Number((result.ExpectedResults || 0).toFixed(2)) },
+      { name: 'Adaptability/Flexibility', score: Number((result.Adaptability || 0).toFixed(2)) },
+      { name: 'Safe Working Environment', score: Number((result.SafeWorking || 0).toFixed(2)) },
+      { name: 'Initiative', score: Number((result.Initiative || 0).toFixed(2)) }
+    ];
+
+    res.status(200).json({ success: true, count: result.totalCount, data });
+  } catch (error) {
+    console.error("Aggregation error:", error);
+    res.status(500).json({ success: false, message: 'Failed to fetch analytics' });
+  }
+});
+
+// 1. GET /api/v1/appraisals
+router.get('/', async (req, res) => {
+  try {
+    let query = {};
+    const userId = req.user.id || req.user._id;
+
+    if (req.user.role === 'MANAGER') query.managerId = userId;
+    else if (req.user.role === 'EMPLOYEE') {
+      query.employeeId = userId;
+      query['workflow.status'] = 'APPROVED'; 
     }
 
-    let appraisal;
-    let employeeData = null;
+    const appraisals = await Appraisal.find(query)
+      .populate('employeeId', 'employeeId personalDetails companyCode employmentDetails')
+      .populate('managerId', 'personalDetails')
+      .populate('appraisalQuarter', 'name year isLocked');
 
-    if (existing) {
-      employeeData = existing.employeeId;
-      Object.assign(existing, {
-        managerId: req.body.managerId,
-        period: req.body.period,
-        scores: req.body.scores,
-        calculatedResults: req.body.calculatedResults,
-        narrative: req.body.narrative,
-        stipAward: req.body.stipAward,
-        'workflow.status': req.body.status
-      });
-      appraisal = await existing.save();
+    res.json({ count: appraisals.length, data: appraisals });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching appraisals.', error: error.message });
+  }
+});
+
+// 2. POST /api/v1/appraisals - Create or Update
+router.post('/', roleGuard('MANAGER'), async (req, res) => {
+  try {
+    const { employeeId, reviewYear, period, scores, calculatedResults, stipAward, narrative, status, appraisalQuarter } = req.body;
+    const managerId = req.user.id || req.user._id;
+
+    if (!appraisalQuarter) return res.status(400).json({ message: 'Appraisal Quarter ID is required.' });
+
+    const actualYear = reviewYear || 2026;
+    const actualQuarter = period?.quarter || 'Q3';
+
+    let appraisal = await Appraisal.findOne({ employeeId, appraisalQuarter });
+
+    if (appraisal) {
+      if (!['DRAFT', 'REOPENED', 'NOT_APPROVED'].includes(appraisal.workflow.status)) {
+        return res.status(403).json({ message: 'Cannot edit an appraisal that has already been submitted.' });
+      }
     } else {
-      employeeData = await User.findById(req.body.employeeId);
-      
-      const refCount = await Appraisal.countDocuments();
-      const newRef = `APP-${new Date().getFullYear()}-${String(refCount + 1).padStart(4, '0')}`;
-
       appraisal = new Appraisal({
-        appraisalRef: newRef,
-        employeeId: req.body.employeeId,
-        managerId: req.body.managerId,
-        appraisalQuarter: quarterId, 
-        period: req.body.period,
-        scores: req.body.scores,
-        calculatedResults: req.body.calculatedResults,
-        narrative: req.body.narrative,
-        stipAward: req.body.stipAward,
-        'workflow.status': req.body.status
+        employeeId, managerId, appraisalQuarter, reviewYear: actualYear,
+        period: { quarter: actualQuarter, year: actualYear },
+        appraisalRef: `APP-${Date.now().toString().slice(-6)}`
       });
-      await appraisal.save();
     }
 
-    if (req.body.status === 'SUBMITTED' || req.body.status === 'UNDER_HR_REVIEW') {
-      const empName = `${employeeData?.personalDetails?.firstName} ${employeeData?.personalDetails?.lastName}`;
-      const mgrName = req.user.personalDetails ? `${req.user.personalDetails.firstName} ${req.user.personalDetails.lastName}` : 'Line Manager';
-      const iprfScore = req.body.calculatedResults?.finalIprfScore || 0;
+    if (!appraisal.scores) appraisal.scores = {};
+    if (!appraisal.calculatedResults) appraisal.calculatedResults = {};
+    if (!appraisal.narrative) appraisal.narrative = {};
+    if (!appraisal.workflow) appraisal.workflow = {};
+
+    if (scores) {
+      if (scores.expectedResults !== undefined) appraisal.scores.deliveredResults = { rating: Number(scores.expectedResults), weight: 0.3 };
+      if (scores.initiative !== undefined) appraisal.scores.behaviors = { rating: Number(scores.initiative), weight: 0.2 };
+      if (scores.safeWorking !== undefined) appraisal.scores.safeWorking = { rating: Number(scores.safeWorking), weight: 0.2 };
+      if (scores.jobCompetence !== undefined) appraisal.scores.jobCompetence = { rating: Number(scores.jobCompetence), weight: 0.1 };
+      if (scores.dependability !== undefined) appraisal.scores.dependability = { rating: Number(scores.dependability), weight: 0.1 };
+      if (scores.adaptability !== undefined) appraisal.scores.adaptability = { rating: Number(scores.adaptability), weight: 0.1 };
+    }
+
+    if (calculatedResults?.finalIprfScore !== undefined) appraisal.calculatedResults.finalIprfScore = calculatedResults.finalIprfScore;
+    if (stipAward !== undefined) appraisal.stipAward = parseFloat(stipAward);
+
+    if (narrative) {
+      appraisal.narrative.generalComments = narrative.generalComments || '';
+      appraisal.narrative.epJustification = narrative.epJustification || '';
+    }
+
+    appraisal.workflow.status = status || 'DRAFT';
+    appraisal.workflow.lastUpdatedBy = managerId;
+    await appraisal.save();
+
+    // 🚨 UPGRADE: Fetch employee name for Audit Log
+    const empForLog = await User.findById(employeeId).select('personalDetails');
+    const empNameLog = empForLog ? `${empForLog.personalDetails?.firstName} ${empForLog.personalDetails?.lastName}` : 'Employee';
+
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, 
+      role: req.user.role, 
+      action: status === 'DRAFT' ? 'APPRAISAL_DRAFT_SAVED' : 'APPRAISAL_SUBMITTED', 
+      category: 'APPRAISAL_WORKFLOW', 
+      severity: status === 'DRAFT' ? 'LOW' : 'MEDIUM',
+      details: `${status === 'DRAFT' ? 'Manager saved draft' : 'Manager submitted'} appraisal for ${empNameLog} (${actualQuarter} ${actualYear}).`, 
+      req
+    });
+
+    if (status === 'SUBMITTED' || status === 'UNDER_HR_REVIEW') {
+      const emp = await User.findById(employeeId);
+      const employeeName = emp ? `${emp.personalDetails?.firstName} ${emp.personalDetails?.lastName}` : 'Employee';
+      
+      const actionUser = await User.findById(managerId);
+      const mgrName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : 'Line Manager';
+      
+      const iprfScore = calculatedResults?.finalIprfScore || 0;
+      const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
       setImmediate(async () => {
         try {
@@ -131,7 +277,7 @@ exports.createAppraisal = async (req, res) => {
             recipientRole: 'HR_ADMIN',
             targetRoleContext: 'HR_ADMIN', 
             title: 'Appraisal Submitted for HR Review',
-            message: `The Line Manager has submitted the ${quarter.name} appraisal for ${empName}. It is now awaiting your review.`,
+            message: `The Line Manager has submitted the appraisal for ${employeeName}. It is now awaiting your review.`,
             type: 'APPRAISAL_SUBMITTED',
             actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
           });
@@ -139,7 +285,6 @@ exports.createAppraisal = async (req, res) => {
           console.log(`📧 [EMAIL SYSTEM] Found ${hrTargets.length} HR_ADMIN users to notify.`);
 
           for (const hr of hrTargets) {
-            // 🚨 THE FIX: Bulletproof Email Extraction
             let adminEmail = null;
             if (hr.personalDetails && hr.personalDetails.notificationEmails) {
               if (typeof hr.personalDetails.notificationEmails.get === 'function') {
@@ -159,13 +304,13 @@ exports.createAppraisal = async (req, res) => {
                await sendManagerSubmitEmail({
                  toEmail: adminEmail,
                  hrName: hr.personalDetails?.firstName || 'HR Manager',
-                 empName: empName,
-                 empId: employeeData?.employeeId || 'N/A',
-                 empTitle: employeeData?.employmentDetails?.jobTitle || 'Staff',
-                 empCompany: employeeData?.companyCode || 'FSM',
+                 empName: employeeName,
+                 empId: emp?.employeeId || 'N/A',
+                 empTitle: emp?.employmentDetails?.jobTitle || 'Staff',
+                 empCompany: emp?.companyCode || 'FSM',
                  mgrName: mgrName,
-                 quarter: quarter.name,
-                 year: quarter.year,
+                 quarter: actualQuarter,
+                 year: actualYear,
                  iprfFactor: iprfScore.toFixed(1),
                  iprfLabel: getIprfLabel(iprfScore),
                  submitDate: new Date().toLocaleDateString('en-GB')
@@ -184,7 +329,7 @@ exports.createAppraisal = async (req, res) => {
     console.error("Appraisal Creation Error:", error);
     res.status(500).json({ success: false, message: 'Server Error saving appraisal.' });
   }
-};
+});
 
 // 2. Get all appraisals
 exports.getAllAppraisals = async (req, res) => {
@@ -221,6 +366,12 @@ exports.forwardToCEO = async (req, res) => {
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
     const isEP = iprfScore >= 1.3;
 
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_HR_APPROVED', category: 'APPRAISAL_WORKFLOW', severity: 'MEDIUM',
+      details: `HR validated appraisal for ${empName} and forwarded it to the CEO.`, req
+    });
+
     setImmediate(async () => {
       try {
         console.log(`\n📧 [EMAIL SYSTEM] Initializing HR Forward sequence...`);
@@ -237,7 +388,6 @@ exports.forwardToCEO = async (req, res) => {
         console.log(`📧 [EMAIL SYSTEM] Found ${ceoTargets.length} CEO users to notify.`);
 
         for (const ceo of ceoTargets) {
-          // 🚨 THE FIX: Bulletproof Email Extraction
           let adminEmail = null;
           if (ceo.personalDetails && ceo.personalDetails.notificationEmails) {
             if (typeof ceo.personalDetails.notificationEmails.get === 'function') {
@@ -317,6 +467,17 @@ exports.approveRejectAppraisal = async (req, res) => {
     const quarterYear = appraisal.appraisalQuarter?.year || new Date().getFullYear();
     const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
 
+    // 🚨 UPGRADE: Fire Audit Log event
+    await logAudit({
+      user: req.user, 
+      role: req.user.role, 
+      action: isApproved ? 'APPRAISAL_CEO_APPROVED' : 'APPRAISAL_REJECTED', 
+      category: 'APPRAISAL_WORKFLOW', 
+      severity: isApproved ? 'HIGH' : 'MEDIUM',
+      details: isApproved ? `CEO officially approved the appraisal for ${empName}.` : `CEO returned the appraisal for ${empName}.`, 
+      req
+    });
+
     setImmediate(async () => {
       try {
         console.log(`\n📧 [EMAIL SYSTEM] Initializing CEO Decision sequence (${status})...`);
@@ -348,13 +509,9 @@ exports.approveRejectAppraisal = async (req, res) => {
           actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
         }); 
 
-        // Note: managerTargets and hrTargets contain the role context they were queried with
-        // We will process them sequentially to ensure the role context is correct for extraction
-        
         // --- Process Line Managers ---
         if (managerTargets.length > 0) {
             for (const target of managerTargets) {
-              // 🚨 THE FIX: Bulletproof Email Extraction
               let adminEmail = null;
               if (target.personalDetails && target.personalDetails.notificationEmails) {
                 if (typeof target.personalDetails.notificationEmails.get === 'function') {
@@ -410,7 +567,6 @@ exports.approveRejectAppraisal = async (req, res) => {
         // --- Process HR Admins ---
         if (hrTargets.length > 0) {
             for (const target of hrTargets) {
-              // 🚨 THE FIX: Bulletproof Email Extraction
               let adminEmail = null;
               if (target.personalDetails && target.personalDetails.notificationEmails) {
                 if (typeof target.personalDetails.notificationEmails.get === 'function') {
