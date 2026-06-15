@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Shield, AlertTriangle, Check, Save, RotateCcw, X, Users, Power, User, Crown, ClipboardList } from 'lucide-react';
+import { Shield, AlertTriangle, Check, Save, RotateCcw, X, Users, Power, User, Crown, ClipboardList, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import api from '../../../../../lib/api';
 
 // --- SYSTEM PERMISSION SCHEMA MATCHING REFERENCE IMAGE ---
@@ -91,6 +91,10 @@ export default function RolesAndPermissions() {
   const [users, setUsers] = useState([]);
   const [userRoleFilter, setUserRoleFilter] = useState('ALL');
 
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   // UI States
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -125,6 +129,11 @@ export default function RolesAndPermissions() {
     const saved = JSON.stringify(savedMatrix);
     setIsDirty(current !== saved);
   }, [matrix, savedMatrix]);
+
+  // Reset pagination when role filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [userRoleFilter]);
 
   const handleToggle = (roleKey, permId) => {
     setMatrix(prev => ({
@@ -183,6 +192,67 @@ export default function RolesAndPermissions() {
   const filteredUsers = userRoleFilter === 'ALL' 
     ? users 
     : users.filter(u => u.security?.role === userRoleFilter);
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredUsers.slice(indexOfFirstItem, indexOfLastItem);
+
+  // Download filtered data
+  const handleDownloadCSV = () => {
+    if (filteredUsers.length === 0) {
+      alert("No data to download.");
+      return;
+    }
+
+    const headers = ['Employee ID', 'Name', 'Username', 'Portal Role', 'Login Access'];
+    const csvRows = [headers.join(',')];
+
+    filteredUsers.forEach(user => {
+      const isActive = user.employmentDetails?.isActive ?? true;
+      const roleLabel = ROLE_LABELS[user.security?.role] || user.security?.role;
+      const name = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`;
+
+      const row = [
+        user.employeeId || '',
+        `"${name}"`,
+        `"${user.username}"`,
+        `"${roleLabel}"`,
+        isActive ? 'Active' : 'Disabled'
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', '');
+    a.setAttribute('href', url);
+    a.setAttribute('download', `fsmpc_${userRoleFilter === 'ALL' ? 'all' : userRoleFilter.toLowerCase()}_credentials.csv`);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
 
   if (loading) return <div className="p-10 text-center font-[600] text-slate-500 animate-pulse">Loading Access Control Systems...</div>;
 
@@ -326,16 +396,27 @@ export default function RolesAndPermissions() {
             </div>
           </div>
           
-          <select 
-            value={userRoleFilter}
-            onChange={(e) => setUserRoleFilter(e.target.value)}
-            className="w-full md:w-auto border border-[#E2DDD4] rounded-lg text-[13px] px-3 py-2 outline-none focus:border-[#0D2B55] bg-white shadow-sm font-[600] text-[#0D2B55]"
-          >
-            <option value="ALL">Filter by: All Roles</option>
-            {Object.entries(ROLE_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <select 
+              value={userRoleFilter}
+              onChange={(e) => setUserRoleFilter(e.target.value)}
+              className="flex-1 md:flex-none border border-[#E2DDD4] rounded-lg text-[13px] px-3 py-2 outline-none focus:border-[#0D2B55] bg-white shadow-sm font-[600] text-[#0D2B55]"
+            >
+              <option value="ALL">Filter by: All Roles</option>
+              {Object.entries(ROLE_LABELS).map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+            
+            <button 
+              onClick={handleDownloadCSV}
+              disabled={filteredUsers.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-[#E2DDD4] hover:bg-[#FAF8F4] text-[#0D2B55] text-[13px] font-[700] rounded-lg shadow-sm transition-colors disabled:opacity-50"
+              title="Download Filtered Data"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         
         <div className="overflow-x-auto custom-scrollbar">
@@ -357,7 +438,7 @@ export default function RolesAndPermissions() {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map(user => {
+                currentItems.map(user => {
                   const isActive = user.employmentDetails?.isActive ?? true;
                   const roleLabel = ROLE_LABELS[user.security?.role] || user.security?.role;
                   
@@ -402,6 +483,52 @@ export default function RolesAndPermissions() {
             </tbody>
           </table>
         </div>
+
+        {/* 🚨 Pagination Footer with Direct Page Selection */}
+        {filteredUsers.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filteredUsers.length)}</span> of <span className="text-[#0f1923]">{filteredUsers.length}</span> entries
+            </div>
+            
+            <div className="flex items-center gap-[4px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
     </div>

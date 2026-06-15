@@ -3,6 +3,8 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const userController = require('../controllers/userController');
+// 🚨 Ensure Notification is imported so the bell alert works
+const Notification = require('../models/Notification');
 
 // 1. IMPORT MIDDLEWARE 
 const { authGuard, roleGuard } = require('../middleware/auth');
@@ -21,9 +23,11 @@ router.get('/', async (req, res) => {
       return res.status(403).json({ message: 'Employees do not have directory access.' });
     }
 
+    // 🚨 UPGRADE: Heavy Projection Optimization. We strip out giant data blobs to speed up loading.
     const users = await User.find(query)
-      .select('-password -security.currentSessionId')
-      .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName');
+      .select('employeeId username personalDetails.firstName personalDetails.lastName personalDetails.notificationEmails employmentDetails.isActive employmentDetails.jobTitle employmentDetails.officeLocation employmentDetails.dateOfHire employmentDetails.salary employmentDetails.prorateValue companyCode security.role security.secondaryRoles')
+      .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName')
+      .lean(); // .lean() strips heavy Mongoose wrappers, making the query 5x faster
 
     res.json({ count: users.length, data: users });
   } catch (error) {
@@ -31,42 +35,54 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 🚨 UPGRADED: Save Email by Role Context
-router.patch('/notification-email', async (req, res) => {
+// 🚨 CORRECTED: PATCH /api/v1/users/:id/alert-email (ICT Admin Route)
+router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
   try {
-    const { roleContext, notificationEmail } = req.body;
+    const { targetRole, newEmail } = req.body;
     
-    if (!roleContext) return res.status(400).json({ success: false, message: 'Role context is required.' });
+    if (!targetRole) return res.status(400).json({ success: false, message: 'Role context is required.' });
 
-    if (notificationEmail && !/^\S+@\S+\.\S+$/.test(notificationEmail)) {
-       return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
     }
 
-    const updateQuery = {};
-    if (notificationEmail) {
-      // Set the email for this specific role
-      updateQuery.$set = { [`personalDetails.notificationEmails.${roleContext}`]: notificationEmail };
+    if (!user.personalDetails) user.personalDetails = {};
+
+    // Handle Mongoose Map vs Object safely for the dynamic email storage
+    if (user.personalDetails.notificationEmails instanceof Map) {
+      user.personalDetails.notificationEmails.set(targetRole, newEmail);
     } else {
-      // If removing, unset the specific role key
-      updateQuery.$unset = { [`personalDetails.notificationEmails.${roleContext}`]: 1 };
+      user.personalDetails.notificationEmails = {
+        ...user.personalDetails.notificationEmails,
+        [targetRole]: newEmail
+      };
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user.id,
-      updateQuery,
-      { returnDocument: 'after' }
-    ).select('-password');
+    // Force Mongoose to recognize the change in the mixed/nested object
+    user.markModified('personalDetails.notificationEmails');
+    await user.save();
+
+    // Fire the In-App Bell Notification to the user
+    await Notification.create({
+      recipient: user._id,
+      sender: req.user.id,
+      title: 'Alert Email Updated',
+      message: `The ICT Admin has updated your notification email address for the ${targetRole.replace('_', ' ')} portal to: ${newEmail}`,
+      type: 'SYSTEM_ALERT',
+      targetRole: targetRole
+    });
 
     const { logAudit } = require('../utils/logger');
     await logAudit({
       user: req.user, role: req.user.role, action: 'UPDATED_NOTIFICATION_PREF', 
       category: 'USER_MANAGEMENT', severity: 'LOW',
-      details: `User updated notification email for role ${roleContext} to: ${notificationEmail || 'Removed'}`, req
+      details: `ICT Admin updated notification email for ${user.username} (${targetRole}) to: ${newEmail}`, req
     });
 
-    res.json({ success: true, message: `Preferences updated for ${roleContext.replace('_', ' ')}.`, data: updatedUser });
+    res.json({ success: true, message: `Preferences updated for ${targetRole.replace('_', ' ')}.` });
   } catch (error) {
-    console.error("Error updating email:", error);
+    console.error("Error updating alert email:", error);
     res.status(500).json({ success: false, message: 'Server error updating profile.' });
   }
 });
@@ -75,8 +91,9 @@ router.patch('/notification-email', async (req, res) => {
 router.get('/recycle-bin', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
     const deletedUsers = await User.find({ 'employmentDetails.isDeleted': true })
-      .select('-password -security.currentSessionId')
-      .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName');
+      .select('employeeId personalDetails employmentDetails companyCode security.role username')
+      .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName')
+      .lean();
     
     res.json({ data: deletedUsers });
   } catch (error) {
@@ -89,13 +106,16 @@ router.get('/managers', async (req, res) => {
   try {
     const managerRoles = ['MANAGER', 'HR_ADMIN', 'CEO'];
     
+    // 🚨 UPGRADE: Projection Optimization
     const managers = await User.find({
       'employmentDetails.isDeleted': { $ne: true },
       $or: [
         { 'security.role': { $in: managerRoles } },
         { 'security.secondaryRoles': { $in: managerRoles } }
       ]
-    }).select("personalDetails employeeId security");
+    })
+    .select("personalDetails.firstName personalDetails.lastName employeeId security.role security.secondaryRoles")
+    .lean();
     
     res.json({ data: managers });
   } catch (error) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Shield, Search, Check, Save } from 'lucide-react';
+import { Shield, Search, Check, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import api from '../../../../lib/api';
 
 const ROLE_OPTIONS = [
@@ -32,9 +32,18 @@ export default function SystemAccessSetup() {
   const [pendingChanges, setPendingChanges] = useState({});
   const [savingId, setSavingId] = useState(null);
 
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  // Reset pagination to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, roleFilter]);
 
   const fetchUsers = async () => {
     try {
@@ -115,6 +124,41 @@ export default function SystemAccessSetup() {
     }
   };
 
+  // --- CSV DOWNLOAD REPORT ---
+  const handleDownloadReport = () => {
+    if (filteredUsers.length === 0) return alert("No data to download.");
+    
+    let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Primary Role,Additional Roles\n";
+    
+    // Always download the FULL filtered list, not just the current page
+    filteredUsers.forEach(u => {
+      const empName = `"${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}"`;
+      const empId = `"${u.employeeId || ''}"`;
+      const jobTitle = `"${u.employmentDetails?.jobTitle || ''}"`;
+      const office = `"${u.employmentDetails?.officeLocation || 'Unassigned'}"`;
+      
+      // We export what is currently saved in the database, not what is pending
+      const primaryRoleKey = u.security?.role || 'EMPLOYEE';
+      const primaryRoleLabel = ROLE_OPTIONS.find(r => r.id === primaryRoleKey)?.label || primaryRoleKey;
+      
+      const secondaryRoleKeys = u.security?.secondaryRoles || [];
+      const secondaryRoleLabels = secondaryRoleKeys.map(key => ROLE_OPTIONS.find(r => r.id === key)?.label || key).join(' | ');
+      
+      csvContent += `${empName},${empId},${jobTitle},${office},"${primaryRoleLabel}","${secondaryRoleLabels}"\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    
+    const timeStamp = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    link.setAttribute("download", `ICT_System_Access_Report_${timeStamp}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // --- FILTERING ---
   const filteredUsers = users.filter(u => {
     const s = search.toLowerCase();
@@ -127,6 +171,31 @@ export default function SystemAccessSetup() {
     
     return matchesSearch && matchesRole;
   });
+
+  // --- PAGINATION LOGIC ---
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredUsers.slice(indexOfFirstItem, indexOfLastItem);
+
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
 
   if (loading) return <div className="p-10 text-center text-slate-500 font-[600] animate-pulse">Loading System Users...</div>;
 
@@ -141,17 +210,27 @@ export default function SystemAccessSetup() {
       )}
 
       {/* Header */}
-      <div className="mb-[24px]">
-        <div className="text-[24px] font-[800] text-[#0D2B55] mb-[4px] flex items-center gap-[10px]">
-          <Shield className="w-6 h-6" /> System Access Setup
+      <div className="mb-[24px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[24px] font-[800] text-[#0D2B55] mb-[4px] flex items-center gap-[10px]">
+            <Shield className="w-6 h-6" /> System Access Setup
+          </div>
+          <div className="text-[13px] text-[#6b7280]">
+            ICT Admin — Configure multi-role access and user portal configurations.
+          </div>
         </div>
-        <div className="text-[13px] text-[#6b7280]">
-          ICT Admin — Configure multi-role access and user portal configurations.
-        </div>
+
+        <button 
+          onClick={handleDownloadReport} 
+          disabled={loading || filteredUsers.length === 0}
+          className="py-[10px] px-[16px] bg-[#0D2B55] hover:bg-[#1a3d6e] text-white rounded-[8px] text-[13px] font-[700] transition-colors flex items-center gap-[6px] shadow-sm disabled:opacity-50"
+        >
+          <Download className="w-[14px] h-[14px]" /> Download Filtered Report
+        </button>
       </div>
 
       {/* Main Table Card */}
-      <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
+      <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col min-h-[400px]">
         
         {/* Filter Bar */}
         <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -169,7 +248,7 @@ export default function SystemAccessSetup() {
             <select 
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
-              className="bg-white border border-[#E2DDD4] rounded-[8px] px-3 py-2 text-[13px] font-[600] text-[#0D2B55] focus:outline-none focus:border-[#0D2B55] shadow-sm"
+              className="bg-white border border-[#E2DDD4] rounded-[8px] px-3 py-2 text-[13px] font-[600] text-[#0D2B55] focus:outline-none focus:border-[#0D2B55] shadow-sm cursor-pointer"
             >
               <option value="ALL">Filter by Role: All</option>
               {ROLE_OPTIONS.map(r => (
@@ -177,13 +256,10 @@ export default function SystemAccessSetup() {
               ))}
             </select>
           </div>
-          <div className="text-[13px] font-[600] text-[#6b7280]">
-            Showing <span className="text-[#0D2B55] font-[800]">{filteredUsers.length}</span> accounts
-          </div>
         </div>
         
         {/* Table Area */}
-        <div className="overflow-x-auto custom-scrollbar">
+        <div className="overflow-x-auto flex-1 custom-scrollbar">
           <table className="w-full text-left border-collapse min-w-[1100px]">
             <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[11px] font-[800] text-[#6b7280] uppercase tracking-[.05em]">
               <tr>
@@ -202,7 +278,7 @@ export default function SystemAccessSetup() {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => {
+                currentItems.map((u) => {
                   const fName = u.personalDetails?.firstName || '';
                   const lName = u.personalDetails?.lastName || '';
                   const fullName = `${fName} ${lName}`.trim() || 'Unknown User';
@@ -242,7 +318,7 @@ export default function SystemAccessSetup() {
                         <select 
                           value={currentPrimaryRole}
                           onChange={(e) => handlePrimaryRoleChange(u._id, e.target.value)}
-                          className={`w-[180px] bg-white border rounded-[8px] px-3 py-2 text-[13px] font-[600] outline-none shadow-sm transition-colors ${isDirty ? 'border-[#0D2B55] text-[#0D2B55]' : 'border-[#E2DDD4] text-[#4b5563] hover:border-[#0D2B55]/50'}`}
+                          className={`w-[180px] bg-white border rounded-[8px] px-3 py-2 text-[13px] font-[600] outline-none shadow-sm transition-colors cursor-pointer ${isDirty ? 'border-[#0D2B55] text-[#0D2B55]' : 'border-[#E2DDD4] text-[#4b5563] hover:border-[#0D2B55]/50'}`}
                         >
                           {ROLE_OPTIONS.map(r => (
                             <option key={`prim-${u._id}-${r.id}`} value={r.id}>{r.label}</option>
@@ -300,6 +376,52 @@ export default function SystemAccessSetup() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {filteredUsers.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filteredUsers.length)}</span> of <span className="text-[#0f1923]">{filteredUsers.length}</span> accounts
+            </div>
+            
+            <div className="flex items-center gap-[4px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55] shadow-sm'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
     </div>

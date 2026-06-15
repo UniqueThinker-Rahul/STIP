@@ -135,11 +135,11 @@ export default function StaffManagement() {
 
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
-  // 🚨 NEW: Pagination States
+  // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // 🚨 NEW: Custom Modal State to lock page and center alerts
+  // Custom Modal State to lock page and center alerts
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
     type: 'alert', 
@@ -231,7 +231,7 @@ export default function StaffManagement() {
     }
   }
 
-  // 🚨 NEW: Pagination Logic Extraction
+  // Pagination Logic Extraction
   const totalPages = Math.ceil(data.length / itemsPerPage);
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
@@ -503,6 +503,25 @@ export default function StaffManagement() {
     );
   };
 
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 relative">
       
@@ -690,32 +709,47 @@ export default function StaffManagement() {
           </table>
         </div>
 
-        {/* 🚨 NEW: Table Pagination Footer */}
+        {/* 🚨 UPGRADED: Table Pagination Footer with Direct Page Selection */}
         {data.length > itemsPerPage && (
-          <div className="p-3 border-t border-slate-200 bg-white flex items-center justify-between mt-auto">
-            <div className="text-xs text-slate-500 font-semibold">
-              Showing <span className="text-slate-900">{indexOfFirstItem + 1}</span> to <span className="text-slate-900">{Math.min(indexOfLastItem, data.length)}</span> of <span className="text-slate-900">{data.length}</span> entries
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-white flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, data.length)}</span> of <span className="text-[#0f1923]">{data.length}</span> entries
             </div>
             
-            <div className="flex gap-1.5">
+            <div className="flex items-center gap-[4px]">
               <button 
                 onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
-                className="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <ChevronLeft className="w-3.5 h-3.5" />
+                <ChevronLeft className="w-[14px] h-[14px]" />
               </button>
               
-              <div className="flex items-center px-2 text-xs font-bold text-slate-800">
-                Page {currentPage} of {totalPages}
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
               </div>
 
               <button 
                 onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                className="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <ChevronRight className="w-3.5 h-3.5" />
+                <ChevronRight className="w-[14px] h-[14px]" />
               </button>
             </div>
           </div>
@@ -969,7 +1003,7 @@ export default function StaffManagement() {
         </div>
       )}
 
-      {/* 🚨 NEW: Centered Screen-Locking Custom Modal */}
+      {/* 🚨 Universal Custom Modal for System Alerts */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">

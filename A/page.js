@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Download, Check, FileX, Calendar, Eye, X, MessageSquare, ChevronDown } from 'lucide-react';
+import { Download, Check, FileX, Calendar, Eye, X } from 'lucide-react';
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -31,7 +31,6 @@ export default function MySubmissions() {
   const [reportType, setReportType] = useState('ALL'); 
 
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
-  const [expandedComment, setExpandedComment] = useState(null); // Added state for toggling comments
 
   const cpPct = 13.01;
 
@@ -160,33 +159,6 @@ export default function MySubmissions() {
     document.body.removeChild(link);
   };
 
-  // Helper to extract specific comment from the compiled narrative text
-  const extractComment = (generalComments, currentLabel, nextLabel) => {
-    if (!generalComments) return '';
-    const startIdx = generalComments.indexOf(currentLabel);
-    if (startIdx === -1) return '';
-    const startOfContent = startIdx + currentLabel.length;
-    const endIdx = nextLabel ? generalComments.indexOf(nextLabel) : generalComments.length;
-    if (endIdx === -1) return generalComments.substring(startOfContent).trim();
-    return generalComments.substring(startOfContent, endIdx).trim();
-  };
-
-  const parseComments = (combinedString) => {
-    if (!combinedString) return {};
-    
-    if (combinedString.includes('1. Delivered Expected Results:')) {
-      return {
-        deliveredResults: extractComment(combinedString, '1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
-        behaviors: extractComment(combinedString, '2. Behaviors & Initiative:', '3. Safe Working:'),
-        safeWorking: extractComment(combinedString, '3. Safe Working:', '4. Job Competence:'),
-        jobCompetence: extractComment(combinedString, '4. Job Competence:', '5. Dependability:'),
-        dependability: extractComment(combinedString, '5. Dependability:', '6. Adaptability:'),
-        adaptability: extractComment(combinedString, '6. Adaptability:', null)
-      };
-    }
-    return {};
-  };
-
   if (loading) return <div className="p-10 text-center text-slate-500">Loading submissions...</div>;
 
   return (
@@ -280,10 +252,7 @@ export default function MySubmissions() {
                   </div>
                   
                   <button 
-                    onClick={() => {
-                      setSelectedAppraisal(a);
-                      setExpandedComment(null); // Reset expansions on new view
-                    }} 
+                    onClick={() => setSelectedAppraisal(a)} 
                     className="px-[12px] py-[5px] bg-white border border-[#E2DDD4] hover:border-[#0D2B55] hover:text-[#0D2B55] text-[#0f1923] text-[11px] font-[700] rounded-[6px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                   >
                     <Eye className="w-3.5 h-3.5" /> View
@@ -342,55 +311,23 @@ export default function MySubmissions() {
                 </div>
               </div>
 
+              {/* 🚨 UPGRADE: Expanded KPA Rating Details */}
               <div className="mb-[24px]">
-                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings & Comments</h4>
-                <div className="flex flex-col gap-[10px]">
+                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-[10px]">
                   {Object.entries(SCORE_LABELS).map(([key, label]) => {
                     const rating = selectedAppraisal.scores?.[key]?.rating;
-                    const commentsObj = parseComments(selectedAppraisal.narrative?.generalComments);
-                    const comment = commentsObj[key] || "No justification provided.";
-                    const isExpanded = expandedComment === key;
-                    const hasRating = rating !== null && rating !== undefined;
-
                     return (
-                      <div key={key} className="bg-white border border-[#E2DDD4] rounded-[8px] overflow-hidden shadow-sm transition-all duration-200">
-                        <div 
-                          className="flex justify-between items-center p-[10px_14px] cursor-pointer hover:bg-slate-50 transition-colors"
-                          onClick={() => setExpandedComment(isExpanded ? null : key)}
-                        >
-                          <div className="flex items-center gap-2">
-                             <span className="text-[13px] font-[600] text-[#475569]">{label}</span>
-                             {hasRating && rating !== 1.0 && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <span className={`text-[14px] font-[800] ${!hasRating ? 'text-slate-300' : rating >= 3 ? 'text-[#059669]' : rating >= 2 ? 'text-[#D97706]' : 'text-[#DC2626]'}`}>
-                              {hasRating ? rating.toFixed(1) : '-'}
-                            </span>
-                            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                          </div>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="p-[10px_14px] bg-slate-50 border-t border-[#E2DDD4] text-[12px] text-slate-700 animate-in fade-in slide-in-from-top-1">
-                            <div className="font-semibold text-slate-500 mb-1 text-[10px] uppercase tracking-wider">Manager Justification:</div>
-                            <div className="italic leading-relaxed">{comment}</div>
-                          </div>
-                        )}
+                      <div key={key} className="flex justify-between items-center bg-white border border-[#E2DDD4] p-[10px_14px] rounded-[8px] shadow-sm">
+                        <span className="text-[13px] font-[600] text-[#475569]">{label}</span>
+                        <span className={`text-[14px] font-[800] ${!rating ? 'text-slate-300' : rating >= 3 ? 'text-[#059669]' : rating >= 2 ? 'text-[#D97706]' : 'text-[#DC2626]'}`}>
+                          {rating ? rating.toFixed(1) : '-'}
+                        </span>
                       </div>
                     );
                   })}
                 </div>
               </div>
-              
-              {selectedAppraisal.narrative?.epJustification && (
-                 <div className="mb-[24px]">
-                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-[12px_16px] rounded-r-[8px]">
-                       <div className="text-[11px] font-bold text-yellow-800 uppercase tracking-wider mb-1">EP Justification Provided</div>
-                       <div className="text-[12px] text-yellow-900 italic">"{selectedAppraisal.narrative.epJustification}"</div>
-                    </div>
-                 </div>
-              )}
 
               <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
                 <div className={`text-[11px] font-[700] p-[4px_12px] rounded-full whitespace-nowrap ${getStatusConfig(selectedAppraisal.workflow?.status).badgeClass}`}>

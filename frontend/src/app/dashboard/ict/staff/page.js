@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, Server, Power, AlertTriangle } from "lucide-react";
+import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, Server, Power, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -55,6 +55,40 @@ export default function ICTStaffDataManagement() {
   const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '' });
   const dropdownRef = useRef(null);
 
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Custom Modal State
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'alert', 
+    title: '',
+    message: '',
+    onConfirm: null,
+    onCancel: null
+  });
+  const [modalInput, setModalInput] = useState('');
+
+  const closeDialog = () => {
+    setModalConfig({ ...modalConfig, isOpen: false });
+    setModalInput('');
+  };
+
+  const showDialog = (type, title, message, onConfirm = closeDialog, onCancel = closeDialog) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      onCancel
+    });
+    setModalInput('');
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -82,6 +116,10 @@ export default function ICTStaffDataManagement() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, coFilter, roleFilter, accessFilter, isRecycleBinView]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -113,6 +151,30 @@ export default function ICTStaffDataManagement() {
   if (roleFilter) data = data.filter(e => e.security?.role === roleFilter || (e.security?.secondaryRoles || []).includes(roleFilter));
   if (accessFilter === 'locked') data = data.filter(e => e.employmentDetails?.isActive === false);
   if (accessFilter === 'active') data = data.filter(e => e.employmentDetails?.isActive !== false);
+
+  // Pagination Logic
+  const totalPages = Math.ceil(data.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = data.slice(indexOfFirstItem, indexOfLastItem);
+
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
 
   // 🚨 ICT SPECIFIC: Toggle User Login Access
   const handleToggleAccess = async (userId, currentStatus) => {
@@ -157,18 +219,58 @@ export default function ICTStaffDataManagement() {
   };
 
   const handleDelete = async () => {
-    if (!editingStaff || !window.confirm("Are you sure you want to move this employee to the Recycle Bin?")) return;
-    try {
-      setActionLoading(true);
-      await api.delete(`/users/${editingStaff._id}`); 
-      showToast("Employee moved to Recycle Bin.");
-      setEditingStaff(null);
-      fetchData();
-    } catch (e) { 
-      alert("Failed to delete from database."); 
-    } finally {
-      setActionLoading(false);
-    }
+    if (!editingStaff) return;
+    
+    showDialog('confirm', 'Confirm Deletion', `Are you sure you want to move ${editingStaff.personalDetails?.firstName} to the Recycle Bin?`, async () => {
+      closeDialog();
+      try {
+        setActionLoading(true);
+        await api.delete(`/users/${editingStaff._id}`); 
+        showToast("Employee moved to Recycle Bin.");
+        setEditingStaff(null);
+        fetchData();
+      } catch (e) { 
+        showDialog('alert', 'Error', "Failed to delete from database."); 
+      } finally {
+        setActionLoading(false);
+      }
+    });
+  };
+
+  const handleMassDelete = () => {
+    if (dbStaff.length === 0) return showDialog('alert', 'Notice', "No active staff to delete.");
+    
+    showDialog(
+      'confirm', 
+      'Mass Deletion Warning', 
+      `WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`, 
+      () => {
+        showDialog(
+          'prompt',
+          'Confirm MASSIVE Action',
+          'To confirm this mass deletion, please type "DELETE ALL" below:',
+          async (inputValue) => {
+            if (inputValue !== "DELETE ALL") {
+              showDialog('alert', 'Action Cancelled', 'Mass deletion cancelled.');
+              return;
+            }
+            
+            closeDialog();
+            try {
+              setIsDeletingAll(true);
+              await api.delete('/users/mass-delete'); 
+              setSuccessMsg(`All employees have been successfully moved to the Recycle Bin.`);
+              fetchData();
+              setTimeout(() => setSuccessMsg(''), 5000);
+            } catch (e) { 
+              showDialog('alert', 'Error', "Failed to execute mass deletion. Make sure the backend route exists."); 
+            } finally {
+              setIsDeletingAll(false);
+            }
+          }
+        );
+      }
+    );
   };
 
   const handleRestore = async (userId) => {
@@ -185,17 +287,24 @@ export default function ICTStaffDataManagement() {
   };
 
   const handlePermanentDelete = async (userId) => {
-    if (!window.confirm("CRITICAL WARNING: This will permanently erase the employee and all their associated data from the database. This action CANNOT be undone. Are you absolutely sure?")) return;
-    try {
-      setActionLoading(true);
-      await api.delete(`/users/${userId}/permanent`);
-      showToast("Employee permanently purged from the system.");
-      fetchData();
-    } catch (e) { 
-      alert("Failed to permanently delete user."); 
-    } finally {
-      setActionLoading(false);
-    }
+    showDialog(
+      'confirm', 
+      'Permanent Deletion', 
+      "WARNING: This will permanently erase the employee and all their associated data from the database. This action CANNOT be undone. Are you absolutely sure?", 
+      async () => {
+        closeDialog();
+        try {
+          setActionLoading(true);
+          await api.delete(`/users/${userId}/permanent`);
+          showToast("Employee permanently purged from the system.");
+          fetchData();
+        } catch (e) { 
+          showDialog('alert', 'Error', "Failed to permanently delete user."); 
+        } finally {
+          setActionLoading(false);
+        }
+      }
+    );
   };
 
   const handleToggleSecondaryRole = (roleId) => {
@@ -361,16 +470,16 @@ export default function ICTStaffDataManagement() {
       </div>
 
       {/* Real-time Table */}
-      <div className={`rounded-xl shadow-sm border overflow-hidden ${isRecycleBinView ? 'bg-red-50/10 border-red-200' : 'bg-white border-slate-200'}`}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left whitespace-nowrap">
+      <div className={`rounded-xl shadow-sm border overflow-hidden flex flex-col min-h-[400px] ${isRecycleBinView ? 'bg-red-50/10 border-red-200' : 'bg-white border-slate-200'}`}>
+        <div className="overflow-x-auto flex-1 custom-scrollbar">
+          <table className="w-full text-left whitespace-nowrap min-w-[1000px]">
             <thead className={isRecycleBinView ? 'bg-red-50/50 border-b border-red-100' : 'bg-slate-50 border-b'}>
               <tr className="text-[11px] text-slate-500 uppercase tracking-wider">
                 <th className="px-6 py-4 font-bold">System Identity</th>
                 <th className="px-6 py-4 font-bold">Assignment</th>
                 <th className="px-6 py-4 font-bold text-center">Auth Roles</th>
                 <th className="px-6 py-4 font-bold text-center">Portal Access</th>
-                <th className="px-6 py-4 font-bold text-center">Config</th>
+                <th className="px-6 py-4 font-bold text-center w-[160px]">Config</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -378,7 +487,7 @@ export default function ICTStaffDataManagement() {
                 <tr><td colSpan="5" className="py-12 text-center text-slate-400 font-medium">Connecting to cluster...</td></tr>
               ) : data.length === 0 ? (
                 <tr><td colSpan="5" className="py-12 text-center text-slate-400 font-medium">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching query parameters.'}</td></tr>
-              ) : data.map((e) => {
+              ) : currentItems.map((e) => {
                 const roleKey = e.security?.role || 'EMPLOYEE';
                 const roleInfo = ROLE_COLOURS[roleKey];
                 const secondaryRoles = e.security?.secondaryRoles || [];
@@ -388,7 +497,7 @@ export default function ICTStaffDataManagement() {
                   <tr key={e._id} className={isRecycleBinView ? 'hover:bg-red-50/30 transition-colors' : 'hover:bg-slate-50 transition-colors'}>
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-black shadow-sm ${isRecycleBinView ? 'bg-red-100 text-red-700' : 'bg-[#0D2B55] text-white'}`}>
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-black shadow-sm shrink-0 ${isRecycleBinView ? 'bg-red-100 text-red-700' : 'bg-[#0D2B55] text-white'}`}>
                           {getInitials(`${e.personalDetails?.firstName} ${e.personalDetails?.lastName}`)}
                         </div>
                         <div>
@@ -457,6 +566,52 @@ export default function ICTStaffDataManagement() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {data.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, data.length)}</span> of <span className="text-[#0f1923]">{data.length}</span> entries
+            </div>
+            
+            <div className="flex items-center gap-[4px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55] shadow-sm'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {editingStaff && (
@@ -555,7 +710,7 @@ export default function ICTStaffDataManagement() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-2">Secondary Role Clearances</label>
+                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-2">Additional Portal Access (Optional)</label>
                   <div className="flex flex-wrap gap-3">
                     {ALL_ROLES.filter(r => r.id !== editingStaff.security?.role).map(role => {
                       const isChecked = (editingStaff.security?.secondaryRoles || []).includes(role.id);
@@ -572,6 +727,7 @@ export default function ICTStaffDataManagement() {
                       );
                     })}
                   </div>
+                  <div className="text-[10px] text-slate-500 mt-2">Allows the user to log into multiple different role portals using the same credentials.</div>
                 </div>
 
               </div>
@@ -590,6 +746,69 @@ export default function ICTStaffDataManagement() {
           </div>
         </div>
       )}
+
+      {/* Custom Modal for System Alerts */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-[24px]">
+              <div className="flex items-center gap-[10px] mb-[12px]">
+                {modalConfig.title.includes('Error') || modalConfig.title.includes('Warning') || modalConfig.title.includes('Deletion') ? (
+                  <AlertTriangle className="w-[20px] h-[20px] text-red-600" />
+                ) : (
+                  <Shield className="w-[20px] h-[20px] text-blue-600" />
+                )}
+                <h3 className="text-[18px] font-[800] text-slate-800">{modalConfig.title}</h3>
+              </div>
+              
+              <p className="text-[14px] text-slate-600 mb-[24px] whitespace-pre-wrap leading-relaxed">
+                {modalConfig.message}
+              </p>
+              
+              {modalConfig.type === 'prompt' && (
+                <input 
+                  type="text"
+                  autoFocus
+                  value={modalInput}
+                  onChange={(e) => setModalInput(e.target.value)}
+                  className="w-full p-[12px_16px] mb-[24px] bg-slate-50 border border-slate-300 rounded-[8px] text-[13px] outline-none focus:border-slate-800 transition-colors font-mono"
+                  placeholder="Type here to confirm..."
+                />
+              )}
+
+              <div className="flex justify-end gap-[12px]">
+                {(modalConfig.type === 'confirm' || modalConfig.type === 'prompt') && (
+                  <button 
+                    type="button"
+                    onClick={modalConfig.onCancel}
+                    className="px-[16px] py-[10px] text-slate-600 font-[700] text-[13px] hover:bg-slate-100 rounded-[8px] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button 
+                  type="button"
+                  onClick={() => {
+                    if (modalConfig.type === 'prompt') {
+                      modalConfig.onConfirm(modalInput);
+                    } else {
+                      modalConfig.onConfirm();
+                    }
+                  }}
+                  className={`px-[20px] py-[10px] text-white font-[800] text-[13px] rounded-[8px] shadow-sm transition-colors ${
+                    modalConfig.title.includes('Error') || modalConfig.title.includes('Warning') || modalConfig.title.includes('Deletion')
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-slate-800 hover:bg-slate-900'
+                  }`}
+                >
+                  {modalConfig.type === 'alert' ? 'Acknowledge' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

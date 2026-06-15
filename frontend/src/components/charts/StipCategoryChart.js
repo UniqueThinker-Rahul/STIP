@@ -25,9 +25,8 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
   const [selectedQuarter, setSelectedQuarter] = useState('ALL');
   
   const [availableYears, setAvailableYears] = useState([new Date().getFullYear()]);
-  const [availableQuarters, setAvailableQuarters] = useState([]);
+  const [dbQuarters, setDbQuarters] = useState([]); // Store raw DB objects to calculate status
 
-  // 🚨 NEW: Download state
   const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
@@ -77,19 +76,53 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
         const qRes = await api.get('/quarters').catch(() => ({ data: { data: [] } }));
         if (qRes.data?.data) {
           const quartersData = qRes.data.data;
+          setDbQuarters(quartersData); // Save full objects for status calculation
           
           const years = [...new Set(quartersData.map(q => q.year))];
           if (years.length > 0) setAvailableYears(years.sort((a,b) => b-a));
-
-          const quarters = [...new Set(quartersData.map(q => q.name))];
-          if (quarters.length > 0) setAvailableQuarters(quarters.sort());
         }
       } catch (e) {}
     };
     fetchDynamicFilters();
   }, []);
 
-  // 🚨 NEW: PDF Download Logic
+  // 🚨 UPGRADE: Dynamic Quarter Filtering & Status Calculation
+  const filteredQuarters = selectedYear === 'ALL' 
+    ? dbQuarters // If all years, show everything
+    : dbQuarters.filter(q => q.year?.toString() === selectedYear.toString());
+
+  // Eliminate duplicate names if multiple years are selected to keep dropdown clean
+  const uniqueQuarterOptions = [];
+  const seenNames = new Set();
+  
+  filteredQuarters.forEach(q => {
+    if (!seenNames.has(q.name)) {
+      seenNames.add(q.name);
+      
+      // Calculate real-time status
+      const start = new Date(q.startDate); start.setHours(0,0,0,0);
+      const end = new Date(q.endDate); end.setHours(23,59,59,999);
+      const now = new Date();
+      
+      const isFuture = now < start;
+      const isExpired = now > end;
+      
+      let lockStatus = '';
+      if (q.isLocked || (isExpired && !q.forceUnlock)) lockStatus = 'Locked';
+      else if (isFuture) lockStatus = 'Upcoming';
+      else if (q.forceUnlock) lockStatus = 'Open (Override)';
+      else lockStatus = 'Active';
+
+      uniqueQuarterOptions.push({
+        name: q.name,
+        status: lockStatus
+      });
+    }
+  });
+  
+  // Sort Q1, Q2, Q3, Q4
+  uniqueQuarterOptions.sort((a, b) => a.name.localeCompare(b.name));
+
   const handleDownloadPDF = () => {
     setIsDownloading(true);
     try {
@@ -103,7 +136,7 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
 
       // Header
       doc.setFontSize(16);
-      doc.setTextColor(13, 43, 85); // #0D2B55
+      doc.setTextColor(13, 43, 85); 
       doc.text(reportTitle, 14, 20);
       
       doc.setFontSize(10);
@@ -129,7 +162,7 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
 
       tableRows.push([
         { content: 'PROJECTED TOTAL IPRF SCORE', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } },
-        { content: totalIprf.toFixed(3), styles: { fontStyle: 'bold', textColor: [22, 163, 74] } } // Green
+        { content: totalIprf.toFixed(3), styles: { fontStyle: 'bold', textColor: [22, 163, 74] } } 
       ]);
 
       autoTable(doc, {
@@ -188,7 +221,10 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
             
             <select 
               value={selectedYear} 
-              onChange={(e) => setSelectedYear(e.target.value)}
+              onChange={(e) => {
+                setSelectedYear(e.target.value);
+                setSelectedQuarter('ALL'); // Reset quarter when year changes to prevent invalid filters
+              }}
               className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors"
             >
               <option value="ALL">All Years</option>
@@ -198,14 +234,18 @@ export default function StipCategoryChart({ scope = 'org', title = "STIP Award P
             <select 
               value={selectedQuarter} 
               onChange={(e) => setSelectedQuarter(e.target.value)}
-              className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors"
+              className="bg-white border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded py-1 px-2 outline-none cursor-pointer hover:border-[#0D2B55]/30 transition-colors min-w-[120px]"
             >
               <option value="ALL">All Quarters</option>
-              {availableQuarters.map(q => <option key={q} value={q}>{q}</option>)}
+              {/* 🚨 UPGRADE: Render options with dynamic status context */}
+              {uniqueQuarterOptions.map(q => (
+                <option key={q.name} value={q.name}>
+                  {q.name} {selectedYear !== 'ALL' ? `— ${q.status}` : ''}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* 🚨 NEW: Download Button */}
           <button 
             onClick={handleDownloadPDF}
             disabled={isDownloading || totalAppraisals === 0}

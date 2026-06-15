@@ -196,6 +196,11 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Invalid Username or Password.' });
     }
 
+    // 🚨 FIX: Block inactive/locked users
+    if (user.employmentDetails?.isActive === false) {
+      return res.status(403).json({ message: 'Account locked. Contact ICT Admin.' });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     
     if (!isMatch) {
@@ -276,6 +281,11 @@ router.post('/staff-login', loginLimiter, async (req, res) => {
         details: `Failed staff login attempt for unknown username: ${safeUsername}`, req
       });
       return res.status(401).json({ message: 'Invalid Username or Password.' });
+    }
+
+    // 🚨 FIX: Block inactive/locked users
+    if (user.employmentDetails?.isActive === false) {
+      return res.status(403).json({ message: 'Account locked. Contact ICT Admin.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -388,6 +398,49 @@ router.get('/me', authGuard, async (req, res) => {
   } catch (error) {
     console.error("Error fetching current user:", error);
     res.status(500).json({ message: 'Server error fetching user profile.' });
+  }
+});
+
+// 🚨 NEW: ICT Admin route to override notification emails
+router.patch('/:id/alert-email', authGuard, roleGuard('ICT_ADMIN'), async (req, res) => {
+  try {
+    const { targetRole, newEmail } = req.body;
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (!user.personalDetails) user.personalDetails = {};
+
+    // Handle Mongoose Map vs Object safely for the dynamic email storage
+    if (user.personalDetails.notificationEmails instanceof Map) {
+      user.personalDetails.notificationEmails.set(targetRole, newEmail);
+    } else {
+      user.personalDetails.notificationEmails = {
+        ...user.personalDetails.notificationEmails,
+        [targetRole]: newEmail
+      };
+    }
+
+    // Force Mongoose to recognize the change in the mixed/nested object
+    user.markModified('personalDetails.notificationEmails');
+    await user.save();
+
+    // 🚨 Fire the In-App Bell Notification to the user
+    await Notification.create({
+      recipient: user._id,
+      sender: req.user.id,
+      title: 'Alert Email Updated',
+      message: `The ICT Admin has updated your notification email address for the ${targetRole.replace('_', ' ')} portal to: ${newEmail}`,
+      type: 'SYSTEM_ALERT',
+      targetRole: targetRole
+    });
+
+    res.status(200).json({ success: true, message: 'Notification email successfully updated.' });
+  } catch (error) {
+    console.error("Alert Email Update Error:", error);
+    res.status(500).json({ message: 'Server error updating email preference.' });
   }
 });
 

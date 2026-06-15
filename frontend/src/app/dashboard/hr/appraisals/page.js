@@ -103,7 +103,7 @@ export default function HRAllAppraisals() {
   
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
 
-  // 🚨 NEW: Pagination States
+  // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -181,7 +181,6 @@ export default function HRAllAppraisals() {
     fetchData();
   }, []);
 
-  // 🚨 NEW: Reset pagination to page 1 whenever ANY filter changes
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterYear, qtr, statusFilter, co, mgrFilter, officeFilter]);
@@ -290,7 +289,6 @@ export default function HRAllAppraisals() {
     return dateB - dateA; 
   });
 
-  // 🚨 NEW: Pagination Logic Extraction
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
@@ -339,6 +337,25 @@ export default function HRAllAppraisals() {
     document.body.removeChild(link);
   };
 
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
+
   return (
     <div className="max-w-6xl mx-auto pb-[60px] font-sans">
       
@@ -369,16 +386,14 @@ export default function HRAllAppraisals() {
           <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
         </div>
         
-        {/* 🚨 UPGRADED: Custom Searchable Dropdown for Office */}
         <SearchableDropdown 
           value={officeFilter}
           onChange={setOfficeFilter}
-          placeholder="All Offices"
+          placeholder="All Office Locations"
           widthClass="w-[180px]"
           options={availableOffices.map(o => ({ value: o, label: o }))}
         />
 
-        {/* 🚨 UPGRADED: Custom Searchable Dropdown for Managers */}
         <SearchableDropdown 
           value={mgrFilter}
           onChange={setMgrFilter}
@@ -408,11 +423,10 @@ export default function HRAllAppraisals() {
           </select>
         </div>
 
-        {/* 🚨 UPGRADED: Custom Searchable Dropdown for Status */}
         <SearchableDropdown 
           value={statusFilter}
           onChange={setStatusFilter}
-          placeholder="All Statuses"
+          placeholder="Appraisal Status"
           widthClass="w-[180px]"
           options={[
             { value: 'SUBMITTED', label: 'Submitted to HR' },
@@ -424,7 +438,7 @@ export default function HRAllAppraisals() {
         />
         
         <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
-          <option value="">All Co.</option>
+          <option value="">All Company</option>
           {companyCodes.map(code => (
              <option key={`co-${code}`} value={code}>{code}</option>
           ))}
@@ -451,7 +465,6 @@ export default function HRAllAppraisals() {
               ) : filtered.length === 0 ? (
                 <tr><td colSpan="7" className="p-[32px] text-center text-[#6b7280] font-[600]">No records match your filters.</td></tr>
               ) : (
-                // 🚨 UPGRADED: Replaced 'filtered.map' with 'currentItems.map' for Pagination
                 currentItems.map(a => {
                   const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`;
                   const mgrInfo = getManagerInfo(a.managerId);
@@ -505,30 +518,45 @@ export default function HRAllAppraisals() {
           </table>
         </div>
 
-        {/* 🚨 NEW: Table Pagination Footer */}
+        {/* 🚨 UPGRADED: Table Pagination Footer with Direct Page Selection */}
         {filtered.length > itemsPerPage && (
-          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-white flex items-center justify-between mt-auto">
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
             <div className="text-[12px] text-[#6b7280] font-[600]">
               Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filtered.length)}</span> of <span className="text-[#0f1923]">{filtered.length}</span> entries
             </div>
             
-            <div className="flex gap-[6px]">
+            <div className="flex items-center gap-[4px]">
               <button 
                 onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
-                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] hover:bg-[#FAF8F4] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="w-[14px] h-[14px]" />
               </button>
               
-              <div className="flex items-center px-[8px] text-[12px] font-[700] text-[#0D2B55]">
-                Page {currentPage} of {totalPages}
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
               </div>
 
               <button 
                 onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] hover:bg-[#FAF8F4] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="w-[14px] h-[14px]" />
               </button>

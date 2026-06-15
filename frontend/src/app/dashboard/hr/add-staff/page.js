@@ -302,9 +302,9 @@ export default function AddNewStaff() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[14px]">
               <div className="flex flex-col gap-[6px]">
-                {/* 🚨 UPGRADED: Dynamic visual logic for Reporting Manager field requirement */}
+                {/* 🚨 UPGRADED: Dynamic visual logic for Line Manager field requirement */}
                 <label className="text-[11px] font-[800] text-[#0D2B55] flex justify-between items-center">
-                  <span>Reporting Manager {!formData.isManager && <span className="text-[#DC2626]">*</span>}</span>
+                  <span>Line Manager {!formData.isManager && <span className="text-[#DC2626]">*</span>}</span>
                   {formData.isManager && <span className="text-[9px] text-[#6b7280] font-normal uppercase">Optional</span>}
                 </label>
                 {renderSearchableDropdown('mgrId', managerList, 'Search for Manager...', (m) => {
@@ -364,7 +364,7 @@ export default function AddNewStaff() {
                     <ShieldCheck className="w-[14px] h-[14px] text-[#2563EB]" /> Designate as Line Manager
                   </div>
                   <div className="text-[11px] text-[#3B82F6] leading-snug mt-[2px]">
-                    If enabled, this employee will be granted Manager access and will appear in the "Reporting Manager" dropdown for future staff assignments.
+                    If enabled, this employee will be granted Manager access and will appear in the "Line Manager" dropdown for future staff assignments.
                   </div>
                 </div>
               </div>
@@ -428,7 +428,7 @@ export default function AddNewStaff() {
                   <span className="text-[#059669] font-[800] shrink-0">1.</span> Employee added to Staff Directory instantly.
                 </div>
                 <div className="flex gap-[10px] items-start text-[12px] text-[#0f1923]">
-                  <span className="text-[#059669] font-[800] shrink-0">2.</span> Reporting manager can immediately initiate Q3 appraisal.
+                  <span className="text-[#059669] font-[800] shrink-0">2.</span> Line manager can immediately initiate Q3 appraisal.
                 </div>
                 <div className="flex gap-[10px] items-start text-[12px] text-[#0f1923]">
                   <span className="text-[#059669] font-[800] shrink-0">3.</span> A temporary password (Password123!) is generated for the employee portal access.

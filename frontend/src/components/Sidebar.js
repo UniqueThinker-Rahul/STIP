@@ -7,7 +7,7 @@ import Cookies from 'js-cookie';
 import { 
   Home, Activity, CheckCircle, FileText, Users, BarChart, 
   UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
-  Lock, Shield, Database, Calendar
+  Lock, Shield, Database, Calendar, Mail
 } from 'lucide-react';
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
@@ -89,7 +89,6 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'Staff Management', href: '/dashboard/hr/staff', icon: Users },
           { name: 'Add New Staff', href: '/dashboard/hr/add-staff', icon: UserPlus },
           { name: 'System Config', href: '/dashboard/hr/system-config', icon: Settings },
-          // 🚨 UPGRADED: Added Quarter Cycles to HR Menu
           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
         ]
       },
@@ -147,7 +146,6 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Information',
         items: [
-          // { name: 'STIP Guide & FAQ', href: '/dashboard/employee/info', icon: HelpCircle },
           { name: 'Deadlines', href: '/dashboard/employee/deadlines', icon: Calendar }
         ]
       }
@@ -166,10 +164,10 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
           { name: 'Audit Trail', href: '/dashboard/ict/audit', icon: FileText },
           { name: 'Update Password', href: '/dashboard/ict/reset-password', icon: Lock },
-          //  { name: 'Panel Permissions', href: '/dashboard/ict/users/roles', icon: Lock },
           { name: 'System Status & E-mail Config', href: '/dashboard/ict/system', icon: Database },
-          // 🚨 UPGRADED: Added Quarter Cycles to ICT Menu for override control
-          { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
+          { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar },
+          // 🚨 UPGRADE: Added the new Notification Email Routing page here
+          { name: 'Email Routing', href: '/dashboard/ict/notification-emails', icon: Mail }
         ]
       },
       {

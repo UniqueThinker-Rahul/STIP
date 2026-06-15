@@ -1,26 +1,23 @@
 'use client';
 
-// 🚨 UPGRADE: Added 'X' to the imports for the clear button icon
 import { Menu, LogOut, Bell, ChevronDown, Lock, Unlock, Clock, BarChart2, CheckCircle, Info, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import Cookies from 'js-cookie';
 import api from '../lib/api';
 
-// Helper function to format timestamp into "2 hours ago" etc.
-const timeAgo = (dateString) => {
+// 🚨 UPGRADE: Format timestamp into a proper, readable exact Date & Time
+const formatExactTime = (dateString) => {
+  if (!dateString) return '';
   const date = new Date(dateString);
-  const now = new Date();
-  const seconds = Math.round((now - date) / 1000);
-  const minutes = Math.round(seconds / 60);
-  const hours = Math.round(minutes / 60);
-  const days = Math.round(hours / 24);
-
-  if (seconds < 60) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days === 1) return 'Yesterday';
-  return `${days}d ago`;
+  return date.toLocaleString('en-GB', { 
+    day: 'numeric', 
+    month: 'short', 
+    year: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit',
+    hour12: true 
+  });
 };
 
 export default function Header({ setIsOpen, user }) {
@@ -160,7 +157,7 @@ export default function Header({ setIsOpen, user }) {
     } catch (err) { console.error("Failed to mark all as read", err); }
   };
 
-  // 🚨 UPGRADE: Handle CLEAR ALL notifications
+  // Handle CLEAR ALL notifications
   const handleClearAll = async (e) => {
     e.stopPropagation();
     try {
@@ -170,15 +167,14 @@ export default function Header({ setIsOpen, user }) {
     } catch (err) { console.error("Failed to clear notifications", err); }
   };
 
-  // 🚨 UPGRADE: Handle CLEAR INDIVIDUAL notification
+  // Handle CLEAR INDIVIDUAL notification
   const handleClearNotification = async (e, id) => {
-    e.stopPropagation(); // Prevent the notification click event from firing
+    e.stopPropagation(); 
     try {
       await api.delete(`/notifications/${id}`);
       
       setNotifications(prev => {
         const updatedNotifs = prev.filter(n => n._id !== id);
-        // Recalculate unread count locally
         setUnreadCount(updatedNotifs.filter(n => !n.isRead).length);
         return updatedNotifs;
       });
@@ -186,7 +182,6 @@ export default function Header({ setIsOpen, user }) {
     } catch (err) { console.error("Failed to clear notification", err); }
   };
 
-  // BULLETPROOF NAME EXTRACTION
   const fName = user?.personalDetails?.firstName || user?.firstName || '';
   const lName = user?.personalDetails?.lastName || user?.lastName || '';
   const email = user?.email || '';
@@ -220,10 +215,8 @@ export default function Header({ setIsOpen, user }) {
         </h1>
       </div>
 
-      {/* Real-Time Central Information Strip */}
       <div className="hidden lg:flex items-center bg-[#FAF8F4] border border-[#E2DDD4] rounded-full px-[16px] py-[6px] shadow-sm">
         
-        {/* CP Score */}
         <div className="flex items-center gap-[6px] pr-[14px] border-r border-[#E2DDD4]">
           <BarChart2 size={14} className="text-[#0D2B55]" />
           <span className="text-[11px] font-[700] text-[#6b7280] uppercase tracking-wider">CP Score:</span>
@@ -232,14 +225,12 @@ export default function Header({ setIsOpen, user }) {
           </span>
         </div>
 
-        {/* Dynamic Quarter Deadline */}
         <div className="flex items-center gap-[6px] px-[14px] border-r border-[#E2DDD4]">
           <Clock size={14} className="text-[#92400E]" />
           <span className="text-[11px] font-[700] text-[#6b7280] uppercase tracking-wider">{activeQuarterData.name}</span>
           <span className="text-[12px] font-[800] text-[#92400E]">{activeQuarterData.deadline}</span>
         </div>
 
-        {/* Conditional Scorecard Lock Status (CEO & HR Only) */}
         {showLockStatus && (
           <div className="flex items-center gap-[6px] pl-[14px]">
             {metrics.locked ? (
@@ -256,7 +247,6 @@ export default function Header({ setIsOpen, user }) {
           </div>
         )}
         
-        {/* Fill space if lock status is hidden to maintain layout balance */}
         {!showLockStatus && (
           <div className="pl-[14px] text-[11px] font-[700] text-[#6b7280] uppercase tracking-wider">
             CY{currentYear} Active
@@ -267,7 +257,6 @@ export default function Header({ setIsOpen, user }) {
 
       <div className="flex items-center gap-[16px]">
         
-        {/* 🚨 Notification Bell Dropdown */}
         <div className="relative" ref={notifRef}>
           <button 
             onClick={() => setShowNotifs(!showNotifs)}
@@ -281,14 +270,12 @@ export default function Header({ setIsOpen, user }) {
             )}
           </button>
 
-          {/* Notification Menu */}
           {showNotifs && (
             <div className="absolute right-0 mt-3 w-[350px] bg-white border border-[#E2DDD4] rounded-[12px] shadow-[0_10px_40px_rgba(0,0,0,0.12)] flex flex-col animate-in fade-in slide-in-from-top-2 z-50 overflow-hidden">
               
               <div className="px-[16px] py-[12px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
                 <div className="text-[13px] font-[800] text-[#0D2B55]">Notifications</div>
                 
-                {/* 🚨 UPGRADE: Added Clear All Button */}
                 <div className="flex items-center gap-2">
                   {unreadCount > 0 && (
                     <button onClick={handleMarkAllRead} className="text-[10px] font-[700] text-[#1E40AF] hover:underline bg-[#DBEAFE] px-[8px] py-[3px] rounded-full">
@@ -329,17 +316,17 @@ export default function Header({ setIsOpen, user }) {
                           <div className={`text-[11px] leading-snug line-clamp-2 ${!notif.isRead ? 'text-[#334155]' : 'text-[#6b7280]'}`}>
                             {notif.message}
                           </div>
+                          {/* 🚨 UPGRADE: Implemented Exact Date and Time Display */}
                           <div className="text-[10px] text-[#94a3b8] mt-[6px] font-[500]">
-                            {timeAgo(notif.createdAt)}
+                            {formatExactTime(notif.createdAt)}
                           </div>
                         </div>
                         
-                        {/* 🚨 UPGRADE: Added Individual Clear X Button */}
                         <div className="flex flex-col items-end justify-between shrink-0 h-full py-1">
                           {!notif.isRead ? (
                             <div className="w-[8px] h-[8px] bg-[#3B82F6] rounded-full shadow-sm mb-2"></div>
                           ) : (
-                            <div className="w-[8px] h-[8px] mb-2"></div> // Spacer
+                            <div className="w-[8px] h-[8px] mb-2"></div> 
                           )}
                           <button 
                             onClick={(e) => handleClearNotification(e, notif._id)}
