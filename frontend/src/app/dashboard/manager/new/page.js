@@ -7,17 +7,17 @@ import api from '../../../../lib/api';
 
 const CRITERIA = [
   { 
-    id: 'expectedResults', 
-    short: 'Results',
-    name: "Delivered Expected Results", 
-    wt: 0.30, 
-    pct: "30%", 
-    desc: "Did the employee deliver the expected results of their position in 2025/2026?",
+    id: 'jobCompetence', 
+    short: 'Competence',
+    name: "Job Competence", 
+    wt: 0.10, 
+    pct: "10%", 
+    desc: "Does the employee have and apply the skills required for their role?",
     rubric: [
-      { score: "0.0", label: "LS", title: "Less Than Satisfactory", details: "Performance failed to achieve the expectations of the position. Key operational outputs missed entirely." },
-      { score: "0.7", label: "NI", title: "Needs Improvement", details: "Performance fell below the expectations set for the role. Required significant guidance or support to attempt core outcomes." },
-      { score: "1.0", label: "E", title: "Fully Effective", details: "Delivered the expected results of the position. Met targets and objectives accurately in line with expectations." },
-      { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Performance is noticeably above requirements. Reflects a wide range of outcomes beyond default targets (Must be supported by written examples)." }
+      { score: "0.0", label: "LS", title: "Less Than Satisfactory", details: "Lacks core technical competencies required for execution. Causes high frequency of errors requiring operational rebuilds." },
+      { score: "0.7", label: "NI", title: "Needs Improvement", details: "Possesses basic understanding but hits technical gaps when working through non-standard system dependencies." },
+      { score: "1.0", label: "E", title: "Fully Effective", details: "Demonstrates total mastery over the required domain logic, completing technical tasks cleanly without design bugs." },
+      { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Serves as an organizational subject matter expert, resolving complex architecture problems and designing framework workarounds." }
     ]
   },
   { 
@@ -32,34 +32,6 @@ const CRITERIA = [
       { score: "0.7", label: "NI", title: "Needs Improvement", details: "Displays baseline accountability occasionally but lacks active initiative to address unassigned workload blocks." },
       { score: "1.0", label: "E", title: "Fully Effective", details: "Takes structured responsibility, coordinates duties efficiently, and handles daily issues independently without intervention." },
       { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Proactively champions efficiency improvements, takes on additional unassigned mandates, and assists peers systematically." }
-    ]
-  },
-  { 
-    id: 'safeWorking', 
-    short: 'Safety', 
-    name: "Safe Working", 
-    wt: 0.20, 
-    pct: "20%", 
-    desc: "Does the employee follow safety rules, wear PPE, and identify hazards?",
-    rubric: [
-      { score: "0.0", label: "LS", title: "Less Than Satisfactory", details: "Takes active shortcuts on protocols, runs processes without assigned PPE, or ignores clear hazardous environmental states." },
-      { score: "0.7", label: "NI", title: "Needs Improvement", details: "Follows general guidelines but occasionally neglects checking hazard updates or requires safety supervisor warnings." },
-      { score: "1.0", label: "E", title: "Fully Effective", details: "Identifies risks proactively before starting tasks, wears all required PPE, monitors co-workers, and logs alerts accurately." },
-      { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Takes a leading cultural role in organizing safety risk frameworks, implements protective upgrades, and acts to stop unsafe work proactively." }
-    ]
-  },
-  { 
-    id: 'jobCompetence', 
-    short: 'Competence',
-    name: "Job Competence", 
-    wt: 0.10, 
-    pct: "10%", 
-    desc: "Does the employee have and apply the skills required for their role?",
-    rubric: [
-      { score: "0.0", label: "LS", title: "Less Than Satisfactory", details: "Lacks core technical competencies required for execution. Causes high frequency of errors requiring operational rebuilds." },
-      { score: "0.7", label: "NI", title: "Needs Improvement", details: "Possesses basic understanding but hits technical gaps when working through non-standard system dependencies." },
-      { score: "1.0", label: "E", title: "Fully Effective", details: "Demonstrates total mastery over the required domain logic, completing technical tasks cleanly without design bugs." },
-      { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Serves as an organizational subject matter expert, resolving complex architecture problems and designing framework workarounds." }
     ]
   },
   { 
@@ -88,6 +60,34 @@ const CRITERIA = [
       { score: "0.7", label: "NI", title: "Needs Improvement", details: "Accepts assignments eventually but requires extended transition timelines or experiences velocity drops during workflow adjustments." },
       { score: "1.0", label: "E", title: "Fully Effective", details: "Adapts smoothly to processing variations, tool changes, or balanced internal team re-structures without friction." },
       { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Thrives during fast pivot conditions, masters new paradigms instantly, and actively constructs onboarding workflows for others." }
+    ]
+  },
+  { 
+    id: 'safeWorking', 
+    short: 'Safety', 
+    name: "Safe Working", 
+    wt: 0.20, 
+    pct: "20%", 
+    desc: "Does the employee follow safety rules, wear PPE, and identify hazards?",
+    rubric: [
+      { score: "0.0", label: "LS", title: "Less Than Satisfactory", details: "Takes active shortcuts on protocols, runs processes without assigned PPE, or ignores clear hazardous environmental states." },
+      { score: "0.7", label: "NI", title: "Needs Improvement", details: "Follows general guidelines but occasionally neglects checking hazard updates or requires safety supervisor warnings." },
+      { score: "1.0", label: "E", title: "Fully Effective", details: "Identifies risks proactively before starting tasks, wears all required PPE, monitors co-workers, and logs alerts accurately." },
+      { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Takes a leading cultural role in organizing safety risk frameworks, implements protective upgrades, and acts to stop unsafe work proactively." }
+    ]
+  },
+  { 
+    id: 'expectedResults', 
+    short: 'Results',
+    name: "Delivered Expected Results", 
+    wt: 0.30, 
+    pct: "30%", 
+    desc: "Did the employee deliver the expected results of their position in 2025/2026?",
+    rubric: [
+      { score: "0.0", label: "LS", title: "Less Than Satisfactory", details: "Performance failed to achieve the expectations of the position. Key operational outputs missed entirely." },
+      { score: "0.7", label: "NI", title: "Needs Improvement", details: "Performance fell below the expectations set for the role. Required significant guidance or support to attempt core outcomes." },
+      { score: "1.0", label: "E", title: "Fully Effective", details: "Delivered the expected results of the position. Met targets and objectives accurately in line with expectations." },
+      { score: "1.3", label: "EP", title: "Exceeds Performance", details: "Performance is noticeably above requirements. Reflects a wide range of outcomes beyond default targets (Must be supported by written examples)." }
     ]
   }
 ];
@@ -141,7 +141,7 @@ function NewAppraisalForm() {
   });
   
   const [scores, setScores] = useState({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
-  const [expandedCrit, setExpandedCrit] = useState('expectedResults'); 
+  const [expandedCrit, setExpandedCrit] = useState('jobCompetence'); 
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [quarterStatuses, setQuarterStatuses] = useState({});
@@ -152,7 +152,7 @@ function NewAppraisalForm() {
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
 
-  // 🚨 UPGRADE: Custom Modal State to lock page and center alerts
+  // Custom Modal State to lock page and center alerts
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
     type: 'alert', 
@@ -180,6 +180,28 @@ function NewAppraisalForm() {
   const parseComments = (combinedString) => {
     if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
     
+    // Parse New Format
+    if (combinedString.includes('1. Job Competence:')) {
+      const extract = (currentLabel, nextLabel) => {
+        const startIdx = combinedString.indexOf(currentLabel);
+        if (startIdx === -1) return '';
+        const startOfContent = startIdx + currentLabel.length;
+        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
+        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
+        return combinedString.substring(startOfContent, endIdx).trim();
+      };
+
+      return {
+        jobCompetence: extract('1. Job Competence:', '2. Behaviors & Initiative:'),
+        initiative: extract('2. Behaviors & Initiative:', '3. Dependability:'),
+        dependability: extract('3. Dependability:', '4. Adaptability:'),
+        adaptability: extract('4. Adaptability:', '5. Safe Working:'),
+        safeWorking: extract('5. Safe Working:', '6. Delivered Expected Results:'),
+        expectedResults: extract('6. Delivered Expected Results:', null)
+      };
+    }
+
+    // Parse Legacy Format (To handle older drafts safely)
     if (combinedString.includes('1. Delivered Expected Results:')) {
       const extract = (currentLabel, nextLabel) => {
         const startIdx = combinedString.indexOf(currentLabel);
@@ -504,23 +526,23 @@ function NewAppraisalForm() {
     setIsSubmitting(true);
     try {
       const compiledComments = 
-`1. Delivered Expected Results:
-${criterionComments.expectedResults || 'No comment required for E (1.0).'}
+`1. Job Competence:
+${criterionComments.jobCompetence || 'No comment required for E (1.0).'}
 
 2. Behaviors & Initiative:
 ${criterionComments.initiative || 'No comment required for E (1.0).'}
 
-3. Safe Working:
-${criterionComments.safeWorking || 'No comment required for E (1.0).'}
-
-4. Job Competence:
-${criterionComments.jobCompetence || 'No comment required for E (1.0).'}
-
-5. Dependability:
+3. Dependability:
 ${criterionComments.dependability || 'No comment required for E (1.0).'}
 
-6. Adaptability:
-${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
+4. Adaptability:
+${criterionComments.adaptability || 'No comment required for E (1.0).'}
+
+5. Safe Working:
+${criterionComments.safeWorking || 'No comment required for E (1.0).'}
+
+6. Delivered Expected Results:
+${criterionComments.expectedResults || 'No comment required for E (1.0).'}`;
 
       const payload = {
         employeeId: selectedStaffId,
@@ -545,7 +567,6 @@ ${criterionComments.adaptability || 'No comment required for E (1.0).'}`;
       const submissionDate = new Date().toLocaleDateString();
       const submissionTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      // 🚨 UPGRADE: Custom Success Modal with Routing embedded
       if (isDraft) {
         showDialog('alert', 'Draft Saved', `Draft saved successfully on ${submissionDate} at ${submissionTime}!`, () => {
           closeDialog();

@@ -28,6 +28,7 @@ const auditRoutes = require('./routes/auditRoutes');
 const apiLogger = require('./middleware/apiLogger');
 const notificationRoutes = require('./routes/notificationRoutes');
 const configRoutes = require('./routes/configRoutes');
+const backupRoutes = require('./routes/backupRoutes');
 
 const app = express();
 
@@ -68,6 +69,7 @@ app.use('/api/v1/quarters', quarterRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/config', configRoutes);
+app.use('/api/v1/backup', backupRoutes);
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

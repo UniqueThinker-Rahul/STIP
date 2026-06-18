@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
+import { Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const CRIT_NAMES = {
   deliveredResults: 'Delivered Expected Results',
@@ -12,51 +13,181 @@ const CRIT_NAMES = {
   adaptability: 'Adaptability'
 };
 
+// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
+const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [wrapperRef]);
+
+  const filteredOptions = options.filter(opt => 
+    opt.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div ref={wrapperRef} className={`relative ${widthClass}`}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full py-[10px] px-[12px] bg-white border rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer flex justify-between items-center transition-colors ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-[#E2DDD4]'}`}
+      >
+        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
+        <ChevronDown className={`w-[14px] h-[14px] text-[#6b7280] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 top-[calc(100%+4px)] left-0 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="p-[8px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
+            <div className="relative">
+              <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[12px] h-[12px] text-[#6b7280]" />
+              <input 
+                type="text"
+                autoFocus
+                placeholder="Search..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-[26px] pr-[8px] py-[6px] text-[12px] border border-[#E2DDD4] rounded-[6px] outline-none focus:border-[#0D2B55]"
+              />
+            </div>
+          </div>
+          
+          <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
+            <div 
+              onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
+              className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors ${value === '' ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#6b7280] hover:bg-[#FAF8F4]'}`}
+            >
+              {placeholder}
+            </div>
+            
+            {filteredOptions.length === 0 ? (
+              <div className="px-[12px] py-[10px] text-[12px] text-[#6b7280] text-center italic">No matches found</div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <div 
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
+                  className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#0f1923] hover:bg-[#FAF8F4]'}`}
+                >
+                  {opt.label}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+// ----------------------------------------------
+
 export default function CEOAllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
+  const [staff, setStaff] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [cpPct, setCpPct] = useState(null);
   
-  // 🚨 UPGRADE: Dynamic state for filters
+  // Dynamic state for filters
   const [dbQuarters, setDbQuarters] = useState([]);
   const [companyCodes, setCompanyCodes] = useState([]);
+  const [managerList, setManagerList] = useState([]);
+  const [availableOffices, setAvailableOffices] = useState([]);
   
   // Filters
   const [search, setSearch] = useState('');
+  const [filterYear, setFilterYear] = useState(''); 
   const [qtr, setQtr] = useState('');
   const [co, setCo] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [mgrFilter, setMgrFilter] = useState('');
+  const [officeFilter, setOfficeFilter] = useState('');
   
   // Modal
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
+
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const fetchData = async () => {
     try {
       setLoading(true);
       
-      // 🚨 UPGRADE: Fetch dynamic Quarters and Company Config concurrently
-      const [metricsRes, appRes, qtrRes, configRes] = await Promise.all([
+      const [metricsRes, appRes, qtrRes, configRes, usersRes] = await Promise.all([
         api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
         api.get('/appraisals').catch(() => ({ data: { data: [] } })),
         api.get('/quarters').catch(() => ({ data: { data: [] } })),
-        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } }))
+        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
+        api.get('/users').catch(() => ({ data: { data: [] } }))
       ]);
 
       if (metricsRes.data?.data?.cpPct) {
         setCpPct(metricsRes.data.data.cpPct);
       }
 
+      const allApps = appRes.data?.data || [];
+      setAppraisals(allApps);
+
+      const allUsers = usersRes.data?.data || [];
+      setStaff(allUsers);
+
+      const extractedOffices = allUsers
+          .map(u => u?.employmentDetails?.officeLocation)
+          .filter(location => location && typeof location === 'string' && location.trim() !== '');
+      const uniqueOffices = [...new Set(extractedOffices)].sort();
+      setAvailableOffices(uniqueOffices);
+
+      const uniqueManagers = new Map();
+      
+      allApps.forEach(a => {
+        if (a.managerId) {
+          const mId = a.managerId._id || a.managerId;
+          const fName = a.managerId.personalDetails?.firstName || '';
+          const lName = a.managerId.personalDetails?.lastName || '';
+          if (fName || lName) uniqueManagers.set(mId, `${fName} ${lName}`.trim());
+        }
+      });
+
+      allUsers.forEach(u => {
+        const mgr = u.employmentDetails?.reportingTo;
+        if (mgr) {
+          const mId = mgr._id || mgr;
+          if (mgr.personalDetails) {
+            uniqueManagers.set(mId, `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim());
+          } else {
+            const foundMgr = allUsers.find(staffMember => staffMember._id === mId);
+            if (foundMgr) {
+              uniqueManagers.set(mId, `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim());
+            }
+          }
+        }
+      });
+      
+      const mgrArray = Array.from(uniqueManagers, ([id, name]) => ({ id, name }));
+      mgrArray.sort((a, b) => a.name.localeCompare(b.name));
+      setManagerList(mgrArray);
+
       const fetchedQuarters = qtrRes.data?.data || [];
       setDbQuarters(fetchedQuarters);
+
+      const activeQ = fetchedQuarters.find(q => new Date(q.endDate) >= new Date() && !q.isLocked);
+      if (activeQ) {
+        setFilterYear(activeQ.year.toString());
+        setQtr(activeQ._id);
+      }
 
       const configData = configRes.data?.data || {};
       setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
 
-      const allData = appRes.data?.data || [];
-      // Sort newest first
-      allData.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-      
-      setAppraisals(allData);
     } catch (error) {
       console.error('Failed to fetch appraisals:', error);
     } finally {
@@ -68,33 +199,111 @@ export default function CEOAllAppraisals() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterYear, qtr, statusFilter, co, mgrFilter, officeFilter]);
+
+  const handleYearChange = (e) => {
+    setFilterYear(e.target.value);
+    setQtr(''); 
+  };
+
+  const getManagerInfo = (mgrRaw) => {
+    if (!mgrRaw) return { id: null, name: 'Unassigned' };
+    if (mgrRaw._id && mgrRaw.personalDetails) {
+      return { id: mgrRaw._id, name: `${mgrRaw.personalDetails.firstName} ${mgrRaw.personalDetails.lastName}`.trim() };
+    }
+    const mId = mgrRaw._id || mgrRaw;
+    const found = staff.find(s => s._id === mId);
+    if (found) {
+       return { id: mId, name: `${found.personalDetails?.firstName} ${found.personalDetails?.lastName}`.trim() };
+    }
+    return { id: mId, name: 'Unknown Manager' };
+  };
+
+  let dataToFilter = [...appraisals];
+
+  if (qtr) {
+    const qtrAppraisals = appraisals.filter(a => {
+      const appQId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+      return appQId === qtr;
+    });
+    
+    const submittedEmpIds = new Set(qtrAppraisals.map(a => a.employeeId?._id || a.employeeId));
+
+    staff.forEach(emp => {
+      if (!submittedEmpIds.has(emp._id)) {
+        dataToFilter.push({
+          _id: `missing-${emp._id}-${qtr}`,
+          isMissing: true,
+          employeeId: emp,
+          managerId: emp.employmentDetails?.reportingTo,
+          appraisalQuarter: qtr,
+          workflow: { status: 'NOT_STARTED' },
+          calculatedResults: null,
+          updatedAt: null,
+          createdAt: null
+        });
+      }
+    });
+  }
+
   // Filter Logic
-  const filteredData = appraisals.filter(a => {
-    const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`.toLowerCase();
-    const jobTitle = (a.employeeId?.employmentDetails?.jobTitle || '').toLowerCase();
-    const searchString = search.toLowerCase();
+  const filteredData = dataToFilter.filter(a => {
+    const emp = a.employeeId?.personalDetails;
+    const empName = `${emp?.firstName || ''} ${emp?.lastName || ''}`.toLowerCase();
+    const empIdStr = (a.employeeId?.employeeId || '').toLowerCase();
     
-    // 🚨 UPGRADE: Use dynamic Quarter ID for filtering
     const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+    const mgrInfo = getManagerInfo(a.managerId);
+
+    const matchesSearch = search === '' || empName.includes(search.toLowerCase()) || empIdStr.includes(search.toLowerCase());
+    const matchesQtr = qtr === '' || appQuarterId === qtr;
     
-    if (search && !empName.includes(searchString) && !jobTitle.includes(searchString)) return false;
-    if (qtr && appQuarterId !== qtr) return false;
-    if (co && a.employeeId?.companyCode !== co) return false;
+    const appYear = a.reviewYear || a.appraisalQuarter?.year;
+    const matchesYear = filterYear === '' || (appYear && appYear.toString() === filterYear) || matchesQtr;
+
+    const matchesCo = co === '' || a.employeeId?.companyCode === co;
+    const matchesMgr = mgrFilter === '' || mgrInfo.id === mgrFilter;
+    const matchesOffice = officeFilter === '' || a.employeeId?.employmentDetails?.officeLocation === officeFilter;
     
-    const wfStatus = a.workflow?.status;
-    if (statusFilter === 'approved' && wfStatus !== 'APPROVED') return false;
-    if (statusFilter === 'pending' && wfStatus !== 'WITH_CEO') return false;
-    if (statusFilter === 'not_approved' && wfStatus !== 'NOT_APPROVED') return false;
+    let matchesStatus = true;
+    if (statusFilter !== '') {
+      if (statusFilter === 'NOT_SUBMITTED') {
+        matchesStatus = a.workflow?.status === 'DRAFT' || a.workflow?.status === 'NOT_STARTED';
+      } else {
+        matchesStatus = a.workflow?.status === statusFilter;
+      }
+    }
     
-    return true;
+    return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
+  }).sort((a, b) => {
+    const ceoStatuses = ['WITH_CEO', 'APPROVED'];
+    const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
+    const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
+
+    if (isACeo !== isBCeo) {
+      return isBCeo - isACeo; 
+    }
+
+    const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+    const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+    return dateB - dateA; 
   });
 
-  // 🚨 UPGRADE: Helper to resolve quarter ID to Name
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
+
   const getQuarterName = (qId) => {
     if (!qId) return 'N/A';
     const match = dbQuarters.find(q => q._id === qId);
-    return match ? match.name : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
+    return match ? `${match.name} (${match.year})` : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
   };
+
+  const availableYears = [...new Set(dbQuarters.map(q => q.year))].sort((a, b) => b - a);
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
 
   const iprfStyle = (f) => {
     if (f >= 1.3) return 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]';
@@ -111,7 +320,9 @@ export default function CEOAllAppraisals() {
   };
 
   const StatusTag = ({ st }) => {
+    if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
     switch(st) {
+      case 'NOT_STARTED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">NOT STARTED</span>;
       case 'APPROVED': 
         return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
       case 'WITH_CEO': 
@@ -127,53 +338,165 @@ export default function CEOAllAppraisals() {
     }
   };
 
+  const handleDownloadReport = () => {
+    let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Pro-Rata,Award %,Status,Last Updated Date & Time\n";
+    
+    filteredData.forEach(a => {
+      const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
+      const empId = `"${a.employeeId?.employeeId || ''}"`;
+      const jobTitle = `"${a.employeeId?.employmentDetails?.jobTitle || ''}"`;
+      const office = `"${a.employeeId?.employmentDetails?.officeLocation || 'Unassigned'}"`;
+      const coCode = `"${a.employeeId?.companyCode || 'FSM'}"`;
+      const mgrInfo = getManagerInfo(a.managerId);
+      const mgrName = `"${mgrInfo.name}"`;
+      const qtrName = `"${getQuarterName(a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter)}"`;
+      
+      const iprf = a.calculatedResults?.finalIprfScore || 0;
+      const score = `"${a.isMissing ? 'N/A' : iprf.toFixed(1)}"`;
+      
+      const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
+      const proRataValue = prMonths / 12;
+      const proRataStr = `"${proRataValue.toFixed(3)}"`;
+      
+      let awardDisplay = '—';
+      if (cpPct !== null && iprf > 0) {
+        const finalAw = (cpPct * iprf) * proRataValue;
+        awardDisplay = `"${finalAw.toFixed(2)}%"`;
+      } else if (a.stipAward) {
+        awardDisplay = `"${a.stipAward}%"`;
+      }
+      
+      let statusText = a.workflow?.status || 'UNKNOWN';
+      if (a.isMissing) statusText = 'NOT_STARTED';
+      const status = `"${statusText}"`;
+      
+      const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
+
+      csvContent += `${empName},${empId},${jobTitle},${office},${coCode},${mgrName},${qtrName},${score},${proRataStr},${awardDisplay},${status},${updated}\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `CEO_Appraisals_Report_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
+
   return (
-    <div className="w-full max-w-[1200px] mx-auto pb-[60px] font-sans">
+    <div className="max-w-6xl mx-auto pb-[60px] font-sans">
       
       {/* Header */}
-      <div className="mb-[20px] flex justify-between items-end">
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
             &#128196; All Appraisals
           </div>
           <div className="text-[13px] text-[#6b7280]">Full read-only view of every appraisal — all staff, all quarters</div>
         </div>
-        <button onClick={fetchData} className="text-[12px] font-[600] text-[#6b7280] bg-white border border-[#E2DDD4] p-[6px_12px] rounded-[8px] hover:text-[#0D2B55] hover:border-[#0D2B55] transition-colors shadow-sm">
-          &#8635; Refresh Data
-        </button>
+        
+        <div className="flex gap-[8px]">
+          <button onClick={fetchData} className="text-[13px] font-[700] text-[#0D2B55] bg-white border border-[#E2DDD4] py-[10px] px-[16px] rounded-[8px] hover:bg-slate-50 transition-colors shadow-sm">
+            &#8635; Refresh
+          </button>
+          <button 
+            onClick={handleDownloadReport} 
+            disabled={loading || filteredData.length === 0}
+            className="py-[10px] px-[16px] bg-[#059669] hover:bg-[#047857] text-white rounded-[8px] text-[13px] font-[700] transition-colors flex items-center gap-[6px] shadow-sm disabled:opacity-50"
+          >
+            &#11015; Download Filtered Report
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}
-      <div className="flex flex-wrap gap-[12px] mb-[20px]">
-        <input 
-          type="text" 
-          placeholder="Search by employee name or job title..." 
-          value={search} 
-          onChange={e => setSearch(e.target.value)}
-          className="flex-1 min-w-[250px] p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none focus:border-[#0D2B55] transition-colors shadow-sm"
+      <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm p-[16px] mb-[20px] flex flex-wrap gap-[12px]">
+        
+        <div className="flex-1 min-w-[200px] relative">
+          <input 
+            type="text" 
+            placeholder="Search staff name or ID..." 
+            value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full pl-[36px] pr-[16px] py-[10px] bg-[#FAF8F4] border border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
+          />
+          <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
+        </div>
+        
+        <SearchableDropdown 
+          value={officeFilter}
+          onChange={setOfficeFilter}
+          placeholder="All Office Locations"
+          widthClass="w-[180px]"
+          options={availableOffices.map(o => ({ value: o, label: o }))}
+        />
+
+        <SearchableDropdown 
+          value={mgrFilter}
+          onChange={setMgrFilter}
+          placeholder="All Managers"
+          widthClass="w-[200px]"
+          options={managerList.map(m => ({ value: m.id, label: m.name }))}
         />
         
-        {/* 🚨 UPGRADED: Dynamic Quarter Dropdown */}
-        <select value={qtr} onChange={e => setQtr(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm">
-          <option value="">All Quarters</option>
-          {dbQuarters.map(q => (
-             <option key={q._id} value={q._id}>{q.name} ({q.year})</option>
-          ))}
-        </select>
+        <div className="flex gap-[6px]">
+          <select value={filterYear} onChange={handleYearChange} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[100px]">
+            <option value="">All Years</option>
+            {availableYears.map(y => (
+               <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            <option value="">All Quarters</option>
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <SearchableDropdown 
+          value={statusFilter}
+          onChange={setStatusFilter}
+          placeholder="Appraisal Status"
+          widthClass="w-[180px]"
+          options={[
+            { value: 'WITH_CEO', label: 'Pending CEO' },
+            { value: 'APPROVED', label: 'CEO Approved' },
+            { value: 'NOT_APPROVED', label: 'Not Approved' },
+            { value: 'NOT_SUBMITTED', label: 'Not Submitted (Missing)' },
+          ]}
+        />
         
-        {/* 🚨 UPGRADED: Dynamic Company Code Dropdown */}
-        <select value={co} onChange={e => setCo(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm">
-          <option value="">All Companies</option>
+        <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
+          <option value="">All Company</option>
           {companyCodes.map(code => (
              <option key={`co-${code}`} value={code}>{code}</option>
           ))}
-        </select>
-        
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="p-[10px_14px] bg-white border border-[#E2DDD4] rounded-[10px] text-[13px] text-[#0f1923] outline-none cursor-pointer shadow-sm">
-          <option value="">All Statuses</option>
-          <option value="approved">CEO Approved</option>
-          <option value="pending">Pending CEO</option>
-          <option value="not_approved">Not Approved</option>
         </select>
       </div>
 
@@ -210,7 +533,7 @@ export default function CEOAllAppraisals() {
                   </td>
                 </tr>
               ) : (
-                filteredData.map((a, i) => {
+                currentItems.map((a, i) => {
                   const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`.trim() || 'Unknown';
                   const init1 = a.employeeId?.personalDetails?.firstName?.[0] || '';
                   const init2 = a.employeeId?.personalDetails?.lastName?.[0] || '';
@@ -231,13 +554,20 @@ export default function CEOAllAppraisals() {
                   }
 
                   return (
-                    <tr key={a._id} className={`hover:bg-[#FAF8F4] transition-colors ${i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'}`}>
+                    <tr key={a._id} className={`${a.isMissing ? 'bg-red-50/30' : i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'} hover:bg-[#FAF8F4] transition-colors`}>
                       <td className="p-[12px_16px] whitespace-nowrap">
                         <div className="flex items-center gap-[9px]">
                           <div className="w-[30px] h-[30px] rounded-[6px] bg-[#E2DDD4] text-[#0f1923] font-[800] flex items-center justify-center text-[11px]">
                             {init1}{init2}
                           </div>
-                          <div className="font-[600] text-[#0D2B55]">{empName}</div>
+                          <div>
+                            <div className="font-[600] text-[#0D2B55]">{empName}</div>
+                            {!a.isMissing && a.updatedAt && (
+                               <div className="text-[10px] text-[#6b7280]">
+                                 {new Date(a.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                               </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-[12px] text-[#0f1923]">
@@ -254,7 +584,9 @@ export default function CEOAllAppraisals() {
                         </span>
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        {iprf > 0 ? (
+                        {a.isMissing ? (
+                           <span className="text-[#6b7280] font-bold">—</span>
+                        ) : iprf > 0 ? (
                           <span className={`px-[8px] py-[4px] rounded-[6px] text-[11px] font-[800] border ${iprfStyle(iprf)}`}>
                             {iprf.toFixed(1)} ({iprfLabel(iprf)})
                           </span>
@@ -266,18 +598,22 @@ export default function CEOAllAppraisals() {
                         {proRataValue.toFixed(3)}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center font-[700] text-[#059669]">
-                        {awardDisplay}
+                        {a.isMissing ? '—' : awardDisplay}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
                         <StatusTag st={a.workflow?.status} />
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <button 
-                          onClick={() => setSelectedAppraisal(a)}
-                          className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
-                        >
-                          View
-                        </button>
+                        {a.isMissing ? (
+                           <span className="text-[10px] font-bold text-red-400 italic">No Data</span>
+                        ) : (
+                          <button 
+                            onClick={() => setSelectedAppraisal(a)}
+                            className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
+                          >
+                            View
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -287,14 +623,55 @@ export default function CEOAllAppraisals() {
           </table>
         </div>
         
-        {/* Footer count */}
-        <div className="p-[10px_16px] bg-[#FAF8F4] border-t border-[#E2DDD4] text-right text-[11px] font-[600] text-[#6b7280]">
-          {filteredData.length > 0 ? `${filteredData.length} appraisal${filteredData.length > 1 ? 's' : ''}` : '0 appraisals'}
-        </div>
+        {/* Table Pagination Footer */}
+        {filteredData.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filteredData.length)}</span> of <span className="text-[#0f1923]">{filteredData.length}</span> entries
+            </div>
+            
+            <div className="flex items-center gap-[4px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Read-Only Audit View Modal */}
-      {selectedAppraisal && (
+      {selectedAppraisal && !selectedAppraisal.isMissing && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
             
@@ -303,7 +680,7 @@ export default function CEOAllAppraisals() {
               <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">&times;</button>
             </div>
             
-            <div className="p-[24px] overflow-y-auto">
+            <div className="p-[24px] overflow-y-auto custom-scrollbar">
               
               <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
                 <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
@@ -326,7 +703,23 @@ export default function CEOAllAppraisals() {
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
-                  <div className="text-[22px] font-[800] text-[#059669]">{selectedAppraisal.stipAward ? `${selectedAppraisal.stipAward}%` : '—'}</div>
+                  {/* Unified Award Display Logic in Modal */}
+                  <div className="text-[22px] font-[800] text-[#059669]">
+                    {(() => {
+                      const iprf = selectedAppraisal.calculatedResults?.finalIprfScore || 0;
+                      const prMonths = selectedAppraisal.employeeId?.employmentDetails?.prorateValue || 12;
+                      const proRataValue = prMonths / 12;
+                      
+                      let displayAward = '—';
+                      if (cpPct !== null && iprf > 0) {
+                        const finalAw = (cpPct * iprf) * proRataValue;
+                        displayAward = `${finalAw.toFixed(2)}%`;
+                      } else if (selectedAppraisal.stipAward) {
+                        displayAward = `${selectedAppraisal.stipAward}%`;
+                      }
+                      return displayAward;
+                    })()}
+                  </div>
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>

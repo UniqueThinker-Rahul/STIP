@@ -7,10 +7,11 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const Notification = require('../models/Notification'); 
 
+// Import the Event Bus for decoupled background tasks
 const eventBus = require('../events/eventBus');
 
-// Import BOTH email senders directly
-const { sendPasswordResetEmail, sendAdminPasswordAlertEmail } = require('../utils/emailService');
+// 🚨 UPGRADE: Import the direct email sender for automated ICT Admin resets
+const { sendPasswordResetEmail } = require('../utils/emailService');
 
 const { authGuard, roleGuard } = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
@@ -62,20 +63,16 @@ router.post('/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 })
         if (adminEmail && adminEmail.includes('@')) {
           const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${rawResetToken}`;
 
-          console.log(`[AUTH] Dispatching automated ICT reset to: ${adminEmail}`);
-
-          // 🚨 FIX: "Fire-and-Forget" Email Dispatch (Removed 'await' for instant UI response)
-          sendPasswordResetEmail({
+          await sendPasswordResetEmail({
             toEmail: adminEmail,
             adminName: user.personalDetails?.firstName || 'Admin',
             resetUrl
-          }).catch(err => console.error("[AUTH] Email dispatch failed:", err));
+          });
 
-          // "Fire-and-Forget" Audit Log
-          logAudit({
+          await logAudit({
             user: user, role: 'ICT_ADMIN', action: 'PASSWORD_RESET_REQUESTED', category: 'AUTH', severity: 'MEDIUM',
             details: `ICT Admin requested an automated password reset. Email dispatched to ${adminEmail}.`, req
-          }).catch(e => console.error(e));
+          });
 
           return res.status(200).json({ 
             success: true, 
@@ -97,59 +94,21 @@ router.post('/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 })
       user.security.resetRequestDate = new Date();
       user.markModified('security'); 
       
-      await user.save({ validateBeforeSave: false });
+      await user.save();
       
-      // "Fire-and-Forget" Audit Log
-      logAudit({
+      await logAudit({
         user, role: 'SYSTEM', action: 'PASSWORD_RESET_REQUESTED', category: 'SECURITY', severity: 'MEDIUM',
         details: `User requested a manual password reset via public portal.`, req
-      }).catch(e => console.error(e));
+      });
 
-      const empName = `${user.personalDetails?.firstName} ${user.personalDetails?.lastName}`;
-      const requestDate = new Date().toLocaleString('en-GB');
+      const formattedDateTime = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      
+      eventBus.emit('PASSWORD_RESET_REQUESTED', { 
+         user: user, 
+         contactDataProvided: contactData,
+         formattedDateTime: formattedDateTime
+      });
 
-      console.log(`[AUTH] Queued manual reset request for ${empName} (${employeeId})`);
-
-      // 🚨 FIX: Fully decoupled background task. The response is sent instantly while this runs in the background.
-      setTimeout(async () => {
-        try {
-          // Find all active ICT admins
-          const ictAdmins = await User.find({
-            'employmentDetails.isActive': true,
-            'employmentDetails.isDeleted': { $ne: true },
-            $or: [{ 'security.role': 'ICT_ADMIN' }, { 'security.secondaryRoles': 'ICT_ADMIN' }]
-          });
-
-          for (const admin of ictAdmins) {
-            let targetEmail = null;
-            if (admin.personalDetails?.notificationEmails) {
-               targetEmail = typeof admin.personalDetails.notificationEmails.get === 'function' 
-                  ? admin.personalDetails.notificationEmails.get('ICT_ADMIN') 
-                  : admin.personalDetails.notificationEmails['ICT_ADMIN'];
-            }
-            if (!targetEmail) targetEmail = admin.username;
-
-            if (targetEmail && targetEmail.includes('@')) {
-              console.log(`[AUTH] Dispatching alert to ICT Admin: ${targetEmail}`);
-              await sendAdminPasswordAlertEmail({
-                toEmail: targetEmail,
-                adminName: admin.personalDetails?.firstName || 'Admin',
-                empName: empName,
-                empId: user.employeeId,
-                empTitle: user.employmentDetails?.jobTitle || 'Unknown',
-                empCompany: user.companyCode || 'FSM',
-                empOffice: user.employmentDetails?.officeLocation || 'Unassigned',
-                requestDate: requestDate,
-                contactDataProvided: contactData
-              }).catch(err => console.error("[AUTH] Failed to send alert email:", err));
-            }
-          }
-        } catch (backgroundError) {
-          console.error("[AUTH] Background email processing error:", backgroundError);
-        }
-      }, 0);
-
-      // Return instant success response
       return res.status(200).json({ 
         success: true, 
         isAdminReset: false,
@@ -157,6 +116,7 @@ router.post('/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 })
       });
     }
 
+    // Instantly return generic success to the user so they can't farm usernames
     res.status(200).json({ success: true, message: 'If the details match, a request has been sent to ICT Admin.' });
   } catch (error) {
     console.error("Forgot Password Error:", error);
@@ -185,6 +145,7 @@ router.post('/reset-password/:token', async (req, res) => {
     user.security.resetPasswordToken = undefined;
     user.security.resetPasswordExpire = undefined;
     
+    // Also clear any lingering manual requests if they exist
     user.security.resetRequested = false;
     user.security.isFirstLogin = false;
     user.markModified('security');

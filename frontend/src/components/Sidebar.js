@@ -7,7 +7,7 @@ import Cookies from 'js-cookie';
 import { 
   Home, Activity, CheckCircle, FileText, Users, BarChart, 
   UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
-  Lock, Shield, Database, Calendar, Mail, Calculator
+  Lock, Shield, Database, Calendar, Mail, Download, Calculator
 } from 'lucide-react';
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
@@ -168,7 +168,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           { name: 'Update Password', href: '/dashboard/ict/reset-password', icon: Lock },
           { name: 'System Status & E-mail Config', href: '/dashboard/ict/system', icon: Database },
           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar },
-          { name: 'Email Routing', href: '/dashboard/ict/notification-emails', icon: Mail }
+          { name: 'Email Routing', href: '/dashboard/ict/notification-emails', icon: Mail },
+          { name: 'System Backup', href: '/dashboard/ict/backup', icon: Database },
         ]
       },
       {

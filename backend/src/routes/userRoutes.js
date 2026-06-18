@@ -35,6 +35,64 @@ router.get('/', async (req, res) => {
   }
 });
 
+// 🚨 FIX: PATCH /api/v1/users/notification-email (Update or Remove own notification email)
+router.patch('/notification-email', async (req, res) => {
+  try {
+    // 🚨 FIX: Fallback to the logged-in user's role if the frontend doesn't send a specific targetRole
+    const roleKey = req.body.targetRole || req.body.role || req.user.role;
+    const emailValue = req.body.newEmail !== undefined ? req.body.newEmail : req.body.email;
+    const userId = req.body.userId || req.user.id;
+
+    if (!roleKey || typeof roleKey !== 'string') {
+      return res.status(400).json({ success: false, message: 'Valid role key is required to update notification emails.' });
+    }
+
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    if (!user.personalDetails) user.personalDetails = {};
+    if (!user.personalDetails.notificationEmails) user.personalDetails.notificationEmails = {};
+    
+    const isMap = user.personalDetails.notificationEmails instanceof Map;
+
+    if (!emailValue || emailValue.trim() === '') {
+      // REMOVE the email if the payload is empty
+      if (isMap) {
+        user.personalDetails.notificationEmails.delete(roleKey);
+      } else {
+        delete user.personalDetails.notificationEmails[roleKey];
+      }
+    } else {
+      // UPDATE or ADD the new email
+      if (isMap) {
+        user.personalDetails.notificationEmails.set(roleKey, emailValue);
+      } else {
+        user.personalDetails.notificationEmails = {
+          ...user.personalDetails.notificationEmails,
+          [roleKey]: emailValue
+        };
+      }
+    }
+
+    user.markModified('personalDetails.notificationEmails');
+    await user.save();
+
+    res.status(200).json({ 
+      success: true, 
+      message: (!emailValue || emailValue.trim() === '') 
+        ? 'Notification email removed successfully.' 
+        : 'Notification email updated successfully.' 
+    });
+
+  } catch (error) {
+    console.error("Notification Email Update Error:", error);
+    res.status(500).json({ success: false, message: 'Server error updating notification email.' });
+  }
+});
+
 // 🚨 CORRECTED: PATCH /api/v1/users/:id/alert-email (ICT Admin Route)
 router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
   try {
