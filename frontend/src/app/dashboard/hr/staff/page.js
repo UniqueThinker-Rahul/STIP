@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye, ChevronLeft, ChevronRight } from "lucide-react";
+// 🚨 FIX: Added Loader2 to the imports
+import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye, ChevronLeft, ChevronRight, CheckSquare, Loader2 } from "lucide-react";
 import api from '../../../../lib/api';
 
 const getInitials = (name) => {
@@ -135,6 +136,10 @@ export default function StaffManagement() {
 
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
+  // Bulk Selection States
+  const [selectedStaffIds, setSelectedStaffIds] = useState([]);
+  const [isBulkActing, setIsBulkActing] = useState(false);
+
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -170,6 +175,7 @@ export default function StaffManagement() {
   const fetchData = async () => {
     try {
       setLoading(true);
+      setSelectedStaffIds([]); // Clear selection on fetch
       const [resUsers, resBin, resMgrs, configRes] = await Promise.all([
         api.get('/users'),
         api.get('/users/recycle-bin').catch(() => ({ data: { data: [] } })), 
@@ -197,6 +203,7 @@ export default function StaffManagement() {
 
   useEffect(() => {
     setCurrentPage(1);
+    setSelectedStaffIds([]); // Clear selection when filters change
   }, [search, coFilter, roleFilter, managerFilter, isRecycleBinView]);
 
   useEffect(() => {
@@ -236,6 +243,103 @@ export default function StaffManagement() {
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentItems = data.slice(indexOfFirstItem, indexOfLastItem);
+
+  // Bulk Selection Logic
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      const currentPageIds = currentItems.map(item => item._id);
+      setSelectedStaffIds([...new Set([...selectedStaffIds, ...currentPageIds])]);
+    } else {
+      const currentPageIds = currentItems.map(item => item._id);
+      setSelectedStaffIds(selectedStaffIds.filter(id => !currentPageIds.includes(id)));
+    }
+  };
+
+  const handleSelectItem = (e, id) => {
+    if (e.target.checked) {
+      setSelectedStaffIds([...selectedStaffIds, id]);
+    } else {
+      setSelectedStaffIds(selectedStaffIds.filter(selectedId => selectedId !== id));
+    }
+  };
+
+  const isAllCurrentPageSelected = currentItems.length > 0 && currentItems.every(item => selectedStaffIds.includes(item._id));
+
+  // --- BULK ACTION EXECUTION HANDLERS ---
+  const handleBulkDelete = () => {
+    if (selectedStaffIds.length === 0) return;
+    
+    showDialog(
+      'confirm',
+      'Confirm Bulk Deletion',
+      `Are you sure you want to move ${selectedStaffIds.length} selected employees to the Recycle Bin?`,
+      async () => {
+        closeDialog();
+        setIsBulkActing(true);
+        try {
+          await Promise.all(selectedStaffIds.map(id => api.delete(`/users/${id}`)));
+          setSuccessMsg(`${selectedStaffIds.length} employees moved to Recycle Bin.`);
+          setSelectedStaffIds([]);
+          fetchData();
+          setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (e) {
+          showDialog('alert', 'Error', "Failed to delete some or all selected users.");
+        } finally {
+          setIsBulkActing(false);
+        }
+      }
+    );
+  };
+
+  const handleBulkRestore = () => {
+    if (selectedStaffIds.length === 0) return;
+
+    showDialog(
+      'confirm',
+      'Confirm Bulk Restore',
+      `Are you sure you want to restore ${selectedStaffIds.length} selected employees back to the active directory?`,
+      async () => {
+        closeDialog();
+        setIsBulkActing(true);
+        try {
+          await Promise.all(selectedStaffIds.map(id => api.patch(`/users/${id}/restore`)));
+          setSuccessMsg(`${selectedStaffIds.length} employees successfully restored.`);
+          setSelectedStaffIds([]);
+          fetchData();
+          setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (e) {
+          showDialog('alert', 'Error', "Failed to restore some or all selected users.");
+        } finally {
+          setIsBulkActing(false);
+        }
+      }
+    );
+  };
+
+  const handleBulkPermanentDelete = () => {
+    if (selectedStaffIds.length === 0) return;
+
+    showDialog(
+      'confirm',
+      'Bulk Permanent Deletion',
+      `WARNING: This will permanently erase ${selectedStaffIds.length} selected employees from the database. This action CANNOT be undone. Are you sure?`,
+      async () => {
+        closeDialog();
+        setIsBulkActing(true);
+        try {
+          await Promise.all(selectedStaffIds.map(id => api.delete(`/users/${id}/permanent`)));
+          setSuccessMsg(`${selectedStaffIds.length} employees permanently deleted.`);
+          setSelectedStaffIds([]);
+          fetchData();
+          setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (e) {
+          showDialog('alert', 'Error', "Failed to permanently delete some or all selected users.");
+        } finally {
+          setIsBulkActing(false);
+        }
+      }
+    );
+  };
 
   const handleSaveEdit = async () => {
     if (!editingStaff) return;
@@ -523,7 +627,7 @@ export default function StaffManagement() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 relative">
+    <div className="p-6 max-w-7xl mx-auto space-y-6 relative pb-24">
       
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200 gap-4">
@@ -554,6 +658,32 @@ export default function StaffManagement() {
       {successMsg && (
         <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg flex items-center gap-2 animate-in fade-in duration-300">
           <Check className="w-5 h-5 text-green-600" /> {successMsg}
+        </div>
+      )}
+
+      {/* 🚨 NEW: Bulk Actions Banner */}
+      {selectedStaffIds.length > 0 && (
+        <div className="bg-[#EFF6FF] border border-[#BFDBFE] p-3 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-200 shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-bold text-[#1E40AF]">
+            <CheckSquare className="w-5 h-5" /> 
+            {selectedStaffIds.length} Employee(s) Selected
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {isRecycleBinView ? (
+              <>
+                <button onClick={handleBulkRestore} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#065F46] bg-[#D1FAE5] hover:bg-[#A7F3D0] border border-[#A7F3D0] rounded-lg transition-colors shadow-sm disabled:opacity-50">
+                  {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Restore Selected
+                </button>
+                <button onClick={handleBulkPermanentDelete} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm disabled:opacity-50">
+                  {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Permanently Delete Selected
+                </button>
+              </>
+            ) : (
+              <button onClick={handleBulkDelete} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#991B1B] bg-[#FEF2F2] hover:bg-[#FECACA] border border-[#FECACA] rounded-lg transition-colors shadow-sm disabled:opacity-50">
+                {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Move Selected to Recycle Bin
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -629,6 +759,15 @@ export default function StaffManagement() {
           <table className="w-full text-left">
             <thead className={isRecycleBinView ? 'bg-red-50/50 border-b border-red-100' : 'bg-slate-50 border-b'}>
               <tr className="text-xs text-slate-500 uppercase tracking-wider">
+                <th className="px-4 py-4 w-12 text-center">
+                  <input 
+                    type="checkbox" 
+                    checked={isAllCurrentPageSelected}
+                    onChange={handleSelectAll}
+                    disabled={currentItems.length === 0}
+                    className="w-4 h-4 rounded border-gray-300 text-[#0D2B55] focus:ring-[#0D2B55] cursor-pointer"
+                  />
+                </th>
                 <th className="px-6 py-4 font-bold">Employee</th>
                 <th className="px-6 py-4 font-bold">Job Title</th>
                 <th className="px-6 py-4 font-bold text-center">ID</th>
@@ -639,18 +778,27 @@ export default function StaffManagement() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan="6" className="py-12 text-center text-slate-400">Syncing with database...</td></tr>
+                <tr><td colSpan="7" className="py-12 text-center text-slate-400">Syncing with database...</td></tr>
               ) : data.length === 0 ? (
-                <tr><td colSpan="6" className="py-12 text-center text-slate-400">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching filters.'}</td></tr>
+                <tr><td colSpan="7" className="py-12 text-center text-slate-400">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching filters.'}</td></tr>
               ) : currentItems.map((e) => {
                 const roleKey = e.security?.role || 'EMPLOYEE';
                 const roleInfo = ROLE_COLOURS[roleKey];
                 const secondaryRoles = e.security?.secondaryRoles || [];
                 const mgr = e.employmentDetails?.reportingTo?.personalDetails;
                 const mgrName = mgr ? `${mgr.firstName} ${mgr.lastName}` : 'Unassigned';
+                const isSelected = selectedStaffIds.includes(e._id);
 
                 return (
-                  <tr key={e._id} className={isRecycleBinView ? 'hover:bg-red-50/30' : 'hover:bg-slate-50'}>
+                  <tr key={e._id} className={`${isRecycleBinView ? 'hover:bg-red-50/30' : 'hover:bg-slate-50'} ${isSelected ? 'bg-blue-50/40' : ''} transition-colors`}>
+                    <td className="px-4 py-3 text-center">
+                      <input 
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(event) => handleSelectItem(event, e._id)}
+                        className="w-4 h-4 rounded border-gray-300 text-[#0D2B55] focus:ring-[#0D2B55] cursor-pointer"
+                      />
+                    </td>
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-3">
                         <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold ${isRecycleBinView ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'}`}>
@@ -709,7 +857,7 @@ export default function StaffManagement() {
           </table>
         </div>
 
-        {/* 🚨 UPGRADED: Table Pagination Footer with Direct Page Selection */}
+        {/* Table Pagination Footer */}
         {data.length > itemsPerPage && (
           <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-white flex items-center justify-between mt-auto">
             <div className="text-[12px] text-[#6b7280] font-[600]">
@@ -755,6 +903,50 @@ export default function StaffManagement() {
           </div>
         )}
       </div>
+
+      {/* Floating Bulk Action Bar */}
+      {selectedStaffIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 animate-in slide-in-from-bottom-10 duration-300 z-40 border border-slate-700">
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <CheckSquare className="w-5 h-5 text-blue-400" />
+            <span>{selectedStaffIds.length} {selectedStaffIds.length === 1 ? 'employee' : 'employees'} selected</span>
+          </div>
+          
+          <div className="w-px h-6 bg-slate-700"></div>
+
+          <div className="flex gap-2">
+            {!isRecycleBinView ? (
+              <button 
+                onClick={handleBulkDelete}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-full transition-colors"
+              >
+                <Trash2 className="w-4 h-4" /> Move to Recycle Bin
+              </button>
+            ) : (
+              <>
+                <button 
+                  onClick={handleBulkRestore}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-full transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4" /> Restore Selected
+                </button>
+                <button 
+                  onClick={handleBulkPermanentDelete}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-full transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" /> Permanently Delete
+                </button>
+              </>
+            )}
+            <button 
+              onClick={() => setSelectedStaffIds([])}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-full transition-colors"
+            >
+              <X className="w-4 h-4" /> Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* View Details Modal */}
       {viewingStaff && (

@@ -35,67 +35,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 🚨 FIX: PATCH /api/v1/users/notification-email (Update or Remove own notification email)
-router.patch('/notification-email', async (req, res) => {
-  try {
-    // FIX: Fallback to the logged-in user's role if the frontend doesn't send a specific targetRole
-    const roleKey = req.body.targetRole || req.body.role || req.user.role;
-    const emailValue = req.body.newEmail !== undefined ? req.body.newEmail : req.body.email;
-    const userId = req.body.userId || req.user.id;
-
-    if (!roleKey || typeof roleKey !== 'string') {
-      return res.status(400).json({ success: false, message: 'Valid role key is required to update notification emails.' });
-    }
-
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-
-    // Ensure map exists
-    if (!user.personalDetails) user.personalDetails = {};
-    if (!user.personalDetails.notificationEmails) {
-      user.personalDetails.notificationEmails = new Map();
-    }
-    
-    const isMap = user.personalDetails.notificationEmails instanceof Map;
-
-    if (!emailValue || emailValue.trim() === '') {
-      // REMOVE the email if the payload is empty
-      if (isMap) {
-        user.personalDetails.notificationEmails.delete(roleKey);
-      } else {
-        delete user.personalDetails.notificationEmails[roleKey];
-      }
-    } else {
-      // UPDATE or ADD the new email
-      if (isMap) {
-        user.personalDetails.notificationEmails.set(roleKey, emailValue);
-      } else {
-        user.personalDetails.notificationEmails = {
-          ...user.personalDetails.notificationEmails,
-          [roleKey]: emailValue
-        };
-      }
-    }
-
-    user.markModified('personalDetails.notificationEmails');
-    await user.save();
-
-    res.status(200).json({ 
-      success: true, 
-      message: (!emailValue || emailValue.trim() === '') 
-        ? 'Notification email removed successfully.' 
-        : 'Notification email updated successfully.' 
-    });
-
-  } catch (error) {
-    console.error("Notification Email Update Error:", error);
-    res.status(500).json({ success: false, message: 'Server error updating notification email.' });
-  }
-});
-
 // 🚨 CORRECTED: PATCH /api/v1/users/:id/alert-email (ICT Admin Route)
 router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
   try {
@@ -108,51 +47,37 @@ router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    // Ensure map exists
     if (!user.personalDetails) user.personalDetails = {};
-    if (!user.personalDetails.notificationEmails) {
-      user.personalDetails.notificationEmails = new Map();
-    }
 
     // Handle Mongoose Map vs Object safely for the dynamic email storage
     if (user.personalDetails.notificationEmails instanceof Map) {
-      if (!newEmail || newEmail.trim() === '') {
-        user.personalDetails.notificationEmails.delete(targetRole);
-      } else {
-        user.personalDetails.notificationEmails.set(targetRole, newEmail);
-      }
+      user.personalDetails.notificationEmails.set(targetRole, newEmail);
     } else {
-      if (!newEmail || newEmail.trim() === '') {
-         delete user.personalDetails.notificationEmails[targetRole];
-      } else {
-         user.personalDetails.notificationEmails = {
-           ...user.personalDetails.notificationEmails,
-           [targetRole]: newEmail
-         };
-      }
+      user.personalDetails.notificationEmails = {
+        ...user.personalDetails.notificationEmails,
+        [targetRole]: newEmail
+      };
     }
 
     // Force Mongoose to recognize the change in the mixed/nested object
     user.markModified('personalDetails.notificationEmails');
     await user.save();
 
-    // Fire the In-App Bell Notification to the user only if email was added
-    if (newEmail && newEmail.trim() !== '') {
-      await Notification.create({
-        recipient: user._id,
-        sender: req.user.id,
-        title: 'Alert Email Updated',
-        message: `The ICT Admin has updated your notification email address for the ${targetRole.replace('_', ' ')} portal to: ${newEmail}`,
-        type: 'SYSTEM_ALERT',
-        targetRole: targetRole
-      });
-    }
+    // Fire the In-App Bell Notification to the user
+    await Notification.create({
+      recipient: user._id,
+      sender: req.user.id,
+      title: 'Alert Email Updated',
+      message: `The ICT Admin has updated your notification email address for the ${targetRole.replace('_', ' ')} portal to: ${newEmail}`,
+      type: 'SYSTEM_ALERT',
+      targetRole: targetRole
+    });
 
     const { logAudit } = require('../utils/logger');
     await logAudit({
       user: req.user, role: req.user.role, action: 'UPDATED_NOTIFICATION_PREF', 
       category: 'USER_MANAGEMENT', severity: 'LOW',
-      details: `ICT Admin updated notification email for ${user.username} (${targetRole}) to: ${newEmail || '[REMOVED]'}`, req
+      details: `ICT Admin updated notification email for ${user.username} (${targetRole}) to: ${newEmail}`, req
     });
 
     res.json({ success: true, message: `Preferences updated for ${targetRole.replace('_', ' ')}.` });
@@ -264,8 +189,7 @@ router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', '
   try {
     const { 
       firstName, lastName, jobTitle, officeLocation, companyCode, 
-      dateOfHire, role, secondaryRoles, reportingTo, salary,
-      notificationEmails
+      dateOfHire, role, secondaryRoles, reportingTo, salary 
     } = req.body;
 
     const user = await User.findById(req.params.id);
@@ -285,21 +209,6 @@ router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', '
     // Securely handle Array assignment for Secondary Roles
     if (secondaryRoles !== undefined) {
       user.security.secondaryRoles = Array.isArray(secondaryRoles) ? secondaryRoles : [secondaryRoles];
-    }
-
-    if (notificationEmails && typeof notificationEmails === 'object') {
-      if (!user.personalDetails.notificationEmails) {
-         user.personalDetails.notificationEmails = new Map();
-      }
-      Object.keys(notificationEmails).forEach(key => {
-         const val = notificationEmails[key];
-         if (!val || String(val).trim() === '') {
-            user.personalDetails.notificationEmails.delete(key);
-         } else {
-            user.personalDetails.notificationEmails.set(key, String(val).trim());
-         }
-      });
-      user.markModified('personalDetails.notificationEmails');
     }
 
     await user.save();

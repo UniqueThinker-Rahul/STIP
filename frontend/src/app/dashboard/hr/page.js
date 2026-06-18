@@ -281,50 +281,50 @@ export default function HRDashboard() {
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-semibold text-slate-800">Financial Resilience (14%)</span>
-                  <span className="text-xs font-bold text-blue-600">{financialResilience}%</span>
+                  <span className="text-xs font-bold text-blue-600">{financialResilience || 0}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${financialResilience}%` }}></div>
+                  <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${financialResilience || 0}%` }}></div>
                 </div>
               </div>
               
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-semibold text-slate-800">Operational Effectiveness (45%)</span>
-                  <span className="text-xs font-bold text-emerald-600">{operationalEffectiveness}%</span>
+                  <span className="text-xs font-bold text-emerald-600">{operationalEffectiveness || 0}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${operationalEffectiveness}%` }}></div>
+                  <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${operationalEffectiveness || 0}%` }}></div>
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-semibold text-slate-800">Human Capital (26%)</span>
-                  <span className="text-xs font-bold text-amber-500">{humanCapital}%</span>
+                  <span className="text-xs font-bold text-amber-500">{humanCapital || 0}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${humanCapital}%` }}></div>
+                  <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${humanCapital || 0}%` }}></div>
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-semibold text-slate-800">Safety & Environment (12%)</span>
-                  <span className="text-xs font-bold text-teal-600">{safetyEnvironment}%</span>
+                  <span className="text-xs font-bold text-teal-600">{safetyEnvironment || 0}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-teal-500 rounded-full transition-all" style={{ width: `${safetyEnvironment}%` }}></div>
+                  <div className="h-full bg-teal-500 rounded-full transition-all" style={{ width: `${safetyEnvironment || 0}%` }}></div>
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-semibold text-slate-800">Reputational Capital (3%)</span>
-                  <span className="text-xs font-bold text-purple-600">{reputationalCapital}%</span>
+                  <span className="text-xs font-bold text-purple-600">{reputationalCapital || 0}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${reputationalCapital}%` }}></div>
+                  <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${reputationalCapital || 0}%` }}></div>
                 </div>
               </div>
             </div>
@@ -332,9 +332,9 @@ export default function HRDashboard() {
             <div className="bg-slate-900 rounded-xl p-4 flex justify-between items-center mt-2 shadow-sm border border-slate-800">
               <span className="text-sm font-bold text-slate-300">BSC Raw Score &rarr; CP%</span>
               <div>
-                <span className="text-xl font-black text-amber-300">{bscRawScore.toFixed(2)}</span>
+                <span className="text-xl font-black text-amber-300">{(bscRawScore || 0).toFixed(2)}</span>
                 <span className="text-xs text-slate-500 mx-2">/ 100 &rarr;</span>
-                <span className="text-xl font-black text-amber-300">{cpPct.toFixed(2)}%</span>
+                <span className="text-xl font-black text-amber-300">{(cpPct || 0).toFixed(2)}%</span>
               </div>
             </div>
 
