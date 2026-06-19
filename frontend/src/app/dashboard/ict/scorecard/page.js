@@ -11,6 +11,9 @@ export default function ICTScorecardControl() {
   const [loading, setLoading] = useState(true);
   const [confirmModal, setConfirmModal] = useState({ open: false, type: '' });
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // 🚨 NEW: Custom Alert Modal state to replace native window.alert()
+  const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: '' });
 
   const fetchMetrics = async () => {
     try {
@@ -41,9 +44,25 @@ export default function ICTScorecardControl() {
       // Close modal and refresh data
       setConfirmModal({ open: false, type: '' });
       await fetchMetrics();
-      alert(`Scorecard successfully ${newLockState ? 'locked' : 'unlocked'}.`);
+      
+      // 🚨 FIX: Replaced native alert with Custom Centered Modal
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Successful', 
+        message: `Scorecard successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
+        type: 'success' 
+      });
+
     } catch (error) {
-      alert("Failed to update scorecard lock status.");
+      setConfirmModal({ open: false, type: '' });
+      
+      // 🚨 FIX: Replaced native alert with Custom Centered Modal
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Failed', 
+        message: 'Failed to update scorecard lock status.', 
+        type: 'error' 
+      });
       console.error(error);
     } finally {
       setIsProcessing(false);
@@ -223,6 +242,29 @@ export default function ICTScorecardControl() {
                   {isProcessing ? 'Processing...' : (confirmModal.type === 'unlock' ? 'Yes, Unlock' : 'Yes, Lock')}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚨 NEW: Universal Success/Error Acknowledge Modal */}
+      {alertModal.show && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[200] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
+            <div className="p-[30px_22px] text-center">
+              <div className="text-[48px] mb-[16px] leading-none">
+                {alertModal.type === 'error' ? '❌' : '✅'}
+              </div>
+              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{alertModal.title}</div>
+              <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
+                {alertModal.message}
+              </div>
+              <button 
+                onClick={() => setAlertModal({ show: false, title: '', message: '', type: '' })} 
+                className="w-full p-[12px] rounded-[10px] text-[13px] font-[800] text-white bg-[#0D2B55] hover:bg-[#1a3d6e] transition-colors shadow-md"
+              >
+                Acknowledge
+              </button>
             </div>
           </div>
         </div>

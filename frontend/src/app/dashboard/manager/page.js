@@ -67,17 +67,21 @@ export default function ManagerDashboard() {
 
   const pendingHr = submissions.filter(a => a.workflow?.status === 'SUBMITTED').length;
   const approved = submissions.filter(a => a.workflow?.status === 'APPROVED' || a.workflow?.status === 'APPROVED_BY_HR').length; 
-  const epRated = submissions.filter(a => a.calculatedResults?.finalIprfScore >= 1.3).length;
+  
+  // 🚨 APPLIED: Strict threshold for EP counting
+  const epRated = submissions.filter(a => a.calculatedResults?.finalIprfScore >= 1.300).length;
 
   const { cpPct, bscRawScore, financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital } = metrics;
 
-  const awNIf = cpPct !== null ? `${cpPct.toFixed(2)}% × 0.7 × Pro-Rata` : 'CP% × 0.7 × Pro-Rata';
-  const awEf = cpPct !== null ? `${cpPct.toFixed(2)}% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
-  const awEPf = cpPct !== null ? `${cpPct.toFixed(2)}% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
+  const safeCpPct = cpPct || 0;
   
-  const awNI = cpPct !== null ? (cpPct * 0.7).toFixed(2) + '%' : '—';
-  const awE = cpPct !== null ? (cpPct * 1.0).toFixed(2) + '%' : '—';
-  const awEP = cpPct !== null ? (cpPct * 1.3).toFixed(2) + '%' : '—';
+  const awNIf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 0.7 × Pro-Rata` : 'CP% × 0.7 × Pro-Rata';
+  const awEf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
+  const awEPf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
+  
+  const awNI = safeCpPct > 0 ? (safeCpPct * 0.7).toFixed(2) + '%' : '—';
+  const awE = safeCpPct > 0 ? (safeCpPct * 1.0).toFixed(2) + '%' : '—';
+  const awEP = safeCpPct > 0 ? (safeCpPct * 1.3).toFixed(2) + '%' : '—';
 
   const recentActivity = [...submissions, ...drafts]
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
@@ -106,10 +110,11 @@ export default function ManagerDashboard() {
         {/* Navy Card: CP Score */}
         <div className="rounded-[14px] p-[16px_18px] bg-[#0D2B55] text-white min-w-0">
           <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-white/50">Company Performance</div>
-          <div className="text-[30px] font-[800] leading-[1] text-[#e8c96a]">{cpPct.toFixed(2)}%</div>
-          <div className="text-[11px] mt-[5px] text-white/50">BSC Score: {bscRawScore.toFixed(2)} / 100</div>
+          {/* 🚨 FIX: Applied safe fallback to prevent crash */}
+          <div className="text-[30px] font-[800] leading-[1] text-[#e8c96a]">{(cpPct || 0).toFixed(2)}%</div>
+          <div className="text-[11px] mt-[5px] text-white/50">BSC Score: {(bscRawScore || 0).toFixed(2)} / 100</div>
           <div className="mt-[8px] h-[5px] bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[0.6s]" style={{ width: `${bscRawScore}%` }}></div>
+            <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[0.6s]" style={{ width: `${bscRawScore || 0}%` }}></div>
           </div>
           <div className="text-[10px] mt-[5px] text-white/35">Max cap 15% &middot; Board approved</div>
         </div>
@@ -119,14 +124,6 @@ export default function ManagerDashboard() {
           <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-[#6b7280]">My Direct Reports</div>
           <div className="text-[30px] font-[800] leading-[1] text-[#0D2B55]">{team.length}</div>
           <div className="text-[11px] mt-[5px] text-[#6b7280]">STIP-eligible employees assigned to you</div>
-          {/* <div className="flex gap-[5px] mt-[8px] flex-wrap">
-            {['FSM', 'CDU', 'NAR', 'GUM'].map(code => {
-               const count = team.filter(t => t.companyCode === code).length;
-               if (count === 0) return null;
-               const bg = code === 'FSM' ? 'bg-[#DBEAFE] text-[#1E40AF]' : code === 'CDU' ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEF3C7] text-[#92400E]';
-               return <span key={code} className={`text-[10px] font-[700] px-[7px] py-[2px] rounded-full ${bg}`}>{code} {count}</span>
-            })}
-          </div> */}
         </div>
 
         {/* White Card: EP Rated */}
@@ -180,13 +177,13 @@ export default function ManagerDashboard() {
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Financial Resilience</span>
                 <div className="flex items-center gap-[8px] shrink-0">
                   <span className="text-[10px] text-[#6b7280]">Wt: 14%</span>
-                  <span className="text-[12px] font-[800] text-[#3B82F6]">{financialResilience}%</span>
+                  <span className="text-[12px] font-[800] text-[#3B82F6]">{financialResilience || 0}%</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#3B82F6] rounded-full transition-all" style={{ width: `${financialResilience}%` }}></div>
+                <div className="h-full bg-[#3B82F6] rounded-full transition-all" style={{ width: `${financialResilience || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{(financialResilience * 0.14).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((financialResilience || 0) * 0.14).toFixed(2)} pts</strong></div>
             </div>
             
             <div>
@@ -194,13 +191,13 @@ export default function ManagerDashboard() {
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Operational Effectiveness</span>
                 <div className="flex items-center gap-[8px] shrink-0">
                   <span className="text-[10px] text-[#6b7280]">Wt: 45%</span>
-                  <span className="text-[12px] font-[800] text-[#059669]">{operationalEffectiveness}%</span>
+                  <span className="text-[12px] font-[800] text-[#059669]">{operationalEffectiveness || 0}%</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#059669] rounded-full transition-all" style={{ width: `${operationalEffectiveness}%` }}></div>
+                <div className="h-full bg-[#059669] rounded-full transition-all" style={{ width: `${operationalEffectiveness || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{(operationalEffectiveness * 0.45).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((operationalEffectiveness || 0) * 0.45).toFixed(2)} pts</strong></div>
             </div>
 
             <div>
@@ -208,13 +205,13 @@ export default function ManagerDashboard() {
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Human Capital</span>
                 <div className="flex items-center gap-[8px] shrink-0">
                   <span className="text-[10px] text-[#6b7280]">Wt: 26%</span>
-                  <span className="text-[12px] font-[800] text-[#F59E0B]">{humanCapital}%</span>
+                  <span className="text-[12px] font-[800] text-[#F59E0B]">{humanCapital || 0}%</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#F59E0B] rounded-full transition-all" style={{ width: `${humanCapital}%` }}></div>
+                <div className="h-full bg-[#F59E0B] rounded-full transition-all" style={{ width: `${humanCapital || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{(humanCapital * 0.26).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((humanCapital || 0) * 0.26).toFixed(2)} pts</strong></div>
             </div>
 
             <div>
@@ -222,13 +219,13 @@ export default function ManagerDashboard() {
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Safety & Environment</span>
                 <div className="flex items-center gap-[8px] shrink-0">
                   <span className="text-[10px] text-[#6b7280]">Wt: 12%</span>
-                  <span className="text-[12px] font-[800] text-[#10B981]">{safetyEnvironment}%</span>
+                  <span className="text-[12px] font-[800] text-[#10B981]">{safetyEnvironment || 0}%</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#10B981] rounded-full transition-all" style={{ width: `${safetyEnvironment}%` }}></div>
+                <div className="h-full bg-[#10B981] rounded-full transition-all" style={{ width: `${safetyEnvironment || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{(safetyEnvironment * 0.12).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((safetyEnvironment || 0) * 0.12).toFixed(2)} pts</strong></div>
             </div>
 
             <div>
@@ -236,21 +233,22 @@ export default function ManagerDashboard() {
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Reputational Capital</span>
                 <div className="flex items-center gap-[8px] shrink-0">
                   <span className="text-[10px] text-[#6b7280]">Wt: 3%</span>
-                  <span className="text-[12px] font-[800] text-[#8B5CF6]">{reputationalCapital}%</span>
+                  <span className="text-[12px] font-[800] text-[#8B5CF6]">{reputationalCapital || 0}%</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#8B5CF6] rounded-full transition-all" style={{ width: `${reputationalCapital}%` }}></div>
+                <div className="h-full bg-[#8B5CF6] rounded-full transition-all" style={{ width: `${reputationalCapital || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{(reputationalCapital * 0.03).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((reputationalCapital || 0) * 0.03).toFixed(2)} pts</strong></div>
             </div>
 
             <div className="bg-[#0D2B55] rounded-[9px] p-[11px_14px] flex justify-between items-center mt-[4px]">
               <span className="text-[12px] font-[700] text-white/60">BSC Raw Score &rarr; CP%</span>
               <div>
-                <span className="text-[20px] font-[800] text-[#e8c96a]">{bscRawScore.toFixed(2)}</span>
+                {/* 🚨 FIX: Applied safe fallback */}
+                <span className="text-[20px] font-[800] text-[#e8c96a]">{(bscRawScore || 0).toFixed(2)}</span>
                 <span className="text-[12px] text-white/50"> / 100 &rarr; </span>
-                <span className="text-[16px] font-[800] text-[#e8c96a]">{cpPct.toFixed(2)}%</span>
+                <span className="text-[16px] font-[800] text-[#e8c96a]">{(cpPct || 0).toFixed(2)}%</span>
               </div>
             </div>
 
@@ -263,14 +261,15 @@ export default function ManagerDashboard() {
             <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFFBEB] flex items-center justify-center text-[13px] shrink-0">&#128176;</div>
             <div>
               <div className="text-[13px] font-[700] text-[#0D2B55]">STIP Award Preview by Rating</div>
-              <div className="text-[11px] text-[#6b7280]">CP = {cpPct.toFixed(2)}% &middot; Pro-Rata = 1.000 (full year)</div>
+              {/* 🚨 FIX: Applied safe fallback */}
+              <div className="text-[11px] text-[#6b7280]">CP = {(cpPct || 0).toFixed(2)}% &middot; Pro-Rata = 1.000 (full year)</div>
             </div>
           </div>
           <div className="p-[14px_16px] flex flex-col gap-[9px]">
             <div className="bg-[#FEE2E2] border border-[#FECACA] rounded-[10px] p-[12px_14px] flex justify-between items-center gap-[10px]">
               <div className="min-w-0">
                 <div className="text-[13px] font-[700] text-[#991B1B]">0.0 &mdash; Less than Satisfactory</div>
-                <div className="text-[11px] text-[#991B1B]/75 mt-[2px]">{cpPct.toFixed(2)}% &times; 0.0 &times; Pro-Rata &times; Salary</div>
+                <div className="text-[11px] text-[#991B1B]/75 mt-[2px]">{(cpPct || 0).toFixed(2)}% &times; 0.0 &times; Pro-Rata &times; Salary</div>
               </div>
               <div className="text-[22px] font-[800] text-[#991B1B] shrink-0">0.00%</div>
             </div>

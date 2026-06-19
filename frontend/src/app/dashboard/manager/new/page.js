@@ -23,7 +23,7 @@ const CRITERIA = [
   { 
     id: 'initiative', 
     short: 'Initiative', 
-    name: "Behaviors & Initiative", 
+    name: "Behaviors", 
     wt: 0.20, 
     pct: "20%", 
     desc: "Does the employee take responsibility, plan tasks, and solve problems proactively?",
@@ -390,22 +390,22 @@ function NewAppraisalForm() {
   let scoreTarget = '0.0';
   
   if (ratedCount === 6) {
-    if (rawIPRF < 0.6) { 
+    if (rawIPRF < 0.700) { 
       calculatedIPRF = 0.0; 
       scoreBucket = 'ls'; 
       scoreTarget = '0.0'; 
     }
-    else if (rawIPRF >= 0.6 && rawIPRF < 0.9) { 
+    else if (rawIPRF >= 0.700 && rawIPRF < 1.000) { 
       calculatedIPRF = 0.7; 
       scoreBucket = 'ni'; 
       scoreTarget = '0.7'; 
     }
-    else if (rawIPRF >= 0.9 && rawIPRF < 1.2) { 
+    else if (rawIPRF >= 1.000 && rawIPRF < 1.300) { 
       calculatedIPRF = 1.0; 
       scoreBucket = 'e'; 
       scoreTarget = '1.0'; 
     }
-    else if (rawIPRF >= 1.2) { 
+    else if (rawIPRF >= 1.300) { 
       calculatedIPRF = 1.3; 
       scoreBucket = 'ep'; 
       scoreTarget = '1.3'; 

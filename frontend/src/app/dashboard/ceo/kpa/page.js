@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+// 🚨 FIXED: Corrected the relative path to go up 4 levels to access 'lib' and 'components'
 import api from '../../../../lib/api';
+import StipCategoryChart from '../../../../components/charts/StipCategoryChart';
 
 const KPAS = [
   { name: 'Financial Resilience', wt: 14, color: '#3B82F6' },
@@ -70,9 +72,9 @@ export default function KPAScorecard() {
   const anyKpaEntered = kpaActuals.some(v => v !== null);
   
   if (anyKpaEntered) {
-    bscRaw = kpaActuals.reduce((sum, val, idx) => sum + ((val || 0) / 100 * KPAS[idx].wt), 0);
-    // Convert to percentage base 100
-    bscRaw = bscRaw * 100;
+    // 🚨 FIXED: The * 100 line was removed as it was inflating 100% to 10,000. 
+    bscRaw = kpaActuals.reduce((sum, val, idx) => sum + ((val || 0) * (KPAS[idx].wt / 100)), 0);
+    
     // CP is BSC * 15% Max Cap
     cpPct = bscRaw * 0.15;
   }
