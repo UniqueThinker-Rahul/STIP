@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Plus, Edit2, Trash2, Check, X, AlertTriangle, Loader2 } from 'lucide-react';
+import { Settings, Plus, Edit2, Trash2, Check, X, AlertTriangle, Loader2, Info } from 'lucide-react';
 import api from '../../../../lib/api';
 
 export default function SystemConfiguration() {
@@ -14,9 +14,32 @@ export default function SystemConfiguration() {
   const [editingItem, setEditingItem] = useState({ oldVal: '', newVal: '' });
   
   // Feedback states
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
   const [processing, setProcessing] = useState(false);
+
+  // 🚨 NEW: Universal Custom Modal State
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'alert', // 'alert', 'error', 'warning', 'confirm'
+    title: '',
+    message: '',
+    onConfirm: null,
+    onCancel: null
+  });
+
+  const closeDialog = () => {
+    setModalConfig({ ...modalConfig, isOpen: false });
+  };
+
+  const showDialog = (type, title, message, onConfirm = closeDialog, onCancel = closeDialog) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      onCancel
+    });
+  };
 
   useEffect(() => {
     fetchConfig();
@@ -28,20 +51,9 @@ export default function SystemConfiguration() {
       const res = await api.get('/config/dropdowns');
       setConfig(res.data?.data || { companyCodes: [], officeLocations: [], jobTitles: [] });
     } catch (err) {
-      setErrorMsg("Failed to load system configuration.");
+      showDialog('error', 'Data Retrieval Failed', "Failed to load system configuration.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const showFeedback = (msg, isError = false) => {
-    if (isError) {
-      setErrorMsg(msg);
-      setSuccessMsg('');
-    } else {
-      setSuccessMsg(msg);
-      setErrorMsg('');
-      setTimeout(() => setSuccessMsg(''), 4000);
     }
   };
 
@@ -55,9 +67,9 @@ export default function SystemConfiguration() {
       });
       setConfig(res.data.data);
       setNewItemValue('');
-      showFeedback("Item added successfully.");
+      showDialog('alert', 'Success', "Item added successfully.");
     } catch (err) {
-      showFeedback(err.response?.data?.message || "Failed to add item.", true);
+      showDialog('error', 'Action Denied', err.response?.data?.message || "Failed to add item.");
     } finally {
       setProcessing(false);
     }
@@ -77,30 +89,38 @@ export default function SystemConfiguration() {
       });
       setConfig(res.data.data);
       setEditingItem({ oldVal: '', newVal: '' });
-      showFeedback(`Updated successfully. All affected employees have been cascaded to "${editingItem.newVal}".`);
+      showDialog('alert', 'Update Successful', `Updated successfully. All affected employees have been cascaded to "${editingItem.newVal}".`);
     } catch (err) {
-      showFeedback(err.response?.data?.message || "Failed to update item.", true);
+      showDialog('error', 'Action Denied', err.response?.data?.message || "Failed to update item.");
     } finally {
       setProcessing(false);
     }
   };
 
   const handleDelete = async (value) => {
-    if (!window.confirm(`Are you sure you want to delete "${value}"?`)) return;
-    setProcessing(true);
-    try {
-      const res = await api.put(`/config/dropdowns/${activeTab}`, {
-        action: 'DELETE',
-        value: value
-      });
-      setConfig(res.data.data);
-      showFeedback(`"${value}" deleted successfully.`);
-    } catch (err) {
-      // 🚨 Captures and displays the 409 Dependency Error
-      showFeedback(err.response?.data?.message || "Failed to delete item.", true);
-    } finally {
-      setProcessing(false);
-    }
+    // 🚨 REPLACED: window.confirm with Custom Modal
+    showDialog(
+      'confirm', 
+      'Confirm Deletion', 
+      `Are you sure you want to completely delete "${value}"? This action may affect employee records.`, 
+      async () => {
+        closeDialog();
+        setProcessing(true);
+        try {
+          const res = await api.put(`/config/dropdowns/${activeTab}`, {
+            action: 'DELETE',
+            value: value
+          });
+          setConfig(res.data.data);
+          showDialog('alert', 'Deletion Successful', `"${value}" deleted successfully.`);
+        } catch (err) {
+          // Captures and displays the 409 Dependency Error
+          showDialog('warning', 'Deletion Blocked', err.response?.data?.message || "Failed to delete item.");
+        } finally {
+          setProcessing(false);
+        }
+      }
+    );
   };
 
   // UI Helpers
@@ -115,7 +135,7 @@ export default function SystemConfiguration() {
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-[#0D2B55] w-10 h-10" /></div>;
 
   return (
-    <div className="max-w-[1000px] mx-auto pb-20 font-sans p-6">
+    <div className="max-w-[1000px] mx-auto pb-20 font-sans p-6 relative">
       
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
@@ -128,24 +148,6 @@ export default function SystemConfiguration() {
         </div>
       </div>
 
-      {/* Feedback Alerts */}
-      {errorMsg && (
-        <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
-          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-bold text-red-800">Action Denied</h3>
-            <p className="text-xs text-red-700 mt-1">{errorMsg}</p>
-          </div>
-          <button onClick={() => setErrorMsg('')} className="ml-auto text-red-400 hover:text-red-600"><X className="w-4 h-4"/></button>
-        </div>
-      )}
-
-      {successMsg && (
-        <div className="mb-6 bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg flex items-center justify-between shadow-sm animate-in fade-in duration-300">
-          <div className="flex items-center gap-2"><Check className="w-5 h-5 text-green-600" /> <span className="text-sm font-semibold">{successMsg}</span></div>
-        </div>
-      )}
-
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         
         {/* Tabs */}
@@ -153,7 +155,7 @@ export default function SystemConfiguration() {
           {tabs.map(tab => (
             <button
               key={tab.id}
-              onClick={() => { setActiveTab(tab.id); setErrorMsg(''); setSuccessMsg(''); setEditingItem({oldVal:'', newVal:''}); }}
+              onClick={() => { setActiveTab(tab.id); setEditingItem({oldVal:'', newVal:''}); }}
               className={`px-6 py-4 text-sm font-bold whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.id ? 'border-[#0D2B55] text-[#0D2B55] bg-white' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
             >
               {tab.label}
@@ -244,6 +246,54 @@ export default function SystemConfiguration() {
           
         </div>
       </div>
+
+      {/* 🚨 NEW: Universal Custom Modal for System Alerts */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-[24px]">
+              <div className="flex items-center gap-[10px] mb-[12px]">
+                {modalConfig.type === 'error' || modalConfig.type === 'warning' || modalConfig.type === 'confirm' ? (
+                  <AlertTriangle className={`w-[20px] h-[20px] ${modalConfig.type === 'warning' ? 'text-amber-500' : 'text-red-600'}`} />
+                ) : (
+                  <Info className="w-[20px] h-[20px] text-blue-600" />
+                )}
+                <h3 className="text-[18px] font-[800] text-slate-800">{modalConfig.title}</h3>
+              </div>
+              
+              <p className="text-[14px] text-slate-600 mb-[24px] whitespace-pre-wrap leading-relaxed">
+                {modalConfig.message}
+              </p>
+
+              <div className="flex justify-end gap-[12px]">
+                {modalConfig.type === 'confirm' && (
+                  <button 
+                    type="button"
+                    onClick={modalConfig.onCancel}
+                    className="px-[16px] py-[10px] text-slate-600 font-[700] text-[13px] hover:bg-slate-100 rounded-[8px] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button 
+                  type="button"
+                  onClick={modalConfig.onConfirm}
+                  className={`px-[20px] py-[10px] text-white font-[800] text-[13px] rounded-[8px] shadow-sm transition-colors ${
+                    modalConfig.type === 'error' || modalConfig.type === 'confirm'
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : modalConfig.type === 'warning'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : 'bg-slate-800 hover:bg-slate-900'
+                  }`}
+                >
+                  {modalConfig.type === 'confirm' ? 'Confirm' : 'Acknowledge'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

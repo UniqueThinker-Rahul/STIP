@@ -5,7 +5,7 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { authGuard, roleGuard } = require('../middleware/auth');
 
-// 🚨 UPGRADE: Imported the logger system to track workflow actions
+// Imported the logger system to track workflow actions
 const { logAudit } = require('../utils/logger');
 
 const { 
@@ -72,30 +72,24 @@ const dispatchNotification = async ({ senderId, recipientRole, recipientId, targ
 // Real-time Analytics Aggregation with Bulletproof Date Filtering
 router.get('/analytics/category-averages', async (req, res) => {
   try {
-    // STRICT FILTER: ONLY calculate averages from fully APPROVED appraisals
     let matchStage = {
        'workflow.status': 'APPROVED' 
     };
 
-    // If scope is explicitly team, filter by manager. Otherwise, process the entire company.
     if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
        matchStage.managerId = req.user.id || req.user._id;
     }
 
     let pipeline = [];
-    
-    // Stage 1: Filter by Status and Manager
     pipeline.push({ $match: matchStage });
 
-    // Stage 2: Bulletproof Date Filtering (Year & Quarter)
     const yearFilter = req.query.year && req.query.year !== 'ALL';
     const quarterFilter = req.query.quarter && req.query.quarter !== 'ALL';
 
     if (yearFilter || quarterFilter) {
-      // ALWAYS join the Quarter document just in case the dates are stored there instead of the appraisal document
       pipeline.push({
         $lookup: {
-          from: 'quarters', // Ensure this matches your Quarters collection name in MongoDB
+          from: 'quarters', 
           localField: 'appraisalQuarter',
           foreignField: '_id',
           as: 'quarterDoc'
@@ -104,7 +98,6 @@ router.get('/analytics/category-averages', async (req, res) => {
 
       let andConditions = [];
 
-      // Check Number and String across all possible year fields (reviewYear, period.year, quarterDoc.year)
       if (yearFilter) {
         const yrNum = parseInt(req.query.year);
         const yrStr = String(req.query.year);
@@ -120,7 +113,6 @@ router.get('/analytics/category-averages', async (req, res) => {
         });
       }
 
-      // Check across all possible quarter fields (period.quarter, quarterDoc.name)
       if (quarterFilter) {
         andConditions.push({
           $or: [
@@ -130,13 +122,11 @@ router.get('/analytics/category-averages', async (req, res) => {
         });
       }
 
-      // Apply the date filters
       if (andConditions.length > 0) {
         pipeline.push({ $match: { $and: andConditions } });
       }
     }
 
-    // Stage 3: The math group
     pipeline.push({
       $group: {
         _id: null,
@@ -176,10 +166,12 @@ router.get('/', async (req, res) => {
     let query = {};
     const userId = req.user.id || req.user._id;
 
-    if (req.user.role === 'MANAGER') query.managerId = userId;
-    else if (req.user.role === 'EMPLOYEE') {
+    if (req.user.role === 'MANAGER') {
+      query.managerId = userId;
+    } else if (req.user.role === 'EMPLOYEE') {
       query.employeeId = userId;
-      query['workflow.status'] = 'APPROVED'; 
+      // 🚨 CRITICAL FIX: Removed `query['workflow.status'] = 'APPROVED';` 
+      // This blocked employees from seeing their live, pending appraisal status.
     }
 
     const appraisals = await Appraisal.find(query)
@@ -201,7 +193,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
 
     if (!appraisalQuarter) return res.status(400).json({ message: 'Appraisal Quarter ID is required.' });
 
-    const actualYear = reviewYear || 2026;
+    const actualYear = reviewYear || new Date().getFullYear();
     const actualQuarter = period?.quarter || 'Q3';
 
     let appraisal = await Appraisal.findOne({ employeeId, appraisalQuarter });
@@ -244,11 +236,9 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
     appraisal.workflow.lastUpdatedBy = managerId;
     await appraisal.save();
 
-    // 🚨 UPGRADE: Fetch employee name for Audit Log
     const empForLog = await User.findById(employeeId).select('personalDetails');
     const empNameLog = empForLog ? `${empForLog.personalDetails?.firstName} ${empForLog.personalDetails?.lastName}` : 'Employee';
 
-    // 🚨 UPGRADE: Fire Audit Log event
     await logAudit({
       user: req.user, 
       role: req.user.role, 
@@ -304,12 +294,280 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
   }
 });
 
-// 3. Move to HR Review
+// 2. Get all appraisals
+exports.getAllAppraisals = async (req, res) => {
+  try {
+    const appraisals = await Appraisal.find()
+      .populate('employeeId', 'personalDetails employeeId companyCode employmentDetails')
+      .populate('managerId', 'personalDetails')
+      .populate('appraisalQuarter', 'name year isLocked'); 
+      
+    res.status(200).json({ success: true, data: appraisals });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server Error fetching appraisals.' });
+  }
+};
+
+// 3. HR Forwards Appraisal to CEO
+exports.forwardToCEO = async (req, res) => {
+  try {
+    const appraisal = await Appraisal.findById(req.params.id)
+      .populate('employeeId', 'personalDetails employeeId companyCode employmentDetails')
+      .populate('managerId', 'personalDetails')
+      .populate('appraisalQuarter', 'name year');
+      
+    if (!appraisal) return res.status(404).json({ success: false, message: 'Appraisal not found.' });
+
+    appraisal.workflow.status = 'WITH_CEO';
+    await appraisal.save();
+
+    const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
+    const mgrName = `${appraisal.managerId?.personalDetails?.firstName || ''} ${appraisal.managerId?.personalDetails?.lastName || ''}`;
+    const hrName = req.user.personalDetails ? `${req.user.personalDetails.firstName} ${req.user.personalDetails.lastName}` : 'HR Manager';
+    const quarterName = appraisal.appraisalQuarter?.name || `Q3`;
+    const quarterYear = appraisal.appraisalQuarter?.year || new Date().getFullYear();
+    const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
+    const isEP = iprfScore >= 1.3;
+
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'APPRAISAL_HR_APPROVED', category: 'APPRAISAL_WORKFLOW', severity: 'MEDIUM',
+      details: `HR validated appraisal for ${empName} and forwarded it to the CEO.`, req
+    });
+
+    setImmediate(async () => {
+      try {
+        const ceoTargets = await dispatchNotification({
+          senderId: req.user.id,
+          recipientRole: 'CEO',
+          targetRoleContext: 'CEO',
+          title: 'Appraisal Ready for Final Approval',
+          message: `HR has validated and forwarded the ${quarterName} appraisal for ${empName}. It requires your final approval.`,
+          type: 'APPRAISAL_FORWARDED',
+          actionUrl: `${process.env.FRONTEND_URL}/dashboard/ceo/approve`
+        });
+
+        for (const ceo of ceoTargets) {
+          let adminEmail = null;
+          if (ceo.personalDetails && ceo.personalDetails.notificationEmails) {
+            if (typeof ceo.personalDetails.notificationEmails.get === 'function') {
+              adminEmail = ceo.personalDetails.notificationEmails.get('CEO');
+            } else {
+              adminEmail = ceo.personalDetails.notificationEmails['CEO'];
+            }
+          }
+          if (!adminEmail) {
+            adminEmail = ceo.username; 
+          }
+          
+          if (adminEmail && adminEmail.includes('@')) {
+            await sendHRForwardEmail({
+              toEmail: adminEmail,
+              ceoName: ceo.personalDetails?.firstName || 'CEO',
+              empName: empName,
+              empId: appraisal.employeeId.employeeId,
+              empTitle: appraisal.employeeId.employmentDetails?.jobTitle,
+              empCompany: appraisal.employeeId.companyCode,
+              mgrName: mgrName,
+              hrName: hrName,
+              quarter: quarterName,
+              year: quarterYear,
+              iprfFactor: iprfScore.toFixed(1),
+              iprfLabel: getIprfLabel(iprfScore),
+              awardPercent: (appraisal.stipAward || 0).toFixed(2),
+              forwardDate: new Date().toLocaleDateString('en-GB'),
+              isEP: isEP
+            });
+          }
+        }
+      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+    });
+
+    res.status(200).json({ success: true, data: appraisal }); 
+  } catch (error) {
+    console.error("Forward to CEO Error:", error);
+    res.status(500).json({ success: false, message: 'Server Error forwarding appraisal.' });
+  }
+};
+
+// 4. CEO Approves or Rejects Appraisal
+exports.approveRejectAppraisal = async (req, res) => {
+  try {
+    const { status, comments } = req.body; 
+    
+    if (!['APPROVED', 'NOT_APPROVED'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status update.' });
+    }
+
+    const appraisal = await Appraisal.findById(req.params.id)
+      .populate('employeeId', 'personalDetails employeeId')
+      .populate('managerId', 'personalDetails username notificationEmails')
+      .populate('appraisalQuarter', 'name year');
+
+    if (!appraisal) return res.status(404).json({ success: false, message: 'Appraisal not found.' });
+
+    appraisal.workflow.status = status;
+    if (comments) {
+      appraisal.narrative.ceoComments = comments;
+    }
+    await appraisal.save();
+
+    const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
+    const mgrName = `${appraisal.managerId?.personalDetails?.firstName || ''} ${appraisal.managerId?.personalDetails?.lastName || ''}`;
+    const ceoName = req.user.personalDetails ? `${req.user.personalDetails.firstName} ${req.user.personalDetails.lastName}` : 'CEO';
+    
+    const isApproved = status === 'APPROVED';
+    const quarterName = appraisal.appraisalQuarter?.name || `Q3`;
+    const quarterYear = appraisal.appraisalQuarter?.year || new Date().getFullYear();
+    const iprfScore = appraisal.calculatedResults?.finalIprfScore || 0;
+
+    await logAudit({
+      user: req.user, 
+      role: req.user.role, 
+      action: isApproved ? 'APPRAISAL_CEO_APPROVED' : 'APPRAISAL_REJECTED', 
+      category: 'APPRAISAL_WORKFLOW', 
+      severity: isApproved ? 'HIGH' : 'MEDIUM',
+      details: isApproved ? `CEO officially approved the appraisal for ${empName}.` : `CEO returned the appraisal for ${empName}.`, 
+      req
+    });
+
+    setImmediate(async () => {
+      try {        
+        let managerTargets = [];
+        if (appraisal.managerId) {
+          managerTargets = await dispatchNotification({
+            senderId: req.user.id,
+            recipientId: appraisal.managerId._id,
+            targetRoleContext: 'MANAGER',
+            title: isApproved ? 'Appraisal Approved' : 'Appraisal Not Approved',
+            message: isApproved 
+              ? `The ${quarterName} appraisal for ${empName} has been officially approved.`
+              : `The ${quarterName} appraisal for ${empName} was returned. Please review the comments and adjust accordingly.`,
+            type: isApproved ? 'APPRAISAL_APPROVED' : 'APPRAISAL_REJECTED',
+            actionUrl: `${process.env.FRONTEND_URL}/dashboard/manager`
+          }); 
+        }
+
+        const hrTargets = await dispatchNotification({
+          senderId: req.user.id,
+          recipientRole: 'HR_ADMIN',
+          targetRoleContext: 'HR_ADMIN',
+          title: isApproved ? 'Appraisal Approved by CEO' : 'Appraisal Not Approved by CEO',
+          message: isApproved 
+            ? `The CEO approved the ${quarterName} appraisal for ${empName}.`
+            : `The CEO returned the ${quarterName} appraisal for ${empName}. Review comments immediately.`,
+          type: isApproved ? 'APPRAISAL_APPROVED' : 'APPRAISAL_REJECTED',
+          actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
+        }); 
+
+        // --- Process Line Managers ---
+        if (managerTargets.length > 0) {
+            for (const target of managerTargets) {
+              let adminEmail = null;
+              if (target.personalDetails && target.personalDetails.notificationEmails) {
+                if (typeof target.personalDetails.notificationEmails.get === 'function') {
+                  adminEmail = target.personalDetails.notificationEmails.get('MANAGER');
+                } else {
+                  adminEmail = target.personalDetails.notificationEmails['MANAGER'];
+                }
+              }
+              if (!adminEmail) adminEmail = target.username; 
+              
+              if (adminEmail && adminEmail.includes('@')) {
+                if (isApproved) {
+                   await sendCEOApproveEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'Manager', 
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB')
+                   });
+                } else {
+                   await sendCEORejectEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'Manager',
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB'),
+                     ceoComment: comments || 'No comment provided.',
+                     mgrName: mgrName
+                   });
+                }
+              }
+            }
+        }
+
+        // --- Process HR Admins ---
+        if (hrTargets.length > 0) {
+            for (const target of hrTargets) {
+              let adminEmail = null;
+              if (target.personalDetails && target.personalDetails.notificationEmails) {
+                if (typeof target.personalDetails.notificationEmails.get === 'function') {
+                  adminEmail = target.personalDetails.notificationEmails.get('HR_ADMIN');
+                } else {
+                  adminEmail = target.personalDetails.notificationEmails['HR_ADMIN'];
+                }
+              }
+              if (!adminEmail) adminEmail = target.username; 
+              
+              if (adminEmail && adminEmail.includes('@')) {
+                if (isApproved) {
+                   await sendCEOApproveEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'HR Manager', 
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB')
+                   });
+                } else {
+                   await sendCEORejectEmail({
+                     toEmail: adminEmail,
+                     recipientName: target.personalDetails?.firstName || 'HR Manager',
+                     empName: empName,
+                     empId: appraisal.employeeId.employeeId,
+                     quarter: quarterName,
+                     year: quarterYear,
+                     iprfFactor: iprfScore.toFixed(1),
+                     iprfLabel: getIprfLabel(iprfScore),
+                     ceoName: ceoName,
+                     decisionDate: new Date().toLocaleDateString('en-GB'),
+                     ceoComment: comments || 'No comment provided.',
+                     mgrName: mgrName
+                   });
+                }
+              }
+            }
+        }
+
+      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+    });
+
+    res.status(200).json({ success: true, data: appraisal }); 
+  } catch (error) {
+    console.error("Approve/Reject Error:", error);
+    res.status(500).json({ success: false, message: 'Server Error updating appraisal status.' });
+  }
+};
+
+// Move to HR Review
 router.patch('/:id/review', roleGuard('HR_ADMIN'), async (req, res) => {
   try {
     const updatedApp = await Appraisal.findByIdAndUpdate(req.params.id, { $set: { 'workflow.status': 'UNDER_HR_REVIEW', 'workflow.lastUpdatedBy': req.user.id || req.user._id } }, { returnDocument: 'after' });
     
-    // 🚨 UPGRADE: Fire Audit Log event
     await logAudit({
       user: req.user, role: req.user.role, action: 'APPRAISAL_UNDER_REVIEW', category: 'APPRAISAL_WORKFLOW', severity: 'LOW',
       details: `HR initiated review for appraisal record: ${updatedApp.appraisalRef || req.params.id}.`, req
@@ -319,7 +577,7 @@ router.patch('/:id/review', roleGuard('HR_ADMIN'), async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Workflow state transition failure.' }); }
 });
 
-// 4. HR Approves the appraisal -> Sends to CEO
+// HR Approves the appraisal -> Sends to CEO
 router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
   try {
     const appraisal = await Appraisal.findById(req.params.id)
@@ -338,7 +596,6 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     const mgrName = appraisal.managerId ? `${appraisal.managerId.personalDetails?.firstName} ${appraisal.managerId.personalDetails?.lastName}` : 'Line Manager';
     
-    // 🚨 UPGRADE: Fire Audit Log event
     await logAudit({
       user: req.user, role: req.user.role, action: 'APPRAISAL_HR_APPROVED', category: 'APPRAISAL_WORKFLOW', severity: 'MEDIUM',
       details: `HR approved appraisal for ${empName} and forwarded to CEO.`, req
@@ -381,7 +638,7 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Approval failure.', error: error.message }); }
 });
 
-// 5. CEO Final Approval
+// CEO Final Approval
 router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
   try {
     const appraisal = await Appraisal.findById(req.params.id)
@@ -399,7 +656,6 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
 
     const empName = `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}`;
     
-    // 🚨 UPGRADE: Fire Audit Log event
     await logAudit({
       user: req.user, role: req.user.role, action: 'APPRAISAL_CEO_APPROVED', category: 'APPRAISAL_WORKFLOW', severity: 'HIGH',
       details: `CEO officially approved the appraisal for ${empName}.`, req
@@ -447,7 +703,7 @@ router.patch('/:id/ceo-approve', roleGuard('CEO'), async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'CEO Approval failure.' }); }
 });
 
-// 6. Reject back to Manager
+// Reject back to Manager
 router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
   try {
     const appraisal = await Appraisal.findById(req.params.id)
@@ -474,7 +730,6 @@ router.patch('/:id/reopen', roleGuard('HR_ADMIN', 'CEO'), async (req, res) => {
     const actionUser = await User.findById(req.user.id || req.user._id);
     const rejectorName = actionUser?.personalDetails ? `${actionUser.personalDetails.firstName} ${actionUser.personalDetails.lastName}` : (req.user.role === 'CEO' ? 'CEO' : 'HR');
     
-    // 🚨 UPGRADE: Fire Audit Log event
     await logAudit({
       user: req.user, role: req.user.role, action: 'APPRAISAL_REJECTED', category: 'APPRAISAL_WORKFLOW', severity: 'HIGH',
       details: `${rejectorName} returned the appraisal for ${empName} back to the Line Manager.`, req
@@ -534,7 +789,6 @@ router.delete('/:id', roleGuard('MANAGER', 'HR_ADMIN'), async (req, res) => {
 
     await Appraisal.findByIdAndDelete(req.params.id);
     
-    // 🚨 UPGRADE: Fire Audit Log event
     await logAudit({
       user: req.user, role: req.user.role, action: 'APPRAISAL_DELETED', category: 'APPRAISAL_WORKFLOW', severity: 'MEDIUM',
       details: `Deleted draft appraisal for ${empName}.`, req

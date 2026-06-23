@@ -83,9 +83,44 @@ export default function MySubmissions() {
       case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
       case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
       case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
+      case 'PENDING_SUBMISSION': return { text: 'Awaiting Manager Rating', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       default: return { text: status?.replace(/_/g, ' ') || 'Unknown', badgeClass: 'bg-[#E2DDD4] text-[#6b7280]' };
     }
   };
+
+  // 🚨 FIX: Extract derived items so the visual list reacts to the dropdown filters
+  const getDisplayedItems = () => {
+    if (!selectedQuarterId) return [];
+
+    const quarterAppraisals = submissions.filter(app => {
+      const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
+      return qId === selectedQuarterId;
+    });
+
+    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
+    let items = [];
+
+    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
+      items = [...quarterAppraisals];
+    }
+
+    if (reportType === 'MISSING' || reportType === 'ALL') {
+      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
+      const missingItems = missingStaff.map(u => ({
+        _id: `missing-${u._id}`,
+        isMissing: true,
+        employeeId: u,
+        appraisalQuarter: quarters.find(q => q._id === selectedQuarterId),
+        workflow: { status: 'PENDING_SUBMISSION' },
+        calculatedResults: { finalIprfScore: 0 }
+      }));
+      items = [...items, ...missingItems];
+    }
+
+    return items;
+  };
+
+  const displayedItems = getDisplayedItems();
 
   const handleDownloadTeamReport = () => {
     if (!selectedQuarterId) return alert('Please select a quarter first.');
@@ -93,7 +128,12 @@ export default function MySubmissions() {
     const targetQuarter = quarters.find(q => q._id === selectedQuarterId);
     if (!targetQuarter) return;
 
-    const quarterAppraisals = submissions.filter(app => (app.appraisalQuarter?._id || app.appraisalQuarter) === selectedQuarterId);
+    // 🚨 FIX: Strict quarter matching for download logic
+    const quarterAppraisals = submissions.filter(app => {
+      const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
+      return qId === selectedQuarterId;
+    });
+    
     const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
 
     let csvRows = [];
@@ -202,7 +242,7 @@ export default function MySubmissions() {
           <div className="bg-white p-3 rounded-lg border border-[#E2DDD4] flex flex-col sm:flex-row items-center gap-2 shadow-sm">
             <div className="flex items-center gap-2 text-[11px] font-bold text-[#0D2B55]">
               <Calendar className="w-4 h-4 text-[#C9A84C]" />
-              Download Team Report:
+              Filter & Export:
             </div>
             
             <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -236,35 +276,35 @@ export default function MySubmissions() {
         )}
       </div>
       
-      {submissions.length === 0 ? (
+      {displayedItems.length === 0 ? (
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[40px] text-center">
           <div className="text-[40px] mb-[10px]">&#128194;</div>
-          <div className="text-[15px] font-[700] text-[#0D2B55] mb-[5px]">No Submissions Yet</div>
-          <div className="text-[13px] text-[#6b7280]">You haven't submitted any appraisals to HR.</div>
+          <div className="text-[15px] font-[700] text-[#0D2B55] mb-[5px]">No Results Found</div>
+          <div className="text-[13px] text-[#6b7280]">No data matches the selected filters for this quarter.</div>
         </div>
       ) : (
         <div className="flex flex-col gap-[12px]">
-          {submissions.map((a) => {
+          {displayedItems.map((a) => {
             const statusConfig = getStatusConfig(a.workflow?.status);
             
             const fName = a.employeeId?.personalDetails?.firstName || 'Unknown';
             const lName = a.employeeId?.personalDetails?.lastName || '';
             const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
-            const quarter = a.appraisalQuarter?.name || a.period?.quarter || 'CY2026';
+            const quarter = a.appraisalQuarter?.name || a.period?.quarter || quarters.find(q => q._id === selectedQuarterId)?.name || 'CY2026';
             
             const iprf = a.calculatedResults?.finalIprfScore || 0;
             const prorate = (a.employeeId?.employmentDetails?.prorateValue || 12) / 12;
-            const awardPct = (cpPct * iprf * prorate).toFixed(2);
+            const awardPct = a.isMissing ? '—' : (cpPct * iprf * prorate).toFixed(2);
 
             return (
               <div key={a._id} className="bg-white border border-[#E2DDD4] rounded-[12px] p-[16px_20px] flex flex-col sm:flex-row sm:items-center justify-between gap-[14px] hover:border-[#0D2B55]/30 transition-colors shadow-sm">
                 <div className="flex-1">
                   <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
                   <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} &middot; Submitted {new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &middot; IPRF: {iprf.toFixed(1)} &mdash; Award: {awardPct}%
+                    {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· Submitted ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
                   </div>
                   
-                  {a.narrative?.generalComments && a.workflow?.status === 'REOPENED' && (
+                  {!a.isMissing && a.narrative?.generalComments && a.workflow?.status === 'REOPENED' && (
                     <div className="mt-[8px] bg-[#FEE2E2] p-[8px_12px] rounded-[6px] text-[11px] text-[#991B1B] border border-[#FECACA]">
                       <strong>HR Feedback:</strong> "{a.narrative.generalComments}"
                     </div>
@@ -276,18 +316,20 @@ export default function MySubmissions() {
                     {statusConfig.text}
                   </span>
                   <div className="text-[11px] text-[#6b7280] bg-[#FAF8F4] border border-[#E2DDD4] px-[10px] py-[5px] rounded-full font-mono">
-                    ID: {a.appraisalRef || a._id.toString().slice(-6).toUpperCase()}
+                    ID: {a.isMissing ? (a.employeeId?.employeeId || 'N/A') : (a.appraisalRef || a._id.toString().slice(-6).toUpperCase())}
                   </div>
                   
-                  <button 
-                    onClick={() => {
-                      setSelectedAppraisal(a);
-                      setExpandedComment(null); // Reset expansions on new view
-                    }} 
-                    className="px-[12px] py-[5px] bg-white border border-[#E2DDD4] hover:border-[#0D2B55] hover:text-[#0D2B55] text-[#0f1923] text-[11px] font-[700] rounded-[6px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View
-                  </button>
+                  {!a.isMissing && (
+                    <button 
+                      onClick={() => {
+                        setSelectedAppraisal(a);
+                        setExpandedComment(null); 
+                      }} 
+                      className="px-[12px] py-[5px] bg-white border border-[#E2DDD4] hover:border-[#0D2B55] hover:text-[#0D2B55] text-[#0f1923] text-[11px] font-[700] rounded-[6px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> View
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -295,7 +337,7 @@ export default function MySubmissions() {
         </div>
       )}
 
-      {/* 🚨 UPGRADE: View Details Modal with Score Breakdown */}
+      {/* View Details Modal with Score Breakdown */}
       {selectedAppraisal && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">

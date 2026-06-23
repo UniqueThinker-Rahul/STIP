@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-// 🚨 FIX: Added Loader2 to the imports
 import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye, ChevronLeft, ChevronRight, CheckSquare, Loader2 } from "lucide-react";
 import api from '../../../../lib/api';
 
@@ -11,6 +10,24 @@ const getInitials = (name) => {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+// 🚨 NEW: Universal helper to cleanly split backend merged names
+const splitName = (source) => {
+  if (!source) return { firstName: '', middleName: '', lastName: '' };
+  
+  let firstName = source.firstName || '';
+  let middleName = source.middleName || '';
+  let lastName = source.lastName || '';
+  
+  // If backend merged them (middleName is empty but firstName has spaces)
+  if (!middleName && firstName.trim().includes(' ')) {
+    const parts = firstName.trim().split(/\s+/);
+    firstName = parts[0];
+    middleName = parts.slice(1).join(' ');
+  }
+  
+  return { firstName, middleName, lastName };
 };
 
 const ROLE_COLOURS = {
@@ -222,9 +239,9 @@ export default function StaffManagement() {
   if (search) {
     const s = search.toLowerCase();
     data = data.filter(e => {
-      const fn = e.personalDetails?.firstName || '';
-      const ln = e.personalDetails?.lastName || '';
-      return `${fn} ${ln} ${e.employeeId}`.toLowerCase().includes(s);
+      // 🚨 FIX: Extract separated names for accurate search filtering
+      const { firstName, middleName, lastName } = splitName(e.personalDetails);
+      return `${firstName} ${middleName} ${lastName} ${e.employeeId}`.toLowerCase().includes(s);
     });
   }
   
@@ -344,10 +361,14 @@ export default function StaffManagement() {
   const handleSaveEdit = async () => {
     if (!editingStaff) return;
     try {
+      // 🚨 FIX: Re-combine first and middle name into the backend's expected structure before saving
+      const fName = editingStaff.personalDetails?.firstName?.trim() || '';
+      const mName = editingStaff.personalDetails?.middleName?.trim() || '';
+      const combinedFirstName = mName ? `${fName} ${mName}` : fName;
+
       await api.patch(`/users/${editingStaff._id}/hr-update`, {
-        firstName: editingStaff.personalDetails?.firstName,
-        middleName: editingStaff.personalDetails?.middleName,
-        lastName: editingStaff.personalDetails?.lastName,
+        firstName: combinedFirstName,
+        lastName: editingStaff.personalDetails?.lastName?.trim() || '',
         jobTitle: editingStaff.employmentDetails?.jobTitle,
         officeLocation: editingStaff.employmentDetails?.officeLocation,
         salary: editingStaff.employmentDetails?.salary,
@@ -358,13 +379,14 @@ export default function StaffManagement() {
         reportingTo: editingStaff.employmentDetails?.reportingTo?._id || editingStaff.employmentDetails?.reportingTo || null
       });
       
-      setSuccessMsg(`${editingStaff.personalDetails.firstName}'s profile updated successfully.`);
+      setSuccessMsg(`${fName}'s profile updated successfully.`);
       setEditingStaff(null);
       setOpenDropdown(null); 
       fetchData();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (e) { 
-      showDialog('alert', 'Error', "Failed to update to database."); 
+      const backendMessage = e.response?.data?.message || e.message || "Failed to update database record.";
+      showDialog('alert', 'Error', backendMessage); 
     }
   };
 
@@ -454,18 +476,24 @@ export default function StaffManagement() {
   const handleDownloadCSV = () => {
     if (data.length === 0) return showDialog('alert', 'Notice', "No data to download.");
     
-    const headers = ['Employee ID', 'First Name', 'Last Name', 'Company', 'Office Location', 'Job Title', 'Base Salary', 'Hire Date', 'Primary Role', 'Secondary Roles', 'Reporting Manager'];
+    const headers = ['Employee ID', 'First Name', 'Middle Name', 'Last Name', 'Company', 'Office Location', 'Job Title', 'Base Salary', 'Hire Date', 'Primary Role', 'Secondary Roles', 'Reporting Manager'];
     const csvRows = [headers.join(',')];
     
     data.forEach(e => {
+      // 🚨 FIX: Extract separated names for CSV Export
+      const { firstName, middleName, lastName } = splitName(e.personalDetails);
       const mgr = e.employmentDetails?.reportingTo?.personalDetails;
-      const mgrName = mgr ? `${mgr.firstName} ${mgr.lastName}` : 'Unassigned';
+      const mgrNames = splitName(mgr);
+      const mgrMName = mgrNames.middleName ? `${mgrNames.middleName} ` : '';
+      const mgrName = mgr ? `${mgrNames.firstName} ${mgrMName}${mgrNames.lastName}` : 'Unassigned';
+      
       const secondaryRoles = (e.security?.secondaryRoles || []).map(r => ROLE_COLOURS[r]?.label).join(' & ');
       
       const row = [
         e.employeeId || '',
-        `"${e.personalDetails?.firstName || ''}"`,
-        `"${e.personalDetails?.lastName || ''}"`,
+        `"${firstName}"`,
+        `"${middleName}"`, 
+        `"${lastName}"`,
         e.companyCode || '',
         `"${e.employmentDetails?.officeLocation || 'd'}"`,
         `"${e.employmentDetails?.jobTitle || ''}"`,
@@ -661,7 +689,7 @@ export default function StaffManagement() {
         </div>
       )}
 
-      {/* 🚨 NEW: Bulk Actions Banner */}
+      {/* Bulk Actions Banner */}
       {selectedStaffIds.length > 0 && (
         <div className="bg-[#EFF6FF] border border-[#BFDBFE] p-3 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-200 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-bold text-[#1E40AF]">
@@ -724,7 +752,12 @@ export default function StaffManagement() {
             widthClass="w-full md:w-64"
             options={[
               { value: 'unassigned', label: '-- Unassigned / CEO --' },
-              ...dbManagers.map(m => ({ value: m._id, label: `${m.personalDetails?.firstName} ${m.personalDetails?.lastName}` }))
+              // 🚨 FIX: Safe extraction for Search dropdown
+              ...dbManagers.map(m => {
+                const { firstName, middleName, lastName } = splitName(m.personalDetails || m);
+                const mNameStr = middleName ? ` ${middleName}` : '';
+                return { value: m._id, label: `${firstName}${mNameStr} ${lastName}`.trim() };
+              })
             ]}
           />
         </div>
@@ -786,8 +819,14 @@ export default function StaffManagement() {
                 const roleInfo = ROLE_COLOURS[roleKey];
                 const secondaryRoles = e.security?.secondaryRoles || [];
                 const mgr = e.employmentDetails?.reportingTo?.personalDetails;
-                const mgrName = mgr ? `${mgr.firstName} ${mgr.lastName}` : 'Unassigned';
+                
+                // 🚨 FIX: Safe extraction for table
+                const mgrNames = splitName(mgr);
+                const mgrMName = mgrNames.middleName ? `${mgrNames.middleName} ` : '';
+                const mgrName = mgr ? `${mgrNames.firstName} ${mgrMName}${mgrNames.lastName}` : 'Unassigned';
                 const isSelected = selectedStaffIds.includes(e._id);
+                
+                const { firstName, middleName, lastName } = splitName(e.personalDetails);
 
                 return (
                   <tr key={e._id} className={`${isRecycleBinView ? 'hover:bg-red-50/30' : 'hover:bg-slate-50'} ${isSelected ? 'bg-blue-50/40' : ''} transition-colors`}>
@@ -802,10 +841,10 @@ export default function StaffManagement() {
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-3">
                         <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold ${isRecycleBinView ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'}`}>
-                          {getInitials(`${e.personalDetails?.firstName} ${e.personalDetails?.lastName}`)}
+                          {getInitials(`${firstName} ${lastName}`)}
                         </div>
                         <div>
-                          <div className={`font-bold text-sm ${isRecycleBinView ? 'text-red-900 line-through opacity-70' : 'text-slate-900'}`}>{e.personalDetails?.firstName} {e.personalDetails?.lastName}</div>
+                          <div className={`font-bold text-sm ${isRecycleBinView ? 'text-red-900 line-through opacity-70' : 'text-slate-900'}`}>{firstName} {middleName ? middleName + ' ' : ''}{lastName}</div>
                           <div className="text-[10px] text-slate-500">{e.companyCode} • {e.employmentDetails?.officeLocation || 'No Office'}</div>
                         </div>
                       </div>
@@ -841,10 +880,30 @@ export default function StaffManagement() {
                         </div>
                       ) : (
                         <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => setViewingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-slate-100 bg-white text-slate-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
+                          <button onClick={() => {
+                            // 🚨 FIX: Intercept data and un-merge the name for the View Modal
+                            const staffToView = JSON.parse(JSON.stringify(e));
+                            if (staffToView.personalDetails) {
+                              const { firstName, middleName, lastName } = splitName(staffToView.personalDetails);
+                              staffToView.personalDetails.firstName = firstName;
+                              staffToView.personalDetails.middleName = middleName;
+                              staffToView.personalDetails.lastName = lastName;
+                            }
+                            setViewingStaff(staffToView);
+                          }} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-slate-100 bg-white text-slate-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
                             <Eye className="w-3 h-3" /> View
                           </button>
-                          <button onClick={() => setEditingStaff(e)} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-white bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
+                          <button onClick={() => {
+                            // 🚨 FIX: Intercept data and un-merge the name for the Edit Modal
+                            const staffToEdit = JSON.parse(JSON.stringify(e));
+                            if (staffToEdit.personalDetails) {
+                              const { firstName, middleName, lastName } = splitName(staffToEdit.personalDetails);
+                              staffToEdit.personalDetails.firstName = firstName;
+                              staffToEdit.personalDetails.middleName = middleName;
+                              staffToEdit.personalDetails.lastName = lastName;
+                            }
+                            setEditingStaff(staffToEdit);
+                          }} className="px-3 py-1.5 text-xs font-semibold border rounded-md hover:bg-white bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors">
                             <Edit2 className="w-3 h-3" /> Edit
                           </button>
                         </div>
@@ -1011,10 +1070,14 @@ export default function StaffManagement() {
                     <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.employmentDetails?.dateOfHire ? new Date(viewingStaff.employmentDetails.dateOfHire).toLocaleDateString() : 'N/A'}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Direct Manager</div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Line Manager</div>
                     <div className="text-sm font-medium text-slate-800 mt-0.5">
+                      {/* 🚨 FIX: Included middleName safely in the View Modal */}
                       {viewingStaff.employmentDetails?.reportingTo?.personalDetails 
-                        ? `${viewingStaff.employmentDetails.reportingTo.personalDetails.firstName} ${viewingStaff.employmentDetails.reportingTo.personalDetails.lastName}` 
+                        ? (() => {
+                            const mgrNames = splitName(viewingStaff.employmentDetails.reportingTo.personalDetails);
+                            return `${mgrNames.firstName} ${mgrNames.middleName ? mgrNames.middleName + ' ' : ''}${mgrNames.lastName}`;
+                          })()
                         : 'Unassigned / CEO'}
                     </div>
                   </div>
@@ -1148,13 +1211,14 @@ export default function StaffManagement() {
                     <div className="text-[10px] text-slate-500 mt-1">Dictates the default landing dashboard.</div>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Direct Manager</label>
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Line Manager</label>
+                    {/* 🚨 FIX: Safe extraction for Line Manager dropdown */}
                     {renderSearchableDropdown('mgr', 'employmentDetails', 'reportingTo', dbManagers, 'Search for Manager...', (m) => {
                        if (!m) return '';
-                       const fName = m.personalDetails?.firstName || m.firstName || '';
-                       const lName = m.personalDetails?.lastName || m.lastName || '';
+                       const { firstName, middleName, lastName } = splitName(m.personalDetails || m);
+                       const mNameStr = middleName ? ` ${middleName}` : '';
                        const isSecondary = !['MANAGER', 'HR_ADMIN', 'CEO'].includes(m.security?.role);
-                       return `${fName} ${lName}${isSecondary ? ` (${m.security?.role})` : ''}`.trim();
+                       return `${firstName}${mNameStr} ${lastName}${isSecondary ? ` (${m.security?.role})` : ''}`.trim();
                     })}
                   </div>
                 </div>
@@ -1195,7 +1259,7 @@ export default function StaffManagement() {
         </div>
       )}
 
-      {/* 🚨 Universal Custom Modal for System Alerts */}
+      {/* Universal Custom Modal for System Alerts */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">

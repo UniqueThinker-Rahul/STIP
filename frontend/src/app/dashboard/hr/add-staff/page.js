@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { User, CheckCircle, Calculator, X, ChevronDown, Search, ShieldCheck } from 'lucide-react';
+import { User, CheckCircle, Calculator, X, ChevronDown, Search, ShieldCheck, AlertTriangle, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 
@@ -16,6 +16,27 @@ export default function AddNewStaff() {
   const [successModalOpen, setSuccessModalOpen] = useState(false);
   const [successDetail, setSuccessDetail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 🚨 NEW: Universal Custom Modal State for Errors & Warnings
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'alert', // 'error', 'warning', 'info'
+    title: '',
+    message: ''
+  });
+
+  const closeDialog = () => {
+    setModalConfig({ ...modalConfig, isOpen: false });
+  };
+
+  const showDialog = (type, title, message) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message
+    });
+  };
 
   const [formData, setFormData] = useState({
     fn: '', mn: '', ln: '', title: '', office: '', co: '', mgrId: '', hire: '', empId: '', isManager: false 
@@ -99,9 +120,9 @@ export default function AddNewStaff() {
   const saveNewStaff = async () => {
     const { fn, mn, ln, title, office, co, mgrId, hire, empId, isManager } = formData;
     
-    // 🚨 UPGRADED: mgrId is REQUIRED unless isManager is true
     if (!fn || !ln || !title || !office || !co || !hire || !empId || (!isManager && !mgrId)) {
-      alert('Please fill in all required fields. Reporting Manager is required unless the staff is designated as a Line Manager.');
+      // 🚨 REPLACED: Native alert with Custom Warning Modal
+      showDialog('warning', 'Missing Information', 'Please fill in all required fields. Reporting Manager is required unless the staff is designated as a Line Manager.');
       return;
     }
 
@@ -140,8 +161,9 @@ export default function AddNewStaff() {
       clearForm();
       
     } catch (error) {
-      const backendMessage = error.response?.data?.message || "An error occurred while creating the employee.";
-      alert(`Server Error: ${backendMessage}`);
+      // 🚨 REPLACED: Native alert with Custom Error Modal for duplicate keys & server errors
+      const backendMessage = error.response?.data?.message || error.message || "An error occurred while creating the employee.";
+      showDialog('error', 'Server Error', backendMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -302,7 +324,6 @@ export default function AddNewStaff() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mb-[14px]">
               <div className="flex flex-col gap-[6px]">
-                {/* 🚨 UPGRADED: Dynamic visual logic for Line Manager field requirement */}
                 <label className="text-[11px] font-[800] text-[#0D2B55] flex justify-between items-center">
                   <span>Line Manager {!formData.isManager && <span className="text-[#DC2626]">*</span>}</span>
                   {formData.isManager && <span className="text-[9px] text-[#6b7280] font-normal uppercase">Optional</span>}
@@ -438,6 +459,51 @@ export default function AddNewStaff() {
           </div>
         </div>
       </div>
+
+      {/* 🚨 NEW: Universal Custom Modal for System Alerts & Errors */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="flex justify-end p-[12px] bg-[#FAF8F4] border-b border-[#E2DDD4]">
+              <button onClick={closeDialog} className="text-[#6b7280] hover:text-[#0D2B55] w-[24px] h-[24px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center hover:bg-white/20 transition-colors">&times;</button>
+            </div>
+            <div className="p-[24px] text-center">
+              <div className="flex justify-center mb-[16px]">
+                {modalConfig.type === 'error' ? (
+                  <div className="w-[54px] h-[54px] bg-red-100 rounded-full flex items-center justify-center text-red-600 shadow-sm">
+                    <AlertTriangle className="w-[28px] h-[28px]" />
+                  </div>
+                ) : modalConfig.type === 'warning' ? (
+                  <div className="w-[54px] h-[54px] bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shadow-sm">
+                    <AlertTriangle className="w-[28px] h-[28px]" />
+                  </div>
+                ) : (
+                  <div className="w-[54px] h-[54px] bg-blue-100 rounded-full flex items-center justify-center text-blue-600 shadow-sm">
+                    <Info className="w-[28px] h-[28px]" />
+                  </div>
+                )}
+              </div>
+              <h3 className="text-[18px] font-[800] text-slate-800 mb-[12px]">{modalConfig.title}</h3>
+              <p className="text-[13px] text-slate-600 mb-[24px] whitespace-pre-wrap leading-relaxed px-[10px]">
+                {modalConfig.message}
+              </p>
+              <button 
+                type="button"
+                onClick={closeDialog}
+                className={`w-full py-[12px] text-white font-[800] text-[13px] rounded-[10px] shadow-sm transition-colors ${
+                  modalConfig.type === 'error'
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : modalConfig.type === 'warning'
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-[#0D2B55] hover:bg-[#1a3d6e]'
+                }`}
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Success Modal */}
       {successModalOpen && (

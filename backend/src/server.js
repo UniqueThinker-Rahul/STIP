@@ -40,8 +40,15 @@ app.use(cors({
     // Allow requests with no origin (like Postman or mobile apps)
     if (!origin) return callback(null, true);
     
-    // Dynamically allow any Vercel domain, local dev, or Railway
-    if (origin.includes('localhost') || origin.includes('vercel.app') || origin.includes('railway.app')) {
+    // Dynamically allow any Vercel domain, local dev, Railway, AND Network IPs
+    if (
+        origin.includes('localhost') || 
+        origin.includes('vercel.app') || 
+        origin.includes('railway.app') ||
+        origin.includes('192.168.') || 
+        origin.includes('10.') || 
+        origin.includes('172.')
+    ) {
       return callback(null, true);
     } else {
       return callback(new Error('Not allowed by CORS'));
