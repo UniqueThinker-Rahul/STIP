@@ -196,7 +196,7 @@ export default function HRAllAppraisals() {
       case 'NOT_STARTED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#FECACA]">NOT STARTED</span>;
       case 'DRAFT': return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#E2DDD4]">DRAFT</span>;
       case 'SUBMITTED': return <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#FDE68A]">AT HR</span>;
-      case 'UNDER_HR_REVIEW': return <span className="bg-[#DBEAFE] text-[#1E40AF] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#BFDBFE]">IN REVIEW</span>;
+      case 'UNDER_HR_REVIEW': return <span className="bg-[#DBEAFE] text-[#1E40AF] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#BFDBFE]">HR Reviewing</span>;
       case 'APPROVED_BY_HR': return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#A7F3D0]">HR APPROVED</span>;
       case 'WITH_CEO': return <span className="bg-[#EDE9FE] text-[#4C1D95] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#DDD6FE]">WITH CEO</span>;
       case 'APPROVED': return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#A7F3D0]">CEO APPROVED</span>;

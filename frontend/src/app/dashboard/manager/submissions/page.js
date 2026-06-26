@@ -83,12 +83,13 @@ export default function MySubmissions() {
       case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
       case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
       case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
+      // 🚨 FIX: Added specific styling for HR Rejected status in the Submissions panel
+      case 'REOPENED': return { text: 'HR Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       case 'PENDING_SUBMISSION': return { text: 'Awaiting Manager Rating', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       default: return { text: status?.replace(/_/g, ' ') || 'Unknown', badgeClass: 'bg-[#E2DDD4] text-[#6b7280]' };
     }
   };
 
-  // 🚨 FIX: Extract derived items so the visual list reacts to the dropdown filters
   const getDisplayedItems = () => {
     if (!selectedQuarterId) return [];
 
@@ -128,7 +129,6 @@ export default function MySubmissions() {
     const targetQuarter = quarters.find(q => q._id === selectedQuarterId);
     if (!targetQuarter) return;
 
-    // 🚨 FIX: Strict quarter matching for download logic
     const quarterAppraisals = submissions.filter(app => {
       const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
       return qId === selectedQuarterId;
@@ -304,9 +304,16 @@ export default function MySubmissions() {
                     {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· Submitted ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
                   </div>
                   
-                  {!a.isMissing && a.narrative?.generalComments && a.workflow?.status === 'REOPENED' && (
+                  {/* 🚨 FIX: Extract HR Rejected Date and Render Rejection Badge in Manager Panel */}
+                  {!a.isMissing && a.narrative?.hrComments && a.workflow?.status === 'REOPENED' && (
                     <div className="mt-[8px] bg-[#FEE2E2] p-[8px_12px] rounded-[6px] text-[11px] text-[#991B1B] border border-[#FECACA]">
-                      <strong>HR Feedback:</strong> "{a.narrative.generalComments}"
+                      <strong>HR Feedback ({a.workflow?.rejectedAt ? new Date(a.workflow.rejectedAt).toLocaleDateString('en-GB') : 'Recently'}):</strong> "{a.narrative.hrComments}"
+                    </div>
+                  )}
+                  
+                  {!a.isMissing && a.narrative?.ceoComments && a.workflow?.status === 'NOT_APPROVED' && (
+                    <div className="mt-[8px] bg-[#FEE2E2] p-[8px_12px] rounded-[6px] text-[11px] text-[#991B1B] border border-[#FECACA]">
+                      <strong>CEO Feedback ({a.workflow?.rejectedAt ? new Date(a.workflow.rejectedAt).toLocaleDateString('en-GB') : 'Recently'}):</strong> "{a.narrative.ceoComments}"
                     </div>
                   )}
                 </div>

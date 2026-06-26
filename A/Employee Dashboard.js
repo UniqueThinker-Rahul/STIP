@@ -16,6 +16,7 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
   
+  // 🚨 NEW: Split filters for Year and Quarter
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedQuarterName, setSelectedQuarterName] = useState('');
   
@@ -27,6 +28,7 @@ export default function EmployeeDashboard() {
       try {
         setLoading(true);
         
+        // 1. Get Logged In User Session
         const userCookie = Cookies.get('stip_user');
         if (!userCookie) {
           router.push('/login');
@@ -34,6 +36,7 @@ export default function EmployeeDashboard() {
         }
         const sessionUser = JSON.parse(userCookie);
 
+        // 2. Fetch Live Data aggressively mapping all potential backend endpoints
         const [meRes, metricsRes, appraisalsRes, quartersRes] = await Promise.all([
           api.get('/auth/me').catch(() => ({ data: { data: sessionUser } })),
           api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })), 
@@ -46,6 +49,7 @@ export default function EmployeeDashboard() {
 
         setMetrics(metricsRes.data?.data || null);
 
+        // Merge and aggressively filter all appraisals to guarantee a match
         const allApps = appraisalsRes.data?.data || [];
         
         const myApps = allApps.filter(a => {
@@ -54,9 +58,11 @@ export default function EmployeeDashboard() {
         });
         setAllMyAppraisals(myApps);
 
+        // Filter out inactive quarters and set to state
         const fetchedQuarters = quartersRes.data?.data || [];
         setAllQuarters(fetchedQuarters);
 
+        // Determine Default Quarter (Current Active)
         const now = new Date();
         let defaultActive = fetchedQuarters.find(q => {
           const start = new Date(q.startDate); start.setHours(0,0,0,0);
@@ -64,10 +70,12 @@ export default function EmployeeDashboard() {
           return now >= start && now <= end;
         });
         
+        // Fallback to most recent if none are active
         if (!defaultActive && fetchedQuarters.length > 0) {
             defaultActive = fetchedQuarters[fetchedQuarters.length - 1]; 
         }
         
+        // 🚨 FIX: Initialize the dual filters based on the default active quarter
         if (defaultActive) {
             setSelectedYear(defaultActive.year.toString());
             setSelectedQuarterName(defaultActive.name);
@@ -83,8 +91,10 @@ export default function EmployeeDashboard() {
     fetchDashboardData();
   }, [router]);
 
+  // 🚨 NEW: Real-time effect hook that runs whenever Year or Quarter dropdowns change
   useEffect(() => {
     if (selectedYear && selectedQuarterName && allQuarters.length > 0) {
+      // Find the specific quarter object matching both filters
       const foundQuarter = allQuarters.find(q => 
         q.year.toString() === selectedYear && q.name === selectedQuarterName
       );
@@ -92,6 +102,7 @@ export default function EmployeeDashboard() {
       setActiveQuarter(foundQuarter || null);
 
       if (foundQuarter) {
+        // Deep schema searching to handle any database structure variations
         const targetAppraisal = allMyAppraisals.find(a => {
             const qId = a.appraisalQuarter?._id || a.appraisalQuarter || a.quarter?._id || a.quarterId;
             if (qId === foundQuarter._id) return true;
@@ -115,6 +126,7 @@ export default function EmployeeDashboard() {
     alert(`You have successfully acknowledged your STIP Award for ${activeQuarter ? activeQuarter.year : 'this cycle'}!`);
   };
 
+  // Calculations
   const cpPct = metrics?.cpPct || null;
   const bscRaw = metrics?.bscRawScore || null;
 
@@ -122,6 +134,7 @@ export default function EmployeeDashboard() {
   const pr = prMonths / 12;
   const pct = Math.min(100, Math.round(pr * 100));
 
+  // Safe extraction for IPRF score from various backend schemas
   const iprf = appraisal?.calculatedResults?.finalIprfScore || appraisal?.finalIprfScore || appraisal?.iprfScore || 0;
   
   let awardPct = '—';
@@ -132,11 +145,11 @@ export default function EmployeeDashboard() {
   }
 
   const iprfColor = (score) => {
-    if (score >= 1.3) return '#1E40AF'; 
-    if (score >= 1.0) return '#059669'; 
-    if (score >= 0.7) return '#D97706'; 
-    if (score > 0) return '#DC2626'; 
-    return '#0D2B55'; 
+    if (score >= 1.3) return '#1E40AF'; // Blue
+    if (score >= 1.0) return '#059669'; // Green
+    if (score >= 0.7) return '#D97706'; // Amber
+    if (score > 0) return '#DC2626'; // Red
+    return '#0D2B55'; // Navy Default
   };
 
   const iprfLabel = (score) => {
@@ -147,6 +160,7 @@ export default function EmployeeDashboard() {
     return 'Not yet submitted';
   };
 
+  // Status logic unified securely to catch all states
   const status = appraisal?.workflow?.status || appraisal?.status || 'DRAFT';
   const step1Done = !!appraisal && status !== 'DRAFT';
   const step2Done = step1Done && ['APPROVED_BY_HR', 'WITH_CEO', 'APPROVED', 'HR_APPROVED'].includes(status);
@@ -164,13 +178,13 @@ export default function EmployeeDashboard() {
       case 'WITH_CEO': return 'Pending CEO';
       case 'APPROVED': 
       case 'CEO_APPROVED': return 'CEO Approved';
-      case 'NOT_APPROVED': return 'Returned for Revision';
-      // 🚨 FIX: Explicitly handle HR rejections
-      case 'REOPENED': return 'Rejected by HR';
+      case 'NOT_APPROVED': 
+      case 'REOPENED': return 'Returned for Revision';
       default: return 'Pending Action';
     }
   };
 
+  // Dynamic countdown logic bound to active quarter
   let daysRemaining = null;
   if (activeQuarter) {
     const now = new Date();
@@ -189,6 +203,7 @@ export default function EmployeeDashboard() {
     return `${day} ${month}`;
   };
 
+  // 🚨 NEW: Extract dynamic options for the dropdowns
   const uniqueYears = Array.from(new Set(allQuarters.map(q => q.year.toString()))).sort((a, b) => b - a);
   const filteredQuarterNames = allQuarters.filter(q => q.year.toString() === selectedYear).map(q => q.name);
 
@@ -290,6 +305,7 @@ export default function EmployeeDashboard() {
               </div>
             </div>
             
+            {/* 🚨 UPGRADED: Dual Real-time dynamic dropdowns for Year and Quarter */}
             <div className="flex items-center gap-3">
               {step1Done && (
                 <button 
@@ -307,6 +323,7 @@ export default function EmployeeDashboard() {
                     onChange={(e) => {
                       const newYear = e.target.value;
                       setSelectedYear(newYear);
+                      // Auto-select the first available quarter for the new year to prevent empty states
                       const newQuarters = allQuarters.filter(q => q.year.toString() === newYear);
                       if (newQuarters.length > 0) setSelectedQuarterName(newQuarters[0].name);
                     }}
@@ -361,39 +378,26 @@ export default function EmployeeDashboard() {
 
               {/* Step 2: HR */}
               <div className="flex items-start gap-[16px] relative z-10">
-                {/* 🚨 FIX: Re-structured this circle to turn red for REOPENED (HR Rejection) */}
-                <div className={`w-[32px] h-[32px] rounded-full border-[2.5px] flex items-center justify-center text-[12px] transition-colors ${status === 'REOPENED' ? 'bg-[#FEE2E2] border-[#FEE2E2] text-[#991B1B]' : step2Done ? 'bg-[#1E40AF] border-[#1E40AF] text-white' : 'bg-[#DBEAFE] border-[#DBEAFE] text-[#1E40AF]'}`}>
-                  {status === 'REOPENED' ? '❌' : '👤'}
+                <div className={`w-[32px] h-[32px] rounded-full border-[2.5px] flex items-center justify-center text-[12px] transition-colors ${step2Done ? 'bg-[#1E40AF] border-[#1E40AF] text-white' : 'bg-[#DBEAFE] border-[#DBEAFE] text-[#1E40AF]'}`}>
+                  &#128100;
                 </div>
                 <div className="pt-[6px]">
-                  <div className={`text-[14px] font-[800] mb-[2px] ${status === 'REOPENED' ? 'text-[#991B1B]' : step2Done ? 'text-[#0f1923]' : 'text-[#6b7280]'}`}>
-                    {status === 'REOPENED' ? 'Rejected by HR' : 'HR Manager reviews'}
-                  </div>
+                  <div className={`text-[14px] font-[800] mb-[2px] ${step2Done ? 'text-[#0f1923]' : 'text-[#6b7280]'}`}>HR Manager reviews</div>
                   <div className="text-[13px] text-[#6b7280]">
-                    {status === 'REOPENED' 
-                      ? `Returned to Line Manager on ${appraisal.workflow?.rejectedAt ? new Date(appraisal.workflow.rejectedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently'}.`
-                      : step2Done 
-                        ? 'HR Manager approved and submitted to CEO.' 
-                        : (step1Done ? 'Waiting for HR review.' : 'Pending Manager submission.')}
+                    {step2Done ? 'HR Manager approved and submitted to CEO.' : (step1Done ? 'Waiting for HR review.' : 'Pending Manager submission.')}
                   </div>
                 </div>
               </div>
 
               {/* Step 3: CEO */}
               <div className="flex items-start gap-[16px] relative z-10">
-                <div className={`w-[32px] h-[32px] rounded-full border-[2.5px] flex items-center justify-center text-[12px] transition-colors ${status === 'NOT_APPROVED' ? 'bg-[#FEE2E2] border-[#FEE2E2] text-[#991B1B]' : step3Done ? 'bg-[#D97706] border-[#D97706] text-white' : 'bg-[#FEF3C7] border-[#FEF3C7] text-[#D97706]'}`}>
-                  {status === 'NOT_APPROVED' ? '❌' : '👑'}
+                <div className={`w-[32px] h-[32px] rounded-full border-[2.5px] flex items-center justify-center text-[12px] transition-colors ${step3Done ? 'bg-[#D97706] border-[#D97706] text-white' : 'bg-[#FEF3C7] border-[#FEF3C7] text-[#D97706]'}`}>
+                  &#128081;
                 </div>
                 <div className="pt-[6px]">
-                  <div className={`text-[14px] font-[800] mb-[2px] ${status === 'NOT_APPROVED' ? 'text-[#991B1B]' : step3Done ? 'text-[#0f1923]' : 'text-[#6b7280]'}`}>
-                    {status === 'NOT_APPROVED' ? 'Rejected by CEO' : 'CEO approves'}
-                  </div>
+                  <div className={`text-[14px] font-[800] mb-[2px] ${step3Done ? 'text-[#0f1923]' : 'text-[#6b7280]'}`}>CEO approves</div>
                   <div className="text-[13px] text-[#6b7280]">
-                    {status === 'NOT_APPROVED' 
-                      ? `Returned for revision on ${appraisal.workflow?.rejectedAt ? new Date(appraisal.workflow.rejectedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently'}.`
-                      : step3Done 
-                        ? 'CEO approved your appraisal result.' 
-                        : (step2Done ? 'Waiting for CEO decision.' : 'Pending prior steps.')}
+                    {step3Done ? 'CEO approved your appraisal result.' : (step2Done ? 'Waiting for CEO decision.' : 'Pending prior steps.')}
                   </div>
                 </div>
               </div>
