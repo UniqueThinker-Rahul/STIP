@@ -133,8 +133,9 @@ function NewAppraisalForm() {
   
   const [filterYear, setFilterYear] = useState('');
 
+  // 🚨 FIX: Added extraComment to state for the new optional box
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '' });
+  const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '', extraComment: '' });
   
   const [criterionComments, setCriterionComments] = useState({
     expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: ''
@@ -178,7 +179,7 @@ function NewAppraisalForm() {
   };
 
   const parseComments = (combinedString) => {
-    if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
+    if (!combinedString) return { expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '', extraComment: '' };
     
     // Parse New Format
     if (combinedString.includes('1. Job Competence:')) {
@@ -197,7 +198,9 @@ function NewAppraisalForm() {
         dependability: extract('3. Dependability:', '4. Adaptability:'),
         adaptability: extract('4. Adaptability:', '5. Safe Working:'),
         safeWorking: extract('5. Safe Working:', '6. Delivered Expected Results:'),
-        expectedResults: extract('6. Delivered Expected Results:', null)
+        // 🚨 FIX: Extract general/extra notes if they exist, otherwise just go to end
+        expectedResults: extract('6. Delivered Expected Results:', '7. General Manager Notes:'),
+        extraComment: extract('7. General Manager Notes:', null)
       };
     }
 
@@ -218,25 +221,27 @@ function NewAppraisalForm() {
         safeWorking: extract('3. Safe Working:', '4. Job Competence:'),
         jobCompetence: extract('4. Job Competence:', '5. Dependability:'),
         dependability: extract('5. Dependability:', '6. Adaptability:'),
-        adaptability: extract('6. Adaptability:', null)
+        adaptability: extract('6. Adaptability:', null),
+        extraComment: ''
       };
     }
 
     if (combinedString.includes('|||')) {
       const parts = combinedString.split('|||');
-      if (parts.length === 6) {
+      if (parts.length >= 6) {
         return {
           expectedResults: parts[0].replace('Results: ', '').trim(),
           initiative: parts[1].replace('Initiative: ', '').trim(),
           safeWorking: parts[2].replace('Safety: ', '').trim(),
           jobCompetence: parts[3].replace('Competence: ', '').trim(),
           dependability: parts[4].replace('Dependability: ', '').trim(),
-          adaptability: parts[5].replace('Adaptability: ', '').trim()
+          adaptability: parts[5].replace('Adaptability: ', '').trim(),
+          extraComment: ''
         };
       }
     }
 
-    return { expectedResults: combinedString, initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' };
+    return { expectedResults: combinedString, initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '', extraComment: '' };
   };
 
   useEffect(() => {
@@ -298,18 +303,21 @@ function NewAppraisalForm() {
             
             const qId = draftData.appraisalQuarter?._id || draftData.appraisalQuarter || (defaultQ?._id || '');
             const matchedQ = fetchedQuarters.find(q => q._id === qId);
+            
+            const parsedDftComments = parseComments(draftData.narrative?.generalComments);
 
             setFormData({
               title: emp?.employmentDetails?.jobTitle || '',
               quarter: qId,
-              epJustification: draftData.narrative?.epJustification || ''
+              epJustification: draftData.narrative?.epJustification || '',
+              extraComment: parsedDftComments.extraComment || '' // 🚨 FIX: Load back extra comments
             });
 
             if (matchedQ) {
               setFilterYear(matchedQ.year?.toString() || new Date().getFullYear().toString());
             }
 
-            setCriterionComments(parseComments(draftData.narrative?.generalComments));
+            setCriterionComments(parsedDftComments);
 
             setScores({
               expectedResults: draftData.scores?.deliveredResults?.rating ?? null,
@@ -359,12 +367,12 @@ function NewAppraisalForm() {
       setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
       setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
       const emp = team.find(s => s._id === selectedStaffId);
-      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', epJustification: '' }));
+      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', epJustification: '', extraComment: '' }));
     } else {
       setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
       setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
       const emp = team.find(s => s._id === selectedStaffId);
-      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', epJustification: '' }));
+      setFormData(prev => ({ ...prev, title: emp?.employmentDetails?.jobTitle || '', epJustification: '', extraComment: '' }));
     }
 
     setQuarterStatuses(newStatuses);
@@ -451,6 +459,7 @@ function NewAppraisalForm() {
     const val = scores[critId];
     if (val === null) return false;
     
+    // 1.0 no longer requires a comment to be considered complete
     if (val === 1.0) return true;
     
     const comment = criterionComments[critId] || '';
@@ -466,10 +475,7 @@ function NewAppraisalForm() {
   const handleScore = (critId, val) => {
     if (isCurrentQuarterLocked) return;
     
-    if (val === 1.0) {
-       setCriterionComments(prev => ({ ...prev, [critId]: '' }));
-    }
-    
+    // Removed auto-clear of comments when selecting 1.0
     setScores(prev => ({ ...prev, [critId]: val }));
   };
 
@@ -477,7 +483,7 @@ function NewAppraisalForm() {
     setSelectedStaffId('');
     setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
     setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
-    setFormData({ title: '', quarter: activeQuarterId, epJustification: '' });
+    setFormData({ title: '', quarter: activeQuarterId, epJustification: '', extraComment: '' });
     setRejectionReason('');
     if (draftId) router.replace('/dashboard/manager/new'); 
   };
@@ -513,6 +519,7 @@ function NewAppraisalForm() {
     if (!isDraft) {
       const missingComments = CRITERIA.filter(c => {
          const s = scores[c.id];
+         // Validation remains ignored for 1.0, treating the comment as strictly optional
          if (s === 1.0) return false;
          const com = criterionComments[c.id] || '';
          return com.trim().length < 5;
@@ -525,24 +532,29 @@ function NewAppraisalForm() {
 
     setIsSubmitting(true);
     try {
-      const compiledComments = 
+      // 🚨 FIX: Compiled the new general notes safely onto the end of the text blob
+      let compiledComments = 
 `1. Job Competence:
-${criterionComments.jobCompetence || 'No comment required for E (1.0).'}
+${criterionComments.jobCompetence || (scores.jobCompetence === 1.0 ? 'No comment required for E (1.0).' : '')}
 
 2. Behaviors & Initiative:
-${criterionComments.initiative || 'No comment required for E (1.0).'}
+${criterionComments.initiative || (scores.initiative === 1.0 ? 'No comment required for E (1.0).' : '')}
 
 3. Dependability:
-${criterionComments.dependability || 'No comment required for E (1.0).'}
+${criterionComments.dependability || (scores.dependability === 1.0 ? 'No comment required for E (1.0).' : '')}
 
 4. Adaptability:
-${criterionComments.adaptability || 'No comment required for E (1.0).'}
+${criterionComments.adaptability || (scores.adaptability === 1.0 ? 'No comment required for E (1.0).' : '')}
 
 5. Safe Working:
-${criterionComments.safeWorking || 'No comment required for E (1.0).'}
+${criterionComments.safeWorking || (scores.safeWorking === 1.0 ? 'No comment required for E (1.0).' : '')}
 
 6. Delivered Expected Results:
-${criterionComments.expectedResults || 'No comment required for E (1.0).'}`;
+${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No comment required for E (1.0).' : '')}`;
+
+      if (formData.extraComment.trim().length > 0) {
+         compiledComments += `\n\n7. General Manager Notes:\n${formData.extraComment.trim()}`;
+      }
 
       const payload = {
         employeeId: selectedStaffId,
@@ -967,20 +979,20 @@ ${criterionComments.expectedResults || 'No comment required for E (1.0).'}`;
                               ))}
                             </div>
                             
-                            {isRated && val !== 1.0 && (
+                            {isRated && (
                               <div className="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
                                 <div className="flex items-center gap-1.5 mb-2">
                                   <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
-                                  <span className="text-[11px] font-bold text-slate-700">Rating Justification <span className="text-red-500">*</span></span>
+                                  <span className="text-[11px] font-bold text-slate-700">Rating Justification {val !== 1.0 ? <span className="text-red-500">*</span> : <span className="text-gray-400 font-normal">(Optional)</span>}</span>
                                 </div>
                                 <textarea 
                                   disabled={isCurrentQuarterLocked}
-                                  className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-400 focus:bg-white resize-none shadow-inner transition-colors min-h-[60px]"
-                                  placeholder={`Why did you assign a rating of ${val.toFixed(1)} for ${crit.name}? (Mandatory)`}
+                                  className={`w-full p-2.5 text-xs bg-slate-50 border rounded-lg outline-none focus:bg-white resize-none shadow-inner transition-colors min-h-[60px] ${val !== 1.0 ? 'border-slate-200 focus:border-blue-400' : 'border-gray-200 focus:border-gray-400'}`}
+                                  placeholder={val !== 1.0 ? `Why did you assign a rating of ${val.toFixed(1)} for ${crit.name}? (Mandatory)` : `Add any optional notes regarding their effective performance here...`}
                                   value={criterionComments[crit.id]}
                                   onChange={(e) => setCriterionComments({...criterionComments, [crit.id]: e.target.value})}
                                 />
-                                {criterionComments[crit.id].trim().length > 0 && criterionComments[crit.id].trim().length < 5 && (
+                                {val !== 1.0 && criterionComments[crit.id].trim().length > 0 && criterionComments[crit.id].trim().length < 5 && (
                                   <p className="text-[10px] text-red-500 mt-1">Please provide a more detailed justification to unlock the next criteria.</p>
                                 )}
                               </div>
@@ -1044,6 +1056,22 @@ ${criterionComments.expectedResults || 'No comment required for E (1.0).'}`;
                     />
                   </div>
                 )}
+                
+                {/* 🚨 ADDED: General / Extra Comments Box at the bottom */}
+                <div className="mx-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
+                   <div className="flex items-center gap-2 mb-2">
+                     <MessageSquare className="w-4 h-4 text-slate-500" />
+                     <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Additional General Comments <span className="text-gray-400 font-normal normal-case">(Optional)</span></span>
+                   </div>
+                   <textarea 
+                     disabled={isCurrentQuarterLocked}
+                     className="w-full p-3 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-slate-400 resize-none h-20 shadow-inner"
+                     placeholder="Add any extra notes or general feedback regarding this staff member that are not directly related to a specific performance rating..."
+                     value={formData.extraComment || ''}
+                     onChange={(e) => setFormData({...formData, extraComment: e.target.value})}
+                   />
+                </div>
+
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2 mt-4">
@@ -1249,7 +1277,7 @@ ${criterionComments.expectedResults || 'No comment required for E (1.0).'}`;
         </div>
       </div>
 
-      {/* 🚨 NEW: Centered Screen-Locking Custom Modal */}
+      {/* Centered Screen-Locking Custom Modal */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-[16px] shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">

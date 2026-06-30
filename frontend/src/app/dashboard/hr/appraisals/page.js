@@ -2,7 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
-import { Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, AlertTriangle } from 'lucide-react';
+
+// Map backend API score keys to readable labels (Added for parsing comments)
+const SCORE_LABELS = {
+  jobCompetence: "Job Competence",
+  dependability: "Dependability",
+  deliveredResults: "Delivered Results",
+  adaptability: "Adaptability/Flexibility",
+  safeWorking: "Safe Working Environment",
+  behaviors: "Behaviors & Initiative"
+};
 
 // --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
 const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
@@ -52,7 +62,6 @@ const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass 
             </div>
           </div>
           
-          {/* Max height calculated to show approx 5 items before scrolling */}
           <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
             <div 
               onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
@@ -82,7 +91,6 @@ const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass 
 };
 // ----------------------------------------------
 
-
 export default function HRAllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
   const [staff, setStaff] = useState([]); 
@@ -102,6 +110,7 @@ export default function HRAllAppraisals() {
   const [officeFilter, setOfficeFilter] = useState('');
   
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
+  const [expandedComment, setExpandedComment] = useState(null);
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
@@ -200,8 +209,8 @@ export default function HRAllAppraisals() {
       case 'APPROVED_BY_HR': return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#A7F3D0]">HR APPROVED</span>;
       case 'WITH_CEO': return <span className="bg-[#EDE9FE] text-[#4C1D95] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#DDD6FE]">WITH CEO</span>;
       case 'APPROVED': return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#A7F3D0]">CEO APPROVED</span>;
-      case 'REOPENED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#FECACA]">REOPENED</span>;
-      case 'NOT_APPROVED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#FECACA]">REJECTED</span>;
+      case 'REOPENED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#FECACA]">HR REJECTED</span>;
+      case 'NOT_APPROVED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#FECACA]">CEO REJECTED</span>;
       default: return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-full text-[11px] font-[700] uppercase tracking-wider border border-[#E2DDD4]">{st}</span>;
     }
   };
@@ -217,6 +226,55 @@ export default function HRAllAppraisals() {
        return { id: mId, name: `${found.personalDetails?.firstName} ${found.personalDetails?.lastName}`.trim() };
     }
     return { id: mId, name: 'Unknown Manager' };
+  };
+
+  // 🚨 UPGRADE: Refactored logic to accurately parse the actual format saved in the DB
+  const parseComments = (combinedString) => {
+    if (!combinedString) return {};
+    
+    // Parse New Accurate Format
+    if (combinedString.includes('1. Job Competence:')) {
+      const extract = (currentLabel, nextLabel) => {
+        const startIdx = combinedString.indexOf(currentLabel);
+        if (startIdx === -1) return '';
+        const startOfContent = startIdx + currentLabel.length;
+        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
+        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
+        return combinedString.substring(startOfContent, endIdx).trim();
+      };
+
+      return {
+        jobCompetence: extract('1. Job Competence:', '2. Behaviors & Initiative:'),
+        initiative: extract('2. Behaviors & Initiative:', '3. Dependability:'),
+        dependability: extract('3. Dependability:', '4. Adaptability:'),
+        adaptability: extract('4. Adaptability:', '5. Safe Working:'),
+        safeWorking: extract('5. Safe Working:', '6. Delivered Expected Results:'),
+        deliveredResults: extract('6. Delivered Expected Results:', null)
+      };
+    }
+
+    // Fallback for extreme legacy format if any
+    if (combinedString.includes('1. Delivered Expected Results:')) {
+      const extract = (currentLabel, nextLabel) => {
+        const startIdx = combinedString.indexOf(currentLabel);
+        if (startIdx === -1) return '';
+        const startOfContent = startIdx + currentLabel.length;
+        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
+        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
+        return combinedString.substring(startOfContent, endIdx).trim();
+      };
+
+      return {
+        deliveredResults: extract('1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
+        behaviors: extract('2. Behaviors & Initiative:', '3. Safe Working:'),
+        safeWorking: extract('3. Safe Working:', '4. Job Competence:'),
+        jobCompetence: extract('4. Job Competence:', '5. Dependability:'),
+        dependability: extract('5. Dependability:', '6. Adaptability:'),
+        adaptability: extract('6. Adaptability:', null)
+      };
+    }
+    
+    return {};
   };
 
   let dataToFilter = [...appraisals];
@@ -306,7 +364,6 @@ export default function HRAllAppraisals() {
   const handleDownloadReport = () => {
     let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Status,Last Updated Date & Time\n";
     
-    // Always download the FULL filtered list, not just the current page
     filtered.forEach(a => {
       const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
       const empId = `"${a.employeeId?.employeeId || ''}"`;
@@ -320,6 +377,8 @@ export default function HRAllAppraisals() {
       
       let statusText = a.workflow?.status || 'UNKNOWN';
       if (a.isMissing) statusText = 'NOT_STARTED';
+      if (statusText === 'REOPENED') statusText = 'HR_REJECTED';
+      if (statusText === 'NOT_APPROVED') statusText = 'CEO_REJECTED';
       const status = `"${statusText}"`;
       
       const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
@@ -337,7 +396,6 @@ export default function HRAllAppraisals() {
     document.body.removeChild(link);
   };
 
-  // Generate page numbers for pagination
   const getPageNumbers = () => {
     let pages = [];
     if (totalPages <= 5) {
@@ -434,6 +492,8 @@ export default function HRAllAppraisals() {
             { value: 'WITH_CEO', label: 'With CEO' },
             { value: 'APPROVED', label: 'CEO Approved' },
             { value: 'NOT_SUBMITTED', label: 'Not Submitted (Missing)' },
+            { value: 'REOPENED', label: 'HR Rejected' },
+            { value: 'NOT_APPROVED', label: 'CEO Rejected' },
           ]}
         />
         
@@ -505,7 +565,13 @@ export default function HRAllAppraisals() {
                         {a.isMissing ? (
                            <span className="text-[10px] font-bold text-red-400 italic">No Data</span>
                         ) : (
-                          <button onClick={() => setSelectedAppraisal(a)} className="text-[11px] font-[700] text-[#0f1923] bg-white border border-[#E2DDD4] px-[12px] py-[6px] rounded-[6px] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors shadow-sm">
+                          <button 
+                            onClick={() => {
+                              setSelectedAppraisal(a);
+                              setExpandedComment(null);
+                            }} 
+                            className="text-[11px] font-[700] text-[#0f1923] bg-white border border-[#E2DDD4] px-[12px] py-[6px] rounded-[6px] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors shadow-sm"
+                          >
                             Inspect &rarr;
                           </button>
                         )}
@@ -518,64 +584,85 @@ export default function HRAllAppraisals() {
           </table>
         </div>
 
-        {/* 🚨 UPGRADED: Table Pagination Footer with Direct Page Selection */}
-        {filtered.length > itemsPerPage && (
-          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
-            <div className="text-[12px] text-[#6b7280] font-[600]">
-              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filtered.length)}</span> of <span className="text-[#0f1923]">{filtered.length}</span> entries
-            </div>
-            
-            <div className="flex items-center gap-[4px]">
-              <button 
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-[14px] h-[14px]" />
-              </button>
-              
-              <div className="flex gap-[4px] px-[4px]">
-                {getPageNumbers().map((number, index) => (
-                  <button
-                    key={index}
-                    onClick={() => number !== '...' && setCurrentPage(number)}
-                    disabled={number === '...'}
-                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
-                      number === currentPage 
-                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
-                        : number === '...' 
-                          ? 'bg-transparent text-[#6b7280] cursor-default'
-                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
-                    }`}
-                  >
-                    {number}
-                  </button>
-                ))}
-              </div>
-
-              <button 
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-[14px] h-[14px]" />
-              </button>
-            </div>
+        <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+          <div className="text-[12px] text-[#6b7280] font-[600]">
+            Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filtered.length)}</span> of <span className="text-[#0f1923]">{filtered.length}</span> entries
           </div>
-        )}
+          
+          <div className="flex items-center gap-[4px]">
+            <button 
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="w-[14px] h-[14px]" />
+            </button>
+            
+            <div className="flex gap-[4px] px-[4px]">
+              {getPageNumbers().map((number, index) => (
+                <button
+                  key={index}
+                  onClick={() => number !== '...' && setCurrentPage(number)}
+                  disabled={number === '...'}
+                  className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                    number === currentPage 
+                      ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                      : number === '...' 
+                        ? 'bg-transparent text-[#6b7280] cursor-default'
+                        : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                  }`}
+                >
+                  {number}
+                </button>
+              ))}
+            </div>
+
+            <button 
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight className="w-[14px] h-[14px]" />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Audit Modal */}
+      {/* Audit Modal - WITH DYNAMIC KPA COMMENTS */}
       {selectedAppraisal && !selectedAppraisal.isMissing && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
             
-            <div className="p-[20px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] relative">
+            <div className="p-[20px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] relative shrink-0">
               <h2 className="text-[18px] font-[800] text-[#0D2B55]">&#128269; Appraisal Audit View</h2>
               <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">&times;</button>
             </div>
             
-            <div className="p-[24px] overflow-y-auto custom-scrollbar">
+            <div className="p-[24px] overflow-y-auto custom-scrollbar flex-1">
+
+              {selectedAppraisal.workflow?.status === 'REOPENED' && selectedAppraisal.narrative?.hrComments && (
+                <div className="mb-[24px] bg-[#FEE2E2] border-l-4 border-[#DC2626] p-[16px] rounded-r-[8px] shadow-sm">
+                  <div className="flex items-center gap-[8px] mb-[4px]">
+                    <AlertTriangle className="w-[16px] h-[16px] text-[#DC2626]" />
+                    <span className="text-[12px] font-[800] text-[#991B1B] uppercase tracking-wider">
+                      Rejected by HR ({selectedAppraisal.workflow?.rejectedAt ? new Date(selectedAppraisal.workflow.rejectedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently'})
+                    </span>
+                  </div>
+                  <p className="text-[13px] text-[#7F1D1D] italic mt-[4px]">"{selectedAppraisal.narrative.hrComments}"</p>
+                </div>
+              )}
+              
+              {selectedAppraisal.workflow?.status === 'NOT_APPROVED' && selectedAppraisal.narrative?.ceoComments && (
+                <div className="mb-[24px] bg-[#FEE2E2] border-l-4 border-[#DC2626] p-[16px] rounded-r-[8px] shadow-sm">
+                  <div className="flex items-center gap-[8px] mb-[4px]">
+                    <AlertTriangle className="w-[16px] h-[16px] text-[#DC2626]" />
+                    <span className="text-[12px] font-[800] text-[#991B1B] uppercase tracking-wider">
+                      Rejected by CEO ({selectedAppraisal.workflow?.rejectedAt ? new Date(selectedAppraisal.workflow.rejectedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently'})
+                    </span>
+                  </div>
+                  <p className="text-[13px] text-[#7F1D1D] italic mt-[4px]">"{selectedAppraisal.narrative.ceoComments}"</p>
+                </div>
+              )}
               
               <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
                 <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
@@ -609,6 +696,58 @@ export default function HRAllAppraisals() {
                   <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.employeeId?.companyCode || 'FSM'}</div>
                 </div>
               </div>
+
+              <div className="mb-[24px]">
+                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings & Comments</h4>
+                <div className="flex flex-col gap-[10px]">
+                  {Object.entries(SCORE_LABELS).map(([key, label]) => {
+                    const rating = selectedAppraisal.scores?.[key]?.rating;
+                    const commentsObj = parseComments(selectedAppraisal.narrative?.generalComments);
+                    const comment = commentsObj[key] || "No justification provided.";
+                    const isExpanded = expandedComment === key;
+                    const hasRating = rating !== null && rating !== undefined;
+
+                    return (
+                      <div key={key} className="bg-white border border-[#E2DDD4] rounded-[8px] overflow-hidden shadow-sm transition-all duration-200">
+                        <div 
+                          className="flex justify-between items-center p-[10px_14px] cursor-pointer hover:bg-slate-50 transition-colors"
+                          onClick={() => setExpandedComment(isExpanded ? null : key)}
+                        >
+                          <div className="flex items-center gap-2">
+                             <span className="text-[13px] font-[600] text-[#475569]">{label}</span>
+                             {hasRating && rating !== 1.0 && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
+                          </div>
+                          
+                          <div className="flex items-center gap-3">
+                            <span className={`text-[14px] font-[800] ${!hasRating ? 'text-slate-300' : rating >= 3 ? 'text-[#059669]' : rating >= 2 ? 'text-[#D97706]' : 'text-[#DC2626]'}`}>
+                              {hasRating ? rating.toFixed(1) : '-'}
+                            </span>
+                            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="p-[10px_14px] bg-slate-50 border-t border-[#E2DDD4] text-[12px] text-slate-700 animate-in fade-in slide-in-from-top-1">
+                            <div className="font-semibold text-slate-500 mb-1 text-[10px] uppercase tracking-wider">Manager Justification:</div>
+                            <div className="italic leading-relaxed">{comment}</div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {selectedAppraisal.narrative?.epJustification && (
+                 <div className="mb-[24px]">
+                    <div className="bg-yellow-50 border-l-4 border-[#D97706] p-[16px] rounded-r-[8px] shadow-sm">
+                       <div className="flex items-center gap-[8px] mb-[4px]">
+                         <span className="text-[12px] font-[800] text-[#92400E] uppercase tracking-wider">EP Justification Provided</span>
+                       </div>
+                       <p className="text-[13px] text-[#78350F] italic leading-relaxed mt-[4px]">"{selectedAppraisal.narrative.epJustification}"</p>
+                    </div>
+                 </div>
+              )}
 
               <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
                 <StatusTag st={selectedAppraisal.workflow?.status} />

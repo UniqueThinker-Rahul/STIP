@@ -1,444 +1,441 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Download, Check, FileX, Calendar, Eye, X, MessageSquare, ChevronDown } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+// 🚨 FIXED: Corrected the relative path to go up 4 levels to access 'lib' and 'components'
 import api from '../../../../lib/api';
+import StipCategoryChart from '../../../../components/charts/StipCategoryChart';
 
-const getInitials = (name) => {
-  if (!name) return '';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-};
+const KPAS = [
+  { name: 'Financial Resilience', wt: 14, color: '#3B82F6' },
+  { name: 'Operational Effectiveness', wt: 45, color: '#059669' },
+  { name: 'Human Capital', wt: 26, color: '#F59E0B' },
+  { name: 'Safety & Environment', wt: 12, color: '#10B981' },
+  { name: 'Reputational Capital', wt: 3, color: '#8B5CF6' }
+];
 
-// Map backend API score keys to readable labels
-const SCORE_LABELS = {
-  jobCompetence: "Job Competence",
-  dependability: "Dependability",
-  deliveredResults: "Delivered Results",
-  adaptability: "Adaptability/Flexibility",
-  safeWorking: "Safe Working Environment",
-  behaviors: "Behaviors & Initiative"
-};
-
-export default function MySubmissions() {
-  const [submissions, setSubmissions] = useState([]);
-  const [loading, setLoading] = useState(true);
+export default function KPAScorecard() {
+  const router = useRouter();
   
-  const [team, setTeam] = useState([]);
-  const [quarters, setQuarters] = useState([]);
-  const [selectedQuarterId, setSelectedQuarterId] = useState('');
-  const [reportType, setReportType] = useState('ALL'); 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [kpaActuals, setKpaActuals] = useState([null, null, null, null, null]);
+  const [locked, setLocked] = useState(false);
+  const [lockedBy, setLockedBy] = useState('');
+  const [lockedAt, setLockedAt] = useState('');
+  const [successModal, setSuccessModal] = useState({ show: false, icon: '', title: '', detail: '' });
+  const [lockModal, setLockModal] = useState(false);
 
-  const [selectedAppraisal, setSelectedAppraisal] = useState(null);
-  const [expandedComment, setExpandedComment] = useState(null); // Added state for toggling comments
-
-  const cpPct = 13.01;
-
+  // Fetch initial data from backend
   useEffect(() => {
-    const fetchSubmissionsAndContext = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
-        const [appRes, teamRes, quarterRes] = await Promise.all([
-          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
-          api.get('/users/my-team').catch(() => ({ data: { data: [] } })),
-          api.get('/quarters').catch(() => ({ data: { data: [] } }))
-        ]);
+        const res = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+        const metrics = res.data?.data;
         
-        const myAppraisals = appRes.data?.data || [];
-        const myTeam = teamRes.data?.data || [];
-        const activeQuarters = quarterRes.data?.data || [];
-        
-        const submitted = myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT');
-        submitted.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-        
-        setSubmissions(submitted);
-        setTeam(myTeam);
-        setQuarters(activeQuarters);
-        
-        const now = new Date();
-        const activeQ = activeQuarters.find(q => {
-          const start = new Date(q.startDate); start.setHours(0,0,0,0);
-          const end = new Date(q.endDate); end.setHours(23,59,59,999);
-          return now >= start && now <= end;
-        });
-        
-        if (activeQ) setSelectedQuarterId(activeQ._id);
-        else if (activeQuarters.length > 0) setSelectedQuarterId(activeQuarters[0]._id);
-
+        if (metrics) {
+          setKpaActuals([
+            metrics.financialResilience,
+            metrics.operationalEffectiveness,
+            metrics.humanCapital,
+            metrics.safetyEnvironment,
+            metrics.reputationalCapital
+          ]);
+          setLocked(metrics.locked || false);
+          if (metrics.lockedAt) {
+            setLockedAt(new Date(metrics.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+          }
+          if (metrics.lockedBy) {
+            setLockedBy('Jared Morris'); // Assuming CEO
+          }
+        }
       } catch (error) {
-        console.error('Failed to load submissions context', error);
+        console.error('Failed to load KPA data', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchSubmissionsAndContext();
+    fetchData();
   }, []);
 
-  const getStatusConfig = (status) => {
-    switch(status) {
-      case 'SUBMITTED': return { text: 'Submitted to HR', badgeClass: 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]' };
-      case 'UNDER_HR_REVIEW': return { text: 'Under HR Review', badgeClass: 'bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE]' };
-      case 'APPROVED_BY_HR': return { text: 'HR Approved', badgeClass: 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' };
-      case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
-      case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
-      case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
-      case 'PENDING_SUBMISSION': return { text: 'Awaiting Manager Rating', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
-      default: return { text: status?.replace(/_/g, ' ') || 'Unknown', badgeClass: 'bg-[#E2DDD4] text-[#6b7280]' };
-    }
+  // Real-time calculations
+  const handleInput = (idx, val) => {
+    const v = val === '' ? null : Math.min(100, Math.max(0, parseFloat(val) || 0));
+    const newArr = [...kpaActuals];
+    newArr[idx] = v;
+    setKpaActuals(newArr);
   };
 
-  // 🚨 FIX: Extract derived items so the visual list reacts to the dropdown filters
-  const getDisplayedItems = () => {
-    if (!selectedQuarterId) return [];
-
-    const quarterAppraisals = submissions.filter(app => {
-      const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
-      return qId === selectedQuarterId;
-    });
-
-    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
-    let items = [];
-
-    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
-      items = [...quarterAppraisals];
-    }
-
-    if (reportType === 'MISSING' || reportType === 'ALL') {
-      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
-      const missingItems = missingStaff.map(u => ({
-        _id: `missing-${u._id}`,
-        isMissing: true,
-        employeeId: u,
-        appraisalQuarter: quarters.find(q => q._id === selectedQuarterId),
-        workflow: { status: 'PENDING_SUBMISSION' },
-        calculatedResults: { finalIprfScore: 0 }
-      }));
-      items = [...items, ...missingItems];
-    }
-
-    return items;
-  };
-
-  const displayedItems = getDisplayedItems();
-
-  const handleDownloadTeamReport = () => {
-    if (!selectedQuarterId) return alert('Please select a quarter first.');
+  let bscRaw = null;
+  let cpPct = null;
+  const anyKpaEntered = kpaActuals.some(v => v !== null);
+  
+  if (anyKpaEntered) {
+    // 🚨 FIXED: The * 100 line was removed as it was inflating 100% to 10,000. 
+    bscRaw = kpaActuals.reduce((sum, val, idx) => sum + ((val || 0) * (KPAS[idx].wt / 100)), 0);
     
-    const targetQuarter = quarters.find(q => q._id === selectedQuarterId);
-    if (!targetQuarter) return;
+    // CP is BSC * 15% Max Cap
+    cpPct = bscRaw * 0.15;
+  }
 
-    // 🚨 FIX: Strict quarter matching for download logic
-    const quarterAppraisals = submissions.filter(app => {
-      const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
-      return qId === selectedQuarterId;
-    });
-    
-    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
+  const awNIf = cpPct ? `CP% × 0.7 × Pro-Rata` : 'CP% × 0.7 × Pro-Rata';
+  const awEf = cpPct ? `CP% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
+  const awEPf = cpPct ? `CP% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
 
-    let csvRows = [];
-    let filename = '';
-
-    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
-      const headers = ['Employee Name', 'Job Title', 'Appraisal Reference', 'Final IPRF Score', 'Calculated Award %', 'Status', 'Submission Date'];
-      if (reportType === 'ALL') csvRows.push('--- STAFF WHO HAVE SUBMITTED ---');
-      csvRows.push(headers.join(','));
-
-      quarterAppraisals.forEach(record => {
-        const empName = `${record.employeeId?.personalDetails?.firstName || ''} ${record.employeeId?.personalDetails?.lastName || ''}`;
-        const jobTitle = record.employeeId?.employmentDetails?.jobTitle || 'Staff';
-        const iprf = record.calculatedResults?.finalIprfScore || 0;
-        const prorate = (record.employeeId?.employmentDetails?.prorateValue || 12) / 12;
-        const awardPct = (cpPct * iprf * prorate).toFixed(2);
-        
-        csvRows.push([
-          `"${empName}"`,
-          `"${jobTitle}"`,
-          record.appraisalRef || 'N/A',
-          iprf.toFixed(2),
-          `${awardPct}%`,
-          record.workflow?.status || 'UNKNOWN',
-          record.createdAt ? new Date(record.createdAt).toLocaleDateString() : 'N/A'
-        ].join(','));
-      });
-      filename = `My_Team_Submitted_Report_${targetQuarter.name}.csv`;
-    }
-
-    if (reportType === 'MISSING' || reportType === 'ALL') {
-      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
-      
-      if (reportType === 'ALL') {
-        csvRows.push(''); 
-        csvRows.push('--- STAFF WITH PENDING SUBMISSIONS ---');
-      }
-      
-      const missingHeaders = ['Employee ID', 'Employee Name', 'Job Title', 'Company Code', 'Action Required'];
-      csvRows.push(missingHeaders.join(','));
-
-      missingStaff.forEach(u => {
-        const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`;
-        csvRows.push([
-           u.employeeId || 'N/A',
-           `"${empName}"`,
-           `"${u.employmentDetails?.jobTitle || 'N/A'}"`,
-           u.companyCode || 'FSM',
-           'Awaiting Manager Rating'
-        ].join(','));
-      });
-      
-      if (reportType === 'MISSING') filename = `My_Team_Pending_Report_${targetQuarter.name}.csv`;
-      else filename = `My_Team_Complete_Status_Report_${targetQuarter.name}.csv`;
-    }
-
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', filename.replace(/\s+/g, '_'));
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Helper to extract specific comment from the compiled narrative text
-  const extractComment = (generalComments, currentLabel, nextLabel) => {
-    if (!generalComments) return '';
-    const startIdx = generalComments.indexOf(currentLabel);
-    if (startIdx === -1) return '';
-    const startOfContent = startIdx + currentLabel.length;
-    const endIdx = nextLabel ? generalComments.indexOf(nextLabel) : generalComments.length;
-    if (endIdx === -1) return generalComments.substring(startOfContent).trim();
-    return generalComments.substring(startOfContent, endIdx).trim();
-  };
-
-  const parseComments = (combinedString) => {
-    if (!combinedString) return {};
-    
-    if (combinedString.includes('1. Delivered Expected Results:')) {
-      return {
-        deliveredResults: extractComment(combinedString, '1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
-        behaviors: extractComment(combinedString, '2. Behaviors & Initiative:', '3. Safe Working:'),
-        safeWorking: extractComment(combinedString, '3. Safe Working:', '4. Job Competence:'),
-        jobCompetence: extractComment(combinedString, '4. Job Competence:', '5. Dependability:'),
-        dependability: extractComment(combinedString, '5. Dependability:', '6. Adaptability:'),
-        adaptability: extractComment(combinedString, '6. Adaptability:', null)
+  // Save functionality
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      const payload = {
+        reviewYear: 2026,
+        financialResilience: kpaActuals[0],
+        operationalEffectiveness: kpaActuals[1],
+        humanCapital: kpaActuals[2],
+        safetyEnvironment: kpaActuals[3],
+        reputationalCapital: kpaActuals[4],
+        bscRawScore: bscRaw,
+        cpPct: cpPct,
+        locked: false
       };
+      
+      await api.post('/company-metrics', payload);
+      
+      const filled = kpaActuals.filter(v => v !== null).length;
+      setSuccessModal({
+        show: true,
+        icon: '💾',
+        title: 'KPA Scores Saved',
+        detail: `${filled} of 5 KPA scores saved. ${5 - filled > 0 ? 'Enter the remaining ' + (5 - filled) + ' scores before locking.' : 'All scores entered — ready to lock when Board approves.'}`
+      });
+    } catch (error) {
+      alert("Failed to save KPA scores");
+    } finally {
+      setSaving(false);
     }
-    return {};
   };
 
-  if (loading) return <div className="p-10 text-center text-slate-500">Loading submissions...</div>;
+  // Lock functionality
+  const attemptLock = () => {
+    const allFilled = kpaActuals.every(v => v !== null);
+    if (!allFilled) {
+      alert('Please enter all 5 KPA scores before locking.');
+      return;
+    }
+    setLockModal(true);
+  };
+
+  const confirmLock = async () => {
+    try {
+      setSaving(true);
+      const payload = {
+        reviewYear: 2026,
+        financialResilience: kpaActuals[0],
+        operationalEffectiveness: kpaActuals[1],
+        humanCapital: kpaActuals[2],
+        safetyEnvironment: kpaActuals[3],
+        reputationalCapital: kpaActuals[4],
+        bscRawScore: bscRaw,
+        cpPct: cpPct,
+        locked: true
+      };
+      
+      await api.post('/company-metrics', payload);
+      
+      setLocked(true);
+      setLockedBy('Jared Morris');
+      setLockedAt(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+      setLockModal(false);
+      
+      setSuccessModal({
+        show: true,
+        icon: '🔒',
+        title: 'Scorecard Locked',
+        detail: `CP has been permanently set to ${cpPct.toFixed(2)}%. The scorecard is now read-only and HR can process awards.`
+      });
+    } catch (error) {
+      alert("Failed to lock the scorecard.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="p-10 text-center text-slate-500 animate-pulse font-medium">Loading Scorecard...</div>;
 
   return (
-    <div className="w-full max-w-full pb-[60px] relative">
+    <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
-      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E2DDD4] pb-4">
+      {/* Page Header */}
+      <div className="mb-[20px] flex justify-between items-end">
         <div>
-          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">&#128228; My Submissions</div>
-          <div className="text-[13px] text-[#6b7280]">Appraisals sent to HR for review and approval</div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
+            &#128200; KPA Scorecard
+          </div>
+          <div className="text-[13px] text-[#6b7280]">Enter CY2026 actual performance scores for each KPA area &mdash; CP% auto-calculates</div>
         </div>
+        <div className="flex gap-[10px]">
+          <button 
+            className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] hover:border-[#0D2B55] px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm disabled:opacity-50"
+            disabled={locked || saving} 
+            onClick={handleSave}
+          >
+            &#128190; Save Progress
+          </button>
+          <button 
+            className={`px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm ${locked ? 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' : 'bg-[#DC2626] hover:bg-[#B91C1C] text-white border-none'}`}
+            disabled={locked || saving} 
+            onClick={attemptLock}
+          >
+            {locked ? '🔒 Locked' : '🔒 Lock Scorecard'}
+          </button>
+        </div>
+      </div>
 
-        {team.length > 0 && quarters.length > 0 && (
-          <div className="bg-white p-3 rounded-lg border border-[#E2DDD4] flex flex-col sm:flex-row items-center gap-2 shadow-sm">
-            <div className="flex items-center gap-2 text-[11px] font-bold text-[#0D2B55]">
-              <Calendar className="w-4 h-4 text-[#C9A84C]" />
-              Filter & Export:
-            </div>
-            
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <select 
-                value={selectedQuarterId}
-                onChange={(e) => setSelectedQuarterId(e.target.value)}
-                className="p-1.5 border border-gray-200 rounded text-xs font-medium outline-none bg-slate-50 min-w-[120px]"
-              >
-                {quarters.map(q => <option key={q._id} value={q._id}>{q.name}</option>)}
-              </select>
-
-              <select 
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
-                className="p-1.5 border border-gray-200 rounded text-xs font-medium outline-none bg-slate-50"
-              >
-                <option value="ALL">All Team Status</option>
-                <option value="SUBMITTED">Submitted Only</option>
-                <option value="MISSING">Pending Only</option>
-              </select>
-
-              <button 
-                onClick={handleDownloadTeamReport}
-                className="p-1.5 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white rounded text-xs font-bold transition-colors flex items-center justify-center min-w-[32px]"
-                title="Download CSV Report"
-              >
-                <Download className="w-4 h-4" />
-              </button>
+      {locked && (
+        <div className="mb-[18px] animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="bg-[#D1FAE5] border-[1.5px] border-[#A7F3D0] rounded-[12px] p-[16px_20px] mb-[14px] flex items-center gap-[16px] shadow-sm">
+            <div className="text-[28px] shrink-0">&#128274;</div>
+            <div className="flex-1">
+              <div className="text-[15px] font-[800] text-[#065F46] mb-[3px]">Scorecard Locked — Board Approved</div>
+              <div className="text-[12px] text-[#065F46] leading-[1.6]">
+                Locked by: <strong className="font-[800]">{lockedBy || '—'}</strong> &nbsp;|&nbsp; Date: <strong className="font-[800]">{lockedAt || '—'}</strong><br/>
+                KPA scores are now <strong className="font-[800]">read-only for everyone</strong> &middot; Award generation unlocked for HR Admin
+              </div>
             </div>
           </div>
-        )}
-      </div>
-      
-      {displayedItems.length === 0 ? (
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[40px] text-center">
-          <div className="text-[40px] mb-[10px]">&#128194;</div>
-          <div className="text-[15px] font-[700] text-[#0D2B55] mb-[5px]">No Results Found</div>
-          <div className="text-[13px] text-[#6b7280]">No data matches the selected filters for this quarter.</div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-[12px]">
-          {displayedItems.map((a) => {
-            const statusConfig = getStatusConfig(a.workflow?.status);
-            
-            const fName = a.employeeId?.personalDetails?.firstName || 'Unknown';
-            const lName = a.employeeId?.personalDetails?.lastName || '';
-            const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
-            const quarter = a.appraisalQuarter?.name || a.period?.quarter || quarters.find(q => q._id === selectedQuarterId)?.name || 'CY2026';
-            
-            const iprf = a.calculatedResults?.finalIprfScore || 0;
-            const prorate = (a.employeeId?.employmentDetails?.prorateValue || 12) / 12;
-            const awardPct = a.isMissing ? '—' : (cpPct * iprf * prorate).toFixed(2);
 
-            return (
-              <div key={a._id} className="bg-white border border-[#E2DDD4] rounded-[12px] p-[16px_20px] flex flex-col sm:flex-row sm:items-center justify-between gap-[14px] hover:border-[#0D2B55]/30 transition-colors shadow-sm">
-                <div className="flex-1">
-                  <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
-                  <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· Submitted ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
-                  </div>
-                  
-                  {!a.isMissing && a.narrative?.generalComments && a.workflow?.status === 'REOPENED' && (
-                    <div className="mt-[8px] bg-[#FEE2E2] p-[8px_12px] rounded-[6px] text-[11px] text-[#991B1B] border border-[#FECACA]">
-                      <strong>HR Feedback:</strong> "{a.narrative.generalComments}"
-                    </div>
-                  )}
+          <div className="bg-[#FFF7ED] border-[1.5px] border-[#FED7AA] rounded-[12px] p-[16px_20px] mb-[18px] flex items-start gap-[12px] shadow-sm">
+            <div className="text-[22px] shrink-0 mt-[2px]">&#8505;</div>
+            <div>
+              <div className="text-[13px] font-[800] text-[#9A3412] mb-[8px]">How to unlock the scorecard</div>
+              <div className="text-[12px] text-[#9A3412] leading-[1.7]">
+                The scorecard lock is <strong className="font-[800]">permanent and irreversible through the CEO panel</strong>. This is intentional — it protects the Board-approved CP% from being changed after formal ratification.<br/><br/>
+                <strong className="font-[800]">If an unlock is required</strong> (e.g. data entry error before Board ratification):
+              </div>
+              <div className="mt-[10px] flex flex-col gap-[7px]">
+                <div className="flex items-start gap-[10px] bg-white/60 rounded-[8px] p-[10px_12px]">
+                  <span className="text-[14px] shrink-0">1️⃣</span>
+                  <div className="text-[12px] text-[#9A3412]"><strong className="font-[800]">Contact ICT Admin</strong> — Only the ICT Manager has the authority to reset the scorecard lock via the ICT Admin Panel or direct database access.</div>
                 </div>
-                
-                <div className="flex items-center gap-[10px] flex-wrap shrink-0">
-                  <span className={`text-[11px] font-[700] p-[4px_12px] rounded-full whitespace-nowrap ${statusConfig.badgeClass} hidden sm:block`}>
-                    {statusConfig.text}
-                  </span>
-                  <div className="text-[11px] text-[#6b7280] bg-[#FAF8F4] border border-[#E2DDD4] px-[10px] py-[5px] rounded-full font-mono">
-                    ID: {a.isMissing ? (a.employeeId?.employeeId || 'N/A') : (a.appraisalRef || a._id.toString().slice(-6).toUpperCase())}
-                  </div>
-                  
-                  {!a.isMissing && (
-                    <button 
-                      onClick={() => {
-                        setSelectedAppraisal(a);
-                        setExpandedComment(null); 
-                      }} 
-                      className="px-[12px] py-[5px] bg-white border border-[#E2DDD4] hover:border-[#0D2B55] hover:text-[#0D2B55] text-[#0f1923] text-[11px] font-[700] rounded-[6px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> View
-                    </button>
-                  )}
+                <div className="flex items-start gap-[10px] bg-white/60 rounded-[8px] p-[10px_12px]">
+                  <span className="text-[14px] shrink-0">2️⃣</span>
+                  <div className="text-[12px] text-[#9A3412]"><strong className="font-[800]">Board re-approval required</strong> — Any unlock must be accompanied by a formal Board decision to revise the CP%. The revised figures must be re-approved before re-locking.</div>
+                </div>
+                <div className="flex items-start gap-[10px] bg-white/60 rounded-[8px] p-[10px_12px]">
+                  <span className="text-[14px] shrink-0">3️⃣</span>
+                  <div className="text-[12px] text-[#9A3412]"><strong className="font-[800]">Audit trail updated</strong> — All unlock and re-lock actions are recorded in the system audit log with timestamps and user IDs for governance compliance.</div>
                 </div>
               </div>
-            );
-          })}
+              <div className="mt-[12px] p-[10px_12px] bg-white/50 rounded-[8px] border-l-[3px] border-[#FB923C]">
+                <div className="text-[11px] text-[#7C2D12] leading-[1.6]">
+                  &#128231; <strong className="font-[800]">To request an unlock:</strong> Contact the ICT Manager directly and provide written justification. The ICT Manager will coordinate with the Board and HR before proceeding.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* View Details Modal with Score Breakdown */}
-      {selectedAppraisal && (
-        <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
-          <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
-            
-            <div className="p-[20px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] relative">
-              <h2 className="text-[18px] font-[800] text-[#0D2B55]">&#128269; Submission Details</h2>
-              <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">
-                <X className="w-4 h-4" />
-              </button>
+      {!locked && (
+        <div className="bg-[#FEF2F2] border-[1.5px] border-[#FECACA] rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
+          <div className="text-[18px] text-[#991B1B]">&#9888;</div>
+          <div className="text-[13px] text-[#991B1B]">Locking is <strong className="font-[800]">permanent and irreversible</strong>. Once locked, KPA scores cannot be edited by anyone. Only lock after Board approval.</div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-[20px]">
+        
+        {/* KPA Entry Card */}
+        <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
+          <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
+            <div className="flex items-center gap-[10px]">
+              <div className="w-[30px] h-[30px] rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[14px]">&#127919;</div>
+              <div>
+                <div className="text-[14px] font-[800] text-[#0D2B55]">Enter KPA Actual Scores</div>
+                <div className="text-[11px] text-[#6b7280]">Type the actual performance % achieved for each KPA (0–100)</div>
+              </div>
+            </div>
+            <span className={`text-[10px] font-[800] px-[10px] py-[4px] rounded-full border ${locked ? 'bg-[#D1FAE5] text-[#065F46] border-[#A7F3D0]' : 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]'}`}>
+              {locked ? '🔒 Locked' : '🔓 Unlocked'}
+            </span>
+          </div>
+          
+          <div className="p-[20px] flex-1">
+            {/* Table Header */}
+            <div className="flex items-center pb-[8px] border-b-[2px] border-[#0D2B55] mb-[12px]">
+              <span className="flex-1 text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.07em]">KPA Area</span>
+              <span className="w-[80px] text-[10px] font-[800] text-[#1E40AF] uppercase tracking-[.07em] text-center">Weight</span>
+              <span className="w-[120px] text-[10px] font-[800] text-[#0D2B55] uppercase tracking-[.07em] text-center pl-[10px]">Actual %</span>
+              <span className="w-[120px] text-[10px] font-[800] text-[#059669] uppercase tracking-[.07em] text-center">Contribution</span>
             </div>
             
-            <div className="p-[24px] overflow-y-auto custom-scrollbar">
-              
-              <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
-                <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
-                  {selectedAppraisal.employeeId?.personalDetails?.firstName?.[0] || ''}{selectedAppraisal.employeeId?.personalDetails?.lastName?.[0] || ''}
-                </div>
-                <div>
-                  <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
-                    {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
-                  </h3>
-                  <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Submitted {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            {/* Rows */}
+            <div className="flex flex-col gap-[12px]">
+              {KPAS.map((k, i) => (
+                <div className="flex items-center p-[10px_0] border-b border-[#E2DDD4]/50" key={i}>
+                  <div className="flex-1 pr-[20px]">
+                    <div className="text-[13px] font-[700] text-[#0f1923] mb-[6px]">{k.name}</div>
+                    <div className="h-[6px] bg-[#E2DDD4] rounded-full overflow-hidden w-[80%]">
+                      <div className="h-full rounded-full transition-all duration-[400ms]" style={{ width: `${kpaActuals[i] || 0}%`, background: k.color }}></div>
+                    </div>
+                  </div>
+                  <div className="w-[80px] text-center text-[15px] font-[800] text-[#1E40AF]">{k.wt}%</div>
+                  <div className="w-[120px] pl-[10px]">
+                    <input 
+                      className="w-full bg-[#FAF8F4] border-[1.5px] border-[#E2DDD4] rounded-[8px] p-[8px] text-center text-[15px] font-[800] text-[#0D2B55] outline-none focus:border-[#0D2B55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+                      type="number" min="0" max="100" step="0.1"
+                      value={kpaActuals[i] !== null ? kpaActuals[i] : ''}
+                      placeholder="0–100" 
+                      disabled={locked}
+                      onChange={(e) => handleInput(i, e.target.value)}
+                    />
+                  </div>
+                  <div className="w-[120px] text-center text-[15px] font-[800] text-[#059669]">
+                    {kpaActuals[i] !== null ? ((kpaActuals[i] / 100) * k.wt).toFixed(2) : ' — '}
                   </div>
                 </div>
+              ))}
+            </div>
+
+            {/* Total Strip */}
+            <div className="mt-[24px] bg-[#FAF8F4] border-[1.5px] border-[#E2DDD4] rounded-[12px] p-[16px] flex flex-col md:flex-row justify-between items-center gap-[16px]">
+              <div>
+                <div className="text-[12px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">BSC Raw Score &rarr; Final CP%</div>
+                <div className="text-[24px] font-[800] text-[#0D2B55] leading-none mb-[6px]">
+                  {cpPct !== null ? `${bscRaw.toFixed(2)} / 100 → ${cpPct.toFixed(2)}%` : '—'}
+                </div>
+                <div className="text-[11px] text-[#6b7280]">Enter all 5 KPA scores to calculate &middot; Max cap: 15%</div>
               </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-[12px] mb-[24px]">
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Final IPRF</div>
-                  <div className="text-[22px] font-[800] text-[#1E40AF]">{selectedAppraisal.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0'}</div>
+              <div className="flex gap-[6px]">
+                <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">
+                  <div className="text-[14px] font-[800] text-[#92400E] leading-none mb-[4px]">{cpPct !== null ? (cpPct * 0.7).toFixed(2) + '%' : '—'}</div>
+                  <div className="text-[9px] font-[800] text-[#6b7280] uppercase tracking-wider">NI Award</div>
                 </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
-                  <div className="text-[22px] font-[800] text-[#059669]">{selectedAppraisal.stipAward ? `${selectedAppraisal.stipAward.toFixed(2)}%` : '—'}</div>
+                <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">
+                  <div className="text-[14px] font-[800] text-[#065F46] leading-none mb-[4px]">{cpPct !== null ? cpPct.toFixed(2) + '%' : '—'}</div>
+                  <div className="text-[9px] font-[800] text-[#6b7280] uppercase tracking-wider">E Award</div>
                 </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>
-                  <div className="text-[18px] font-[800] text-[#0f1923] truncate">{selectedAppraisal.appraisalQuarter?.name || selectedAppraisal.period?.quarter || 'N/A'}</div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Company</div>
-                  <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.employeeId?.companyCode || 'FSM'}</div>
-                </div>
-              </div>
-
-              <div className="mb-[24px]">
-                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings & Comments</h4>
-                <div className="flex flex-col gap-[10px]">
-                  {Object.entries(SCORE_LABELS).map(([key, label]) => {
-                    const rating = selectedAppraisal.scores?.[key]?.rating;
-                    const commentsObj = parseComments(selectedAppraisal.narrative?.generalComments);
-                    const comment = commentsObj[key] || "No justification provided.";
-                    const isExpanded = expandedComment === key;
-                    const hasRating = rating !== null && rating !== undefined;
-
-                    return (
-                      <div key={key} className="bg-white border border-[#E2DDD4] rounded-[8px] overflow-hidden shadow-sm transition-all duration-200">
-                        <div 
-                          className="flex justify-between items-center p-[10px_14px] cursor-pointer hover:bg-slate-50 transition-colors"
-                          onClick={() => setExpandedComment(isExpanded ? null : key)}
-                        >
-                          <div className="flex items-center gap-2">
-                             <span className="text-[13px] font-[600] text-[#475569]">{label}</span>
-                             {hasRating && rating !== 1.0 && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <span className={`text-[14px] font-[800] ${!hasRating ? 'text-slate-300' : rating >= 3 ? 'text-[#059669]' : rating >= 2 ? 'text-[#D97706]' : 'text-[#DC2626]'}`}>
-                              {hasRating ? rating.toFixed(1) : '-'}
-                            </span>
-                            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                          </div>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="p-[10px_14px] bg-slate-50 border-t border-[#E2DDD4] text-[12px] text-slate-700 animate-in fade-in slide-in-from-top-1">
-                            <div className="font-semibold text-slate-500 mb-1 text-[10px] uppercase tracking-wider">Manager Justification:</div>
-                            <div className="italic leading-relaxed">{comment}</div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">
+                  <div className="text-[14px] font-[800] text-[#1E40AF] leading-none mb-[4px]">{cpPct !== null ? (cpPct * 1.3).toFixed(2) + '%' : '—'}</div>
+                  <div className="text-[9px] font-[800] text-[#6b7280] uppercase tracking-wider">EP Award</div>
                 </div>
               </div>
-              
-              {selectedAppraisal.narrative?.epJustification && (
-                 <div className="mb-[24px]">
-                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-[12px_16px] rounded-r-[8px]">
-                       <div className="text-[11px] font-bold text-yellow-800 uppercase tracking-wider mb-1">EP Justification Provided</div>
-                       <div className="text-[12px] text-yellow-900 italic">"{selectedAppraisal.narrative.epJustification}"</div>
-                    </div>
-                 </div>
-              )}
+            </div>
+          </div>
+        </div>
 
-              <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
-                <div className={`text-[11px] font-[700] p-[4px_12px] rounded-full whitespace-nowrap ${getStatusConfig(selectedAppraisal.workflow?.status).badgeClass}`}>
-                  {getStatusConfig(selectedAppraisal.workflow?.status).text}
+        {/* Right Sidebar */}
+        <div className="flex flex-col gap-[16px]">
+          
+          {/* Formula Card */}
+          <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
+            <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
+              <div className="w-[30px] h-[30px] rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[14px]">&#129518;</div>
+              <div className="text-[14px] font-[800] text-[#0D2B55]">CP% Formula</div>
+            </div>
+            <div className="p-[16px]">
+              <div className="bg-[#0D2B55] rounded-[9px] p-[12px_14px] font-mono text-[12px] text-[#e8c96a] leading-[1.8] mb-[16px]">
+                BSC = &Sigma;(Actual &divide; 100 &times; Weight)<br/>
+                <span className="text-white/40">CP% = BSC &times; 15%</span>
+              </div>
+              <div className="flex flex-col gap-[12px]">
+                <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
+                  <span className="text-[12px] font-[600] text-[#6b7280]">BSC Raw Score</span>
+                  <span className="text-[14px] font-[800] text-[#0D2B55]">{cpPct !== null ? bscRaw.toFixed(2) : '—'}</span>
                 </div>
-                <div className="text-[11px] text-[#6b7280] font-mono font-[600]">REF: {selectedAppraisal.appraisalRef || selectedAppraisal._id}</div>
+                <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
+                  <span className="text-[12px] font-[600] text-[#6b7280]">Max CP Cap</span>
+                  <span className="text-[14px] font-[800] text-[#92400E]">15%</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[12px] font-[600] text-[#6b7280]">Final CP%</span>
+                  <span className="text-[16px] font-[800] text-[#065F46]">{cpPct !== null ? cpPct.toFixed(2) + '%' : '—'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Live Award Preview Card */}
+          <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
+            <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
+              <div className="flex items-center gap-[10px]">
+                <div className="w-[30px] h-[30px] rounded-[8px] bg-[#FFFBEB] flex items-center justify-center text-[14px]">&#128176;</div>
+                <div>
+                  <div className="text-[14px] font-[800] text-[#0D2B55]">Live Award Preview</div>
+                  <div className="text-[11px] text-[#6b7280]">Updates as you type</div>
+                </div>
+              </div>
+            </div>
+            <div className="p-[16px] flex flex-col gap-[10px]">
+              <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
+                <span className="text-[12px] font-[700] text-[#991B1B]">LS (0.0)</span>
+                <span className="text-[14px] font-[800] text-[#991B1B]">0.00%</span>
+              </div>
+              <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
+                <span className="text-[12px] font-[700] text-[#92400E]">NI (0.7)</span>
+                <span className="text-[14px] font-[800] text-[#92400E]">{cpPct !== null ? (cpPct * 0.7).toFixed(2) + '%' : '—'}</span>
+              </div>
+              <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
+                <span className="text-[12px] font-[700] text-[#065F46]">E (1.0)</span>
+                <span className="text-[14px] font-[800] text-[#065F46]">{cpPct !== null ? cpPct.toFixed(2) + '%' : '—'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[12px] font-[700] text-[#1E40AF]">EP (1.3)</span>
+                <span className="text-[14px] font-[800] text-[#1E40AF]">{cpPct !== null ? (cpPct * 1.3).toFixed(2) + '%' : '—'}</span>
+              </div>
+            </div>
+          </div>
+          
+        </div>
+      </div>
+
+      {/* Success Modal */}
+      {successModal.show && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl p-[32px] text-center slide-in-from-bottom-4">
+            <div className="text-[54px] mb-[16px] leading-none">{successModal.icon}</div>
+            <h2 className="text-[20px] font-[800] text-[#0D2B55] mb-[8px]">{successModal.title}</h2>
+            <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed">{successModal.detail}</div>
+            <button 
+              className="w-full bg-[#0D2B55] hover:bg-[#1a3d6e] text-white font-[800] text-[14px] py-[12px] rounded-[10px] shadow-sm transition-colors" 
+              onClick={() => setSuccessModal({ show: false })}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lock Confirmation Modal */}
+      {lockModal && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[460px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
+            <div className="bg-[#DC2626] p-[16px_22px] flex justify-between items-center">
+              <div className="text-[15px] font-[800] text-white flex items-center gap-[8px]">
+                <span className="text-[18px]">⚠</span> Confirm Permanent Lock
+              </div>
+              <button onClick={() => setLockModal(false)} className="bg-white/10 text-white w-[30px] h-[30px] rounded-[8px] flex items-center justify-center hover:bg-white/20 transition-colors">&times;</button>
+            </div>
+            <div className="p-[30px_22px] text-center">
+              <div className="text-[48px] mb-[16px] leading-none">🔒</div>
+              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock 2026 Scorecard?</div>
+              <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
+                This action is <strong>irreversible</strong> from the CEO panel. 
+                Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{cpPct.toFixed(2)}%</strong>?
+              </div>
+              <div className="flex gap-[12px] justify-center">
+                <button 
+                  onClick={() => setLockModal(false)} 
+                  className="p-[12px_20px] rounded-[10px] text-[13px] font-[800] text-[#0f1923] bg-white border-[2px] border-[#E2DDD4] hover:border-[#0D2B55] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmLock} 
+                  className="p-[12px_20px] rounded-[10px] text-[13px] font-[800] bg-[#DC2626] text-white hover:bg-[#B91C1C] transition-colors shadow-md flex items-center gap-[6px]"
+                >
+                  Yes, Lock Scorecard
+                </button>
               </div>
             </div>
           </div>

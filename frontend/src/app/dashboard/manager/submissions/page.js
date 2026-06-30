@@ -1,17 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Download, Check, FileX, Calendar, Eye, X, MessageSquare, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
+import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, AlertTriangle, Calendar, Eye, X, Download } from 'lucide-react';
 
-const getInitials = (name) => {
-  if (!name) return '';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-};
-
-// Map backend API score keys to readable labels
+// Map backend API score keys to readable labels (Added for parsing comments)
 const SCORE_LABELS = {
   jobCompetence: "Job Competence",
   dependability: "Dependability",
@@ -20,6 +13,83 @@ const SCORE_LABELS = {
   safeWorking: "Safe Working Environment",
   behaviors: "Behaviors & Initiative"
 };
+
+// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
+const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [wrapperRef]);
+
+  const filteredOptions = options.filter(opt => 
+    opt.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div ref={wrapperRef} className={`relative ${widthClass}`}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full py-[10px] px-[12px] bg-white border rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer flex justify-between items-center transition-colors ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-[#E2DDD4]'}`}
+      >
+        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
+        <ChevronDown className={`w-[14px] h-[14px] text-[#6b7280] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 top-[calc(100%+4px)] left-0 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="p-[8px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
+            <div className="relative">
+              <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[12px] h-[12px] text-[#6b7280]" />
+              <input 
+                type="text"
+                autoFocus
+                placeholder="Search..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-[26px] pr-[8px] py-[6px] text-[12px] border border-[#E2DDD4] rounded-[6px] outline-none focus:border-[#0D2B55]"
+              />
+            </div>
+          </div>
+          
+          <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
+            <div 
+              onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
+              className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors ${value === '' ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#6b7280] hover:bg-[#FAF8F4]'}`}
+            >
+              {placeholder}
+            </div>
+            
+            {filteredOptions.length === 0 ? (
+              <div className="px-[12px] py-[10px] text-[12px] text-[#6b7280] text-center italic">No matches found</div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <div 
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
+                  className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#0f1923] hover:bg-[#FAF8F4]'}`}
+                >
+                  {opt.label}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+// ----------------------------------------------
 
 export default function MySubmissions() {
   const [submissions, setSubmissions] = useState([]);
@@ -31,7 +101,7 @@ export default function MySubmissions() {
   const [reportType, setReportType] = useState('ALL'); 
 
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
-  const [expandedComment, setExpandedComment] = useState(null); // Added state for toggling comments
+  const [expandedComment, setExpandedComment] = useState(null);
 
   const cpPct = 13.01;
 
@@ -83,7 +153,6 @@ export default function MySubmissions() {
       case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
       case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
       case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
-      // 🚨 FIX: Added specific styling for HR Rejected status in the Submissions panel
       case 'REOPENED': return { text: 'HR Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       case 'PENDING_SUBMISSION': return { text: 'Awaiting Manager Rating', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       default: return { text: status?.replace(/_/g, ' ') || 'Unknown', badgeClass: 'bg-[#E2DDD4] text-[#6b7280]' };
@@ -200,30 +269,52 @@ export default function MySubmissions() {
     document.body.removeChild(link);
   };
 
-  // Helper to extract specific comment from the compiled narrative text
-  const extractComment = (generalComments, currentLabel, nextLabel) => {
-    if (!generalComments) return '';
-    const startIdx = generalComments.indexOf(currentLabel);
-    if (startIdx === -1) return '';
-    const startOfContent = startIdx + currentLabel.length;
-    const endIdx = nextLabel ? generalComments.indexOf(nextLabel) : generalComments.length;
-    if (endIdx === -1) return generalComments.substring(startOfContent).trim();
-    return generalComments.substring(startOfContent, endIdx).trim();
-  };
-
+  // 🚨 UPGRADED: Robust parseComments function accurately handling the new backend format
   const parseComments = (combinedString) => {
     if (!combinedString) return {};
     
-    if (combinedString.includes('1. Delivered Expected Results:')) {
+    // Parse New Accurate Format
+    if (combinedString.includes('1. Job Competence:')) {
+      const extract = (currentLabel, nextLabel) => {
+        const startIdx = combinedString.indexOf(currentLabel);
+        if (startIdx === -1) return '';
+        const startOfContent = startIdx + currentLabel.length;
+        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
+        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
+        return combinedString.substring(startOfContent, endIdx).trim();
+      };
+
       return {
-        deliveredResults: extractComment(combinedString, '1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
-        behaviors: extractComment(combinedString, '2. Behaviors & Initiative:', '3. Safe Working:'),
-        safeWorking: extractComment(combinedString, '3. Safe Working:', '4. Job Competence:'),
-        jobCompetence: extractComment(combinedString, '4. Job Competence:', '5. Dependability:'),
-        dependability: extractComment(combinedString, '5. Dependability:', '6. Adaptability:'),
-        adaptability: extractComment(combinedString, '6. Adaptability:', null)
+        jobCompetence: extract('1. Job Competence:', '2. Behaviors & Initiative:'),
+        behaviors: extract('2. Behaviors & Initiative:', '3. Dependability:'),
+        dependability: extract('3. Dependability:', '4. Adaptability:'),
+        adaptability: extract('4. Adaptability:', '5. Safe Working:'),
+        safeWorking: extract('5. Safe Working:', '6. Delivered Expected Results:'),
+        deliveredResults: extract('6. Delivered Expected Results:', null)
       };
     }
+
+    // Fallback for extreme legacy format if any
+    if (combinedString.includes('1. Delivered Expected Results:')) {
+      const extract = (currentLabel, nextLabel) => {
+        const startIdx = combinedString.indexOf(currentLabel);
+        if (startIdx === -1) return '';
+        const startOfContent = startIdx + currentLabel.length;
+        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
+        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
+        return combinedString.substring(startOfContent, endIdx).trim();
+      };
+
+      return {
+        deliveredResults: extract('1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
+        behaviors: extract('2. Behaviors & Initiative:', '3. Safe Working:'),
+        safeWorking: extract('3. Safe Working:', '4. Job Competence:'),
+        jobCompetence: extract('4. Job Competence:', '5. Dependability:'),
+        dependability: extract('5. Dependability:', '6. Adaptability:'),
+        adaptability: extract('6. Adaptability:', null)
+      };
+    }
+    
     return {};
   };
 
@@ -304,7 +395,6 @@ export default function MySubmissions() {
                     {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· Submitted ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
                   </div>
                   
-                  {/* 🚨 FIX: Extract HR Rejected Date and Render Rejection Badge in Manager Panel */}
                   {!a.isMissing && a.narrative?.hrComments && a.workflow?.status === 'REOPENED' && (
                     <div className="mt-[8px] bg-[#FEE2E2] p-[8px_12px] rounded-[6px] text-[11px] text-[#991B1B] border border-[#FECACA]">
                       <strong>HR Feedback ({a.workflow?.rejectedAt ? new Date(a.workflow.rejectedAt).toLocaleDateString('en-GB') : 'Recently'}):</strong> "{a.narrative.hrComments}"
