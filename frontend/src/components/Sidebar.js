@@ -45,7 +45,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         category: 'Scorecard',
         items: [
           { name: 'KPA Scorecard', href: '/dashboard/ceo/kpa', icon: Activity },
-           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar }
+           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar },
+           { name: 'Quarter Scorecard', href: '/dashboard/ceo/QuarterlyScorecard', icon: Calendar }
         ]
       },
       {

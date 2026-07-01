@@ -77,6 +77,7 @@ app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/config', configRoutes);
 app.use('/api/v1/backup', backupRoutes);
+app.use('/api/v1/quarterly-scorecards', require('./routes/quarterlyScorecardRoutes'));
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

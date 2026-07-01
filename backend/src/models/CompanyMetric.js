@@ -1,8 +1,8 @@
-// backend/src/models/CompanyMetric.js
 const mongoose = require('mongoose');
 
 const companyMetricSchema = new mongoose.Schema({
-  reviewYear: { type: Number, required: true, unique: true },
+  reviewYear: { type: Number, required: true },
+  reviewMonth: { type: Number, required: true },
   financialResilience: { type: Number, default: null },
   operationalEffectiveness: { type: Number, default: null },
   humanCapital: { type: Number, default: null },
@@ -14,5 +14,8 @@ const companyMetricSchema = new mongoose.Schema({
   lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   lockedAt: { type: Date }
 }, { timestamps: true });
+
+// Composite index to track both year and month correctly
+companyMetricSchema.index({ reviewYear: 1, reviewMonth: 1 }, { unique: true });
 
 module.exports = mongoose.model('CompanyMetric', companyMetricSchema);

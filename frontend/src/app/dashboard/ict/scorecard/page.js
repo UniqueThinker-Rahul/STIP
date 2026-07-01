@@ -4,6 +4,13 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 
+const MONTHS = [
+  { val: 1, label: 'January' }, { val: 2, label: 'February' }, { val: 3, label: 'March' },
+  { val: 4, label: 'April' }, { val: 5, label: 'May' }, { val: 6, label: 'June' },
+  { val: 7, label: 'July' }, { val: 8, label: 'August' }, { val: 9, label: 'September' },
+  { val: 10, label: 'October' }, { val: 11, label: 'November' }, { val: 12, label: 'December' }
+];
+
 export default function ICTScorecardControl() {
   const router = useRouter();
 
@@ -12,13 +19,18 @@ export default function ICTScorecardControl() {
   const [confirmModal, setConfirmModal] = useState({ open: false, type: '' });
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // 🚨 NEW: Custom Alert Modal state to replace native window.alert()
+  // Custom Alert Modal state to replace native window.alert()
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: '' });
 
+  // 🚨 UPGRADE: Month and Year Selection States
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+
+  // 🚨 UPGRADE: Fetch metrics dynamically by Month and Year
   const fetchMetrics = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+      const res = await api.get(`/company-metrics/${selectedYear}/${selectedMonth}`).catch(() => ({ data: { data: null } }));
       setMetrics(res.data?.data || null);
     } catch (error) {
       console.error('Failed to load metrics status', error);
@@ -29,15 +41,17 @@ export default function ICTScorecardControl() {
 
   useEffect(() => {
     fetchMetrics();
-  }, []);
+  }, [selectedYear, selectedMonth]);
 
   const handleLockAction = async () => {
     try {
       setIsProcessing(true);
       const newLockState = confirmModal.type === 'lock';
       
+      // 🚨 UPGRADE: Send the specific month and year to be locked/unlocked
       await api.post('/company-metrics', {
-        reviewYear: 2026,
+        reviewYear: selectedYear,
+        reviewMonth: selectedMonth,
         locked: newLockState
       });
 
@@ -45,18 +59,16 @@ export default function ICTScorecardControl() {
       setConfirmModal({ open: false, type: '' });
       await fetchMetrics();
       
-      // 🚨 FIX: Replaced native alert with Custom Centered Modal
       setAlertModal({ 
         show: true, 
         title: 'Action Successful', 
-        message: `Scorecard successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
+        message: `Scorecard for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
         type: 'success' 
       });
 
     } catch (error) {
       setConfirmModal({ open: false, type: '' });
       
-      // 🚨 FIX: Replaced native alert with Custom Centered Modal
       setAlertModal({ 
         show: true, 
         title: 'Action Failed', 
@@ -76,18 +88,45 @@ export default function ICTScorecardControl() {
 
   const ts = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  if (loading) return <div className="p-10 text-center text-slate-500 font-[600] animate-pulse">Loading Lock Status...</div>;
+  // Generate Year Options
+  const currentY = new Date().getFullYear();
+  const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
 
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
       {/* Header */}
-      <div className="mb-[20px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-          &#128274; Scorecard Lock Control
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
+            &#128274; Scorecard Lock Control
+          </div>
+          <div className="text-[13px] text-[#6b7280]">
+            ICT Admin — Only ICT can unlock the CEO scorecard after a Board-approved unlock request
+          </div>
         </div>
-        <div className="text-[13px] text-[#6b7280]">
-          ICT Admin — Only ICT can unlock the CEO scorecard after a Board-approved unlock request
+
+        {/* 🚨 UPGRADE: Month and Year Selectors */}
+        <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+           <select 
+             value={selectedMonth} 
+             onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+             className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+           >
+              {MONTHS.map(m => (
+                 <option key={m.val} value={m.val}>{m.label}</option>
+              ))}
+           </select>
+           <span className="text-[#E2DDD4]">|</span>
+           <select 
+             value={selectedYear} 
+             onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+             className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
+           >
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+           </select>
         </div>
       </div>
 
@@ -104,7 +143,7 @@ export default function ICTScorecardControl() {
             <div className="w-[36px] h-[36px] rounded-[8px] bg-[#FEF3C7] flex items-center justify-center text-[16px]">&#128274;</div>
             <div>
               <div className="text-[15px] font-[800] text-[#0D2B55]">Current Scorecard Status</div>
-              <div className="text-[12px] font-[500] text-[#6b7280]">Real-time lock state</div>
+              <div className="text-[12px] font-[500] text-[#6b7280]">Viewing status for {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}</div>
             </div>
           </div>
           <span 
@@ -115,62 +154,66 @@ export default function ICTScorecardControl() {
         </div>
         
         <div className="p-[24px]">
-          <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-[30px]">
-            
-            {/* Status Details */}
-            <div className="flex flex-col text-[13px]">
-              <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
-                <span className="text-[#6b7280] font-[600]">Lock Status</span>
-                <span className={`font-[800] ${scorecardLocked ? 'text-[#059669]' : 'text-[#92400E]'}`}>{scorecardLocked ? 'Locked' : 'Unlocked'}</span>
+          {loading ? (
+            <div className="py-[40px] text-center text-slate-500 font-[600] animate-pulse">Checking status...</div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-[30px]">
+              
+              {/* Status Details */}
+              <div className="flex flex-col text-[13px]">
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Lock Status</span>
+                  <span className={`font-[800] ${scorecardLocked ? 'text-[#059669]' : 'text-[#92400E]'}`}>{scorecardLocked ? 'Locked' : 'Unlocked'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Locked By</span>
+                  <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedBy : '—'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Locked At</span>
+                  <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedAt : '—'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">CP%</span>
+                  <span className="font-[800] text-[#0D2B55]">{cpPct}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px]">
+                  <span className="text-[#6b7280] font-[600]">Last System Sync</span>
+                  <span className="font-[700] text-[#6b7280] text-[11px] bg-[#FAF8F4] border border-[#E2DDD4] px-[8px] py-[3px] rounded-[4px]">{ts}</span>
+                </div>
               </div>
-              <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
-                <span className="text-[#6b7280] font-[600]">Locked By</span>
-                <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedBy : '—'}</span>
-              </div>
-              <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
-                <span className="text-[#6b7280] font-[600]">Locked At</span>
-                <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedAt : '—'}</span>
-              </div>
-              <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
-                <span className="text-[#6b7280] font-[600]">CP%</span>
-                <span className="font-[800] text-[#0D2B55]">{cpPct}</span>
-              </div>
-              <div className="flex justify-between items-center py-[12px]">
-                <span className="text-[#6b7280] font-[600]">Last ICT Action</span>
-                <span className="font-[700] text-[#6b7280] text-[11px] bg-[#FAF8F4] border border-[#E2DDD4] px-[8px] py-[3px] rounded-[4px]">{ts}</span>
-              </div>
-            </div>
 
-            {/* Controls */}
-            <div>
-              <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
-                <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">ICT Lock Controls</div>
-                <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
-                  The scorecard is locked by the CEO after Board approval. ICT can reset this lock if formally authorised. This action is irreversible unless ICT performs another reset.
+              {/* Controls */}
+              <div>
+                <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
+                  <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">ICT Lock Controls</div>
+                  <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
+                    The scorecard is locked by the CEO after Board approval. ICT can reset this lock if formally authorised. This action is irreversible unless ICT performs another reset.
+                  </div>
+                  <div className="flex flex-col gap-[10px]">
+                    <button 
+                      className="w-full bg-[#DC2626] hover:bg-[#B91C1C] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => setConfirmModal({ open: true, type: 'unlock' })}
+                      disabled={!scorecardLocked || isProcessing}
+                    >
+                      &#128275; Reset Lock (Unlock)
+                    </button>
+                    <button 
+                      className="w-full bg-[#059669] hover:bg-[#047857] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => setConfirmModal({ open: true, type: 'lock' })}
+                      disabled={scorecardLocked || isProcessing}
+                    >
+                      &#128274; Force Lock
+                    </button>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-[10px]">
-                  <button 
-                    className="w-full bg-[#DC2626] hover:bg-[#B91C1C] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => setConfirmModal({ open: true, type: 'unlock' })}
-                    disabled={!scorecardLocked || isProcessing}
-                  >
-                    &#128275; Reset Lock (Unlock)
-                  </button>
-                  <button 
-                    className="w-full bg-[#059669] hover:bg-[#047857] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => setConfirmModal({ open: true, type: 'lock' })}
-                    disabled={scorecardLocked || isProcessing}
-                  >
-                    &#128274; Force Lock
-                  </button>
+                <div className="bg-[#FEF2F2] border border-[#FECACA] text-[#991B1B] rounded-[8px] p-[10px_12px] text-[11px] leading-[1.5]">
+                  &#128683; <strong className="font-[800]">Unlock requires:</strong> Written CEO authorisation + Board Secretary approval + ICT audit entry
                 </div>
               </div>
-              <div className="bg-[#FEF2F2] border border-[#FECACA] text-[#991B1B] rounded-[8px] p-[10px_12px] text-[11px] leading-[1.5]">
-                &#128683; <strong className="font-[800]">Unlock requires:</strong> Written CEO authorisation + Board Secretary approval + ICT audit entry
-              </div>
+              
             </div>
-            
-          </div>
+          )}
         </div>
       </div>
 
@@ -223,8 +266,8 @@ export default function ICTScorecardControl() {
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{confirmModal.type === 'unlock' ? 'Reset Scorecard Lock?' : 'Force Scorecard Lock?'}</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 {confirmModal.type === 'unlock' 
-                  ? 'This will open the scorecard for the CEO to make edits. You must verify that you have written Board approval before proceeding.'
-                  : 'This will permanently lock the scorecard. Are you sure you want to force this lock manually?'}
+                  ? `This will open the scorecard for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} for the CEO to make edits. You must verify that you have written Board approval before proceeding.`
+                  : `This will permanently lock the scorecard for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}. Are you sure you want to force this lock manually?`}
               </div>
               <div className="flex gap-[12px] justify-center">
                 <button 
@@ -247,7 +290,7 @@ export default function ICTScorecardControl() {
         </div>
       )}
 
-      {/* 🚨 NEW: Universal Success/Error Acknowledge Modal */}
+      {/* Universal Success/Error Acknowledge Modal */}
       {alertModal.show && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 z-[200] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl overflow-hidden slide-in-from-bottom-4">

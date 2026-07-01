@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-// 🚨 FIXED: Corrected the relative path to go up 4 levels to access 'lib' and 'components'
 import api from '../../../../lib/api';
 import StipCategoryChart from '../../../../components/charts/StipCategoryChart';
 
@@ -12,6 +11,13 @@ const KPAS = [
   { name: 'Human Capital', wt: 26, color: '#F59E0B' },
   { name: 'Safety & Environment', wt: 12, color: '#10B981' },
   { name: 'Reputational Capital', wt: 3, color: '#8B5CF6' }
+];
+
+const MONTHS = [
+  { val: 1, label: 'January' }, { val: 2, label: 'February' }, { val: 3, label: 'March' },
+  { val: 4, label: 'April' }, { val: 5, label: 'May' }, { val: 6, label: 'June' },
+  { val: 7, label: 'July' }, { val: 8, label: 'August' }, { val: 9, label: 'September' },
+  { val: 10, label: 'October' }, { val: 11, label: 'November' }, { val: 12, label: 'December' }
 ];
 
 export default function KPAScorecard() {
@@ -25,13 +31,24 @@ export default function KPAScorecard() {
   const [lockedAt, setLockedAt] = useState('');
   const [successModal, setSuccessModal] = useState({ show: false, icon: '', title: '', detail: '' });
   const [lockModal, setLockModal] = useState(false);
+  
+  const [currentTime, setCurrentTime] = useState(new Date());
+  
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
 
-  // Fetch initial data from backend
+  // Live clock tick
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Fetch data when Year or Month changes
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const res = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+        const res = await api.get(`/company-metrics/${selectedYear}/${selectedMonth}`).catch(() => ({ data: { data: null } }));
         const metrics = res.data?.data;
         
         if (metrics) {
@@ -44,11 +61,16 @@ export default function KPAScorecard() {
           ]);
           setLocked(metrics.locked || false);
           if (metrics.lockedAt) {
-            setLockedAt(new Date(metrics.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+            setLockedAt(new Date(metrics.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
           }
           if (metrics.lockedBy) {
-            setLockedBy('Jared Morris'); // Assuming CEO
+            setLockedBy(metrics.lockedBy.personalDetails ? `${metrics.lockedBy.personalDetails.firstName} ${metrics.lockedBy.personalDetails.lastName}` : 'System Admin');
           }
+        } else {
+          setKpaActuals([null, null, null, null, null]);
+          setLocked(false);
+          setLockedAt('');
+          setLockedBy('');
         }
       } catch (error) {
         console.error('Failed to load KPA data', error);
@@ -57,10 +79,16 @@ export default function KPAScorecard() {
       }
     };
     fetchData();
-  }, []);
+  }, [selectedYear, selectedMonth]);
+
+  // 🚨 UPGRADE: Validation logic adjusted to allow editing for ALL months within the current active year
+  const isCurrentYear = selectedYear === currentTime.getFullYear();
+  // Disable entry if the scorecard is locked OR if the selected year is not the current active year
+  const isEntryDisabled = locked || !isCurrentYear;
 
   // Real-time calculations
   const handleInput = (idx, val) => {
+    if (isEntryDisabled) return;
     const v = val === '' ? null : Math.min(100, Math.max(0, parseFloat(val) || 0));
     const newArr = [...kpaActuals];
     newArr[idx] = v;
@@ -72,10 +100,7 @@ export default function KPAScorecard() {
   const anyKpaEntered = kpaActuals.some(v => v !== null);
   
   if (anyKpaEntered) {
-    // 🚨 FIXED: The * 100 line was removed as it was inflating 100% to 10,000. 
     bscRaw = kpaActuals.reduce((sum, val, idx) => sum + ((val || 0) * (KPAS[idx].wt / 100)), 0);
-    
-    // CP is BSC * 15% Max Cap
     cpPct = bscRaw * 0.15;
   }
 
@@ -83,12 +108,15 @@ export default function KPAScorecard() {
   const awEf = cpPct ? `CP% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
   const awEPf = cpPct ? `CP% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
 
-  // Save functionality
   const handleSave = async () => {
+    if (!isCurrentYear) {
+       return alert("You can only save scores for months within the current active financial year.");
+    }
     try {
       setSaving(true);
       const payload = {
-        reviewYear: 2026,
+        reviewYear: selectedYear,
+        reviewMonth: selectedMonth, 
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -106,7 +134,7 @@ export default function KPAScorecard() {
         show: true,
         icon: '💾',
         title: 'KPA Scores Saved',
-        detail: `${filled} of 5 KPA scores saved. ${5 - filled > 0 ? 'Enter the remaining ' + (5 - filled) + ' scores before locking.' : 'All scores entered — ready to lock when Board approves.'}`
+        detail: `${filled} of 5 KPA scores saved for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}. ${5 - filled > 0 ? 'Enter the remaining ' + (5 - filled) + ' scores before locking.' : 'All scores entered — ready to lock when Board approves.'}`
       });
     } catch (error) {
       alert("Failed to save KPA scores");
@@ -115,8 +143,10 @@ export default function KPAScorecard() {
     }
   };
 
-  // Lock functionality
   const attemptLock = () => {
+    if (!isCurrentYear) {
+      return alert("You can only lock scores for months within the current active financial year.");
+    }
     const allFilled = kpaActuals.every(v => v !== null);
     if (!allFilled) {
       alert('Please enter all 5 KPA scores before locking.');
@@ -129,7 +159,8 @@ export default function KPAScorecard() {
     try {
       setSaving(true);
       const payload = {
-        reviewYear: 2026,
+        reviewYear: selectedYear,
+        reviewMonth: selectedMonth,
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -143,15 +174,15 @@ export default function KPAScorecard() {
       await api.post('/company-metrics', payload);
       
       setLocked(true);
-      setLockedBy('Jared Morris');
-      setLockedAt(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+      setLockedBy('Board Admin'); 
+      setLockedAt(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
       setLockModal(false);
       
       setSuccessModal({
         show: true,
         icon: '🔒',
         title: 'Scorecard Locked',
-        detail: `CP has been permanently set to ${cpPct.toFixed(2)}%. The scorecard is now read-only and HR can process awards.`
+        detail: `CP for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} has been permanently set to ${cpPct.toFixed(2)}%. The scorecard is now read-only.`
       });
     } catch (error) {
       alert("Failed to lock the scorecard.");
@@ -160,45 +191,87 @@ export default function KPAScorecard() {
     }
   };
 
-  if (loading) return <div className="p-10 text-center text-slate-500 animate-pulse font-medium">Loading Scorecard...</div>;
+  const currentY = currentTime.getFullYear();
+  const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
+
+  if (loading) return <div className="p-10 text-center text-slate-500 animate-pulse font-medium">Loading Scorecard Data...</div>;
 
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
-      {/* Page Header */}
-      <div className="mb-[20px] flex justify-between items-end">
+      <div className="bg-[#0D2B55] text-[#e8c96a] text-[11px] font-[800] p-[8px_16px] rounded-t-[8px] flex justify-between items-center mb-0 border-b border-white/10">
+         <span className="uppercase tracking-widest flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+            System Clock:
+         </span>
+         <span className="font-mono">
+            {currentTime.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} — {currentTime.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+         </span>
+      </div>
+
+      <div className="bg-white p-[16px_20px] rounded-b-[14px] border border-[#E2DDD4] border-t-0 shadow-sm mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-            &#128200; KPA Scorecard
+            &#128200; KPA Scorecard Matrix
           </div>
-          <div className="text-[13px] text-[#6b7280]">Enter CY2026 actual performance scores for each KPA area &mdash; CP% auto-calculates</div>
+          <div className="text-[13px] text-[#6b7280]">Select the physical period to record or lock KPA scores</div>
         </div>
-        <div className="flex gap-[10px]">
+        
+        <div className="flex flex-wrap items-center gap-[10px]">
+          <div className="flex items-center gap-[6px] bg-slate-50 border border-[#E2DDD4] p-[4px] rounded-[8px]">
+             <select 
+               value={selectedMonth} 
+               onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+               className="bg-white border border-[#E2DDD4] p-[6px_10px] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer"
+             >
+                {MONTHS.map(m => (
+                   <option key={m.val} value={m.val}>{m.label}</option>
+                ))}
+             </select>
+             <select 
+               value={selectedYear} 
+               onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+               className="bg-white border border-[#E2DDD4] p-[6px_10px] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer"
+             >
+                {yearOptions.map(y => (
+                   <option key={y} value={y}>{y}</option>
+                ))}
+             </select>
+          </div>
+
           <button 
             className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] hover:border-[#0D2B55] px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm disabled:opacity-50"
-            disabled={locked || saving} 
+            disabled={isEntryDisabled || saving} 
             onClick={handleSave}
           >
             &#128190; Save Progress
           </button>
           <button 
-            className={`px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm ${locked ? 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' : 'bg-[#DC2626] hover:bg-[#B91C1C] text-white border-none'}`}
-            disabled={locked || saving} 
+            className={`px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm ${locked ? 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' : 'bg-[#DC2626] hover:bg-[#B91C1C] text-white border-none disabled:opacity-50'}`}
+            disabled={isEntryDisabled || saving} 
             onClick={attemptLock}
           >
-            {locked ? '🔒 Locked' : '🔒 Lock Scorecard'}
+            {locked ? '🔒 Locked' : '🔒 Lock Period'}
           </button>
         </div>
       </div>
+
+      {/* 🚨 UPGRADE: Warning Banner if not the current active year */}
+      {!isCurrentYear && !locked && (
+        <div className="bg-amber-50 border-[1.5px] border-amber-200 rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
+          <div className="text-[18px] text-amber-700">&#9888;</div>
+          <div className="text-[13px] text-amber-800">You are viewing <strong>{MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}</strong>. You can only enter or lock data for months within the <strong>current active financial year</strong> ({currentTime.getFullYear()}).</div>
+        </div>
+      )}
 
       {locked && (
         <div className="mb-[18px] animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="bg-[#D1FAE5] border-[1.5px] border-[#A7F3D0] rounded-[12px] p-[16px_20px] mb-[14px] flex items-center gap-[16px] shadow-sm">
             <div className="text-[28px] shrink-0">&#128274;</div>
             <div className="flex-1">
-              <div className="text-[15px] font-[800] text-[#065F46] mb-[3px]">Scorecard Locked — Board Approved</div>
+              <div className="text-[15px] font-[800] text-[#065F46] mb-[3px]">Scorecard Locked — {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}</div>
               <div className="text-[12px] text-[#065F46] leading-[1.6]">
-                Locked by: <strong className="font-[800]">{lockedBy || '—'}</strong> &nbsp;|&nbsp; Date: <strong className="font-[800]">{lockedAt || '—'}</strong><br/>
+                Locked by: <strong className="font-[800]">{lockedBy || '—'}</strong> &nbsp;|&nbsp; Timestamp: <strong className="font-[800]">{lockedAt || '—'}</strong><br/>
                 KPA scores are now <strong className="font-[800]">read-only for everyone</strong> &middot; Award generation unlocked for HR Admin
               </div>
             </div>
@@ -236,7 +309,7 @@ export default function KPAScorecard() {
         </div>
       )}
 
-      {!locked && (
+      {isCurrentYear && !locked && (
         <div className="bg-[#FEF2F2] border-[1.5px] border-[#FECACA] rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
           <div className="text-[18px] text-[#991B1B]">&#9888;</div>
           <div className="text-[13px] text-[#991B1B]">Locking is <strong className="font-[800]">permanent and irreversible</strong>. Once locked, KPA scores cannot be edited by anyone. Only lock after Board approval.</div>
@@ -286,7 +359,7 @@ export default function KPAScorecard() {
                       type="number" min="0" max="100" step="0.1"
                       value={kpaActuals[i] !== null ? kpaActuals[i] : ''}
                       placeholder="0–100" 
-                      disabled={locked}
+                      disabled={isEntryDisabled}
                       onChange={(e) => handleInput(i, e.target.value)}
                     />
                   </div>
@@ -398,7 +471,7 @@ export default function KPAScorecard() {
             <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed">{successModal.detail}</div>
             <button 
               className="w-full bg-[#0D2B55] hover:bg-[#1a3d6e] text-white font-[800] text-[14px] py-[12px] rounded-[10px] shadow-sm transition-colors" 
-              onClick={() => setSuccessModal({ show: false })}
+              onClick={() => setSuccessModal({ show: false, icon: '', title: '', detail: '' })}
             >
               Continue
             </button>
@@ -418,7 +491,7 @@ export default function KPAScorecard() {
             </div>
             <div className="p-[30px_22px] text-center">
               <div className="text-[48px] mb-[16px] leading-none">🔒</div>
-              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock 2026 Scorecard?</div>
+              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear} Scorecard?</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 This action is <strong>irreversible</strong> from the CEO panel. 
                 Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{cpPct.toFixed(2)}%</strong>?

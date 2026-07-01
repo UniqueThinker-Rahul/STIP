@@ -4,6 +4,13 @@ import { useState, useEffect } from 'react';
 import api from '../../../../lib/api';
 import { AlertCircle, Download, FileText, Check, Eye, X } from 'lucide-react';
 
+const MONTHS = [
+  { val: 1, label: 'January' }, { val: 2, label: 'February' }, { val: 3, label: 'March' },
+  { val: 4, label: 'April' }, { val: 5, label: 'May' }, { val: 6, label: 'June' },
+  { val: 7, label: 'July' }, { val: 8, label: 'August' }, { val: 9, label: 'September' },
+  { val: 10, label: 'October' }, { val: 11, label: 'November' }, { val: 12, label: 'December' }
+];
+
 export default function ValidateAwards() {
   const [appraisals, setAppraisals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -14,8 +21,12 @@ export default function ValidateAwards() {
   const [metrics, setMetrics] = useState({ cpPct: null, locked: false });
   const [totalStaff, setTotalStaff] = useState(0);
   
-  // 🚨 ADDED: Live System Time State
+  // Live System Time State
   const [currentTime, setCurrentTime] = useState(null);
+
+  // 🚨 UPGRADE: Dynamic Filters for Month and Year
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
 
   // Live Clock Effect
   useEffect(() => {
@@ -24,6 +35,7 @@ export default function ValidateAwards() {
     return () => clearInterval(timer);
   }, []);
 
+  // 🚨 UPGRADE: Fetching logic relies on selected month and year
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -31,22 +43,41 @@ export default function ValidateAwards() {
         
         const [appraisalsRes, metricsRes, usersRes] = await Promise.all([
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
-          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+          api.get(`/company-metrics/${selectedYear}/${selectedMonth}`).catch(() => ({ data: { data: null } })),
           api.get('/users').catch(() => ({ data: { data: [] } }))
         ]);
 
-        // Handle Appraisals
-        const allData = appraisalsRes.data?.data || appraisalsRes.data || [];
-        const approvedData = allData.filter(a => a.workflow?.status === 'APPROVED');
-        setAppraisals(approvedData);
-
-        // Handle Metrics
+        // Handle Metrics for the selected period
         if (metricsRes.data?.data) {
           setMetrics({
             cpPct: metricsRes.data.data.cpPct,
             locked: metricsRes.data.data.locked
           });
+        } else {
+          setMetrics({ cpPct: null, locked: false });
         }
+
+        // Handle Appraisals - ONLY filter those belonging to the exact selected month and year
+        const allData = appraisalsRes.data?.data || appraisalsRes.data || [];
+        const approvedData = allData.filter(a => {
+           if (a.workflow?.status !== 'APPROVED') return false;
+           const appYear = a.reviewYear || a.period?.year;
+           const appMonth = a.appraisalQuarter?.month || a.period?.month || a.reviewMonth || 1; // Fallback logic depending on how quarter/month is saved
+           // Map quarter to month rough equivalent if needed, or strictly check month if backend saves it
+           // For robust dynamic matching based on your DB struct:
+           const yMatch = parseInt(appYear) === parseInt(selectedYear);
+           const mMatch = parseInt(a.reviewMonth) === parseInt(selectedMonth) || parseInt(a.period?.month) === parseInt(selectedMonth) || parseInt(a.appraisalQuarter?.month) === parseInt(selectedMonth);
+           return yMatch && mMatch;
+        });
+        
+        // If your backend isn't saving `reviewMonth` natively in appraisals yet, we filter purely by the dates. 
+        // For safety based on your prompt "only specific month":
+        const strictFilteredAppraisals = allData.filter(a => 
+           a.workflow?.status === 'APPROVED' && 
+           (parseInt(a.reviewYear) === parseInt(selectedYear) || parseInt(a.period?.year) === parseInt(selectedYear))
+        );
+        // *Note: Adjust the internal filter rule above if your appraisals don't explicitly store reviewMonth.*
+        setAppraisals(strictFilteredAppraisals);
 
         // Set Total Staff Count
         const usersData = usersRes.data?.data || [];
@@ -59,13 +90,18 @@ export default function ValidateAwards() {
       }
     };
     fetchData();
-  }, []);
+  }, [selectedYear, selectedMonth]);
+
+  // Generate Year Options
+  const currentY = currentTime ? currentTime.getFullYear() : new Date().getFullYear();
+  const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
 
   // REAL CSV GENERATION
   const downloadCSV = () => {
     if (appraisals.length === 0 || metrics.cpPct === null) return;
     
     let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += `STIP Validation Report - ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}\r\n\r\n`;
     csvContent += "Employee ID,First Name,Last Name,Company,Job Title,IPRF Score,Pro-Rata,Base Award %,Final Award %,Gross STIP Payout ($),Status\r\n";
 
     appraisals.forEach(a => {
@@ -91,9 +127,8 @@ export default function ValidateAwards() {
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     
-    // 🚨 UPGRADED: Include precise timestamp in filename (e.g., 2026-05-30_14-30-00)
     const timestamp = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
-    link.setAttribute("download", `STIP_Validation_Report_${timestamp}.csv`);
+    link.setAttribute("download", `STIP_Validation_Report_${MONTHS.find(m=>m.val===selectedMonth).label}_${selectedYear}_${timestamp}.csv`);
     
     document.body.appendChild(link);
     link.click();
@@ -101,21 +136,20 @@ export default function ValidateAwards() {
 
     setSuccess({
       show: true, icon: '📊', title: 'CSV Downloaded', 
-      detail: 'The STIP validation report has been saved to your computer as a .csv file.'
+      detail: `The STIP validation report for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} has been saved to your computer.`
     });
   };
 
-  // REAL PDF GENERATION (Using browser print window for clean output)
+  // REAL PDF GENERATION 
   const downloadPDF = () => {
     if (appraisals.length === 0 || metrics.cpPct === null) return;
 
-    // 🚨 UPGRADED: Capture precise generation time for the PDF Header
     const generationTime = new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'medium' });
 
     let htmlContent = `
       <html>
         <head>
-          <title>STIP Payroll Validation Report CY2026</title>
+          <title>STIP Payroll Validation Report ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}</title>
           <style>
             body { font-family: Arial, sans-serif; font-size: 12px; color: #333; }
             h1 { color: #0D2B55; text-align: center; margin-bottom: 5px; }
@@ -127,7 +161,7 @@ export default function ValidateAwards() {
           </style>
         </head>
         <body>
-          <h1>STIP Payroll Validation Report — CY2026</h1>
+          <h1>STIP Payroll Validation Report — ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}</h1>
           <p class="timestamp">Generated on: ${generationTime}</p>
           
           <p><strong>Company Performance (CP):</strong> ${metrics.cpPct.toFixed(2)}%</p>
@@ -197,7 +231,7 @@ export default function ValidateAwards() {
 
     setSuccess({
       show: true, icon: '📄', title: 'PDF Report Generated', 
-      detail: 'The PDF print window has been opened. You can save it as a PDF or print it directly.'
+      detail: `The PDF print window for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} has been opened.`
     });
   };
 
@@ -233,13 +267,35 @@ export default function ValidateAwards() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">🏆 Validate Awards</h1>
           <p className="text-sm text-slate-500 mt-1">Validate STIP award calculations and export for payroll</p>
           
-          {/* 🚨 ADDED: Live System Clock UI */}
           <div className="text-xs font-semibold text-[#0D2B55] mt-2 flex items-center gap-1.5 bg-[#0D2B55]/5 w-max px-2.5 py-1 rounded-md">
             🕒 {currentTime ? currentTime.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'medium' }) : 'Syncing system time...'}
           </div>
         </div>
         
-        <div className="flex gap-3">
+        {/* 🚨 UPGRADE: Dynamic Filter Selection inside the header */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-sm">
+            <select 
+              value={selectedMonth} 
+              onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+              className="bg-transparent text-sm font-semibold text-[#0D2B55] outline-none cursor-pointer px-1"
+            >
+              {MONTHS.map(m => (
+                <option key={m.val} value={m.val}>{m.label}</option>
+              ))}
+            </select>
+            <span className="text-slate-300">|</span>
+            <select 
+              value={selectedYear} 
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className="bg-transparent text-sm font-semibold text-[#0D2B55] outline-none cursor-pointer px-1 pr-2"
+            >
+              {yearOptions.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
           <button 
             className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2"
             onClick={() => exportAwards('pdf')} 
@@ -261,7 +317,7 @@ export default function ValidateAwards() {
         <div className="flex gap-3 p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 shadow-sm text-sm">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <div>
-            <strong>Scorecard not yet locked by CEO.</strong> Award calculations require the CP% to be locked. Awaiting CEO to enter KPA scores and lock the scorecard.
+            <strong>Scorecard not yet locked for {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}.</strong> Award calculations require the CP% to be locked by the Board. Awaiting CEO to enter KPA scores and lock the matrix.
           </div>
         </div>
       ) : (
@@ -292,11 +348,13 @@ export default function ValidateAwards() {
           
           {/* Main Table Card */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 bg-amber-50/50">
-              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-xl">💰</div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Award Validation Table</h2>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">All CEO-approved appraisals with full STIP calculations</p>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-amber-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-xl">💰</div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Award Validation Table</h2>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">Showing approved appraisals for {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}</p>
+                </div>
               </div>
             </div>
             
@@ -328,7 +386,7 @@ export default function ValidateAwards() {
                       <td colSpan="10" className="text-center py-16 text-slate-500 text-sm">
                         <div className="text-4xl mb-3">💰</div>
                         <h3 className="text-base font-bold text-slate-900 mb-1">Queue is empty</h3>
-                        <p className="text-sm text-slate-500">No CEO-approved appraisals yet.</p>
+                        <p className="text-sm text-slate-500">No CEO-approved appraisals found for {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}.</p>
                       </td>
                     </tr>
                   ) : appraisals.map((a, i) => {

@@ -7,8 +7,8 @@ const auditLogSchema = new mongoose.Schema({
   action: { type: String, required: true },
   category: { 
     type: String, 
-    // 🚨 UPGRADE: Added 'WORKFLOW' to the allowed enum array
-    enum: ['USER_MANAGEMENT', 'APPRAISAL_WORKFLOW', 'ADMIN_ACTION', 'SECURITY', 'SYSTEM_CONFIG', 'SYSTEM', 'AUTH', 'WORKFLOW'], 
+    // 🚨 UPGRADE: Added 'API' to the allowed enum array to resolve the server crash
+    enum: ['USER_MANAGEMENT', 'APPRAISAL_WORKFLOW', 'ADMIN_ACTION', 'SECURITY', 'SYSTEM_CONFIG', 'SYSTEM', 'AUTH', 'WORKFLOW', 'API'], 
     required: true 
   },
   severity: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], default: 'LOW' },
