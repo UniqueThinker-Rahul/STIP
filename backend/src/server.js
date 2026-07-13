@@ -78,6 +78,7 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/config', configRoutes);
 app.use('/api/v1/backup', backupRoutes);
 app.use('/api/v1/quarterly-scorecards', require('./routes/quarterlyScorecardRoutes'));
+app.use('/api/v1/executive', require('./routes/executiveRoutes'));
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {
@@ -198,7 +199,12 @@ app.put(
 });
 
 const PORT = process.env.PORT || 5000;
-mongoose.connect(process.env.MONGO_URI)
+
+// 🚀 UPGRADED: Added Connection Pooling to prevent database timeouts
+mongoose.connect(process.env.MONGO_URI, {
+  maxPoolSize: 50, // Allows 50 concurrent database operations instead of the default 5
+  serverSelectionTimeoutMS: 5000 
+})
   .then(() => {
     console.log('✅ Connected to MongoDB Atlas Cloud Production Ready.');
     app.listen(PORT, () => console.log(`🚀 API Engine online on port ${PORT}`));

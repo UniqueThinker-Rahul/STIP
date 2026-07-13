@@ -58,6 +58,8 @@ export default function UnifiedLogin() {
         if (activeRole === 'HR_ADMIN') router.push('/dashboard/hr');
         else if (activeRole === 'CEO') router.push('/dashboard/ceo');
         else if (activeRole === 'ICT_ADMIN') router.push('/dashboard/ict');
+        // 👇 ADDED: Executive Member Route Support
+        else if (activeRole === 'EXECUTIVE') router.push('/dashboard/executive');
         else router.push('/dashboard/manager');
       }
     } catch (err) {
@@ -117,7 +119,9 @@ export default function UnifiedLogin() {
               Click your role to open the correct panel. Use the switcher bar at the top to move between panels instantly.
             </p>
 
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+            {/* 🚨 ADJUSTED: Grid changed to 3 columns on medium screens to perfectly fit the 6 buttons symmetrically */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
+              
               <button onClick={() => selectRole('MANAGER', 'Line Manager')} className="bg-[#F5F3EE] border-2 border-[#E2DDD4] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#0D2B55] hover:bg-[#EFF6FF] hover:-translate-y-1 hover:shadow-lg transition-all">
                 <span className="text-3xl mb-2">👥</span>
                 <span className="text-xs font-bold text-[#0D2B55] leading-tight">Line<br/>Manager</span>
@@ -136,18 +140,27 @@ export default function UnifiedLogin() {
                 <span className="bg-[#FEF3C7] text-[#92400E] text-[9px] font-bold px-2 py-1 rounded-full uppercase tracking-wider mt-3">Approve</span>
               </button>
 
+              {/* 👇 ADDED: Executive Member Button (Fits seamlessly in the styling architecture) */}
+              <button onClick={() => selectRole('EXECUTIVE', 'Executive Member')} className="bg-[#F5F3EE] border-2 border-[#E2DDD4] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#0D2B55] hover:bg-[#EFF6FF] hover:-translate-y-1 hover:shadow-lg transition-all">
+                <span className="text-3xl mb-2">👔</span>
+                <span className="text-xs font-bold text-[#0D2B55] leading-tight">Executive<br/>Member</span>
+                <span className="bg-[#FFE4E6] text-[#9F1239] text-[9px] font-bold px-2 py-1 rounded-full uppercase tracking-wider mt-3">Management</span>
+              </button>
+
+              <button onClick={() => selectRole('ICT_ADMIN', 'ICT Admin')} className="bg-[#F5F3EE] border-2 border-[#E2DDD4] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#0D2B55] hover:bg-[#EFF6FF] hover:-translate-y-1 hover:shadow-lg transition-all">
+                <span className="text-3xl mb-2">💻</span>
+                <span className="text-xs font-bold text-[#0D2B55] leading-tight">ICT<br/>Admin</span>
+                <span className="bg-[#CCFBF1] text-[#134E4A] text-[9px] font-bold px-2 py-1 rounded-full uppercase tracking-wider mt-3">System</span>
+              </button>
+
               <button onClick={() => selectRole('EMPLOYEE', 'Staff')} className="bg-[#F5F3EE] border-2 border-[#E2DDD4] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#0D2B55] hover:bg-[#EFF6FF] hover:-translate-y-1 hover:shadow-lg transition-all">
                 <span className="text-3xl mb-2">📋</span>
                 <span className="text-xs font-bold text-[#0D2B55] leading-tight">Staff</span>
                 <span className="bg-[#EDE9FE] text-[#4C1D95] text-[9px] font-bold px-2 py-1 rounded-full uppercase tracking-wider mt-3">My STIP</span>
               </button>
-
-              <button onClick={() => selectRole('ICT_ADMIN', 'ICT Admin')} className="bg-[#F5F3EE] border-2 border-[#E2DDD4] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#0D2B55] hover:bg-[#EFF6FF] hover:-translate-y-1 hover:shadow-lg transition-all col-span-2 md:col-span-1">
-                <span className="text-3xl mb-2">💻</span>
-                <span className="text-xs font-bold text-[#0D2B55] leading-tight">ICT<br/>Admin</span>
-                <span className="bg-[#CCFBF1] text-[#134E4A] text-[9px] font-bold px-2 py-1 rounded-full uppercase tracking-wider mt-3">System</span>
-              </button>
+              
             </div>
+            
             <div className="bg-[#F5F3EE] border border-[#E2DDD4] rounded-xl p-4 text-xs text-slate-600 text-left mb-6 leading-relaxed">
               <p><strong>🔒 Role-Based Security Active:</strong> The system verifies your Job Title clearance upon login. You will be blocked if you attempt to access a panel you are not authorized for.</p>
             </div>

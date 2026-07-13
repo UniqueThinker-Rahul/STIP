@@ -7,7 +7,8 @@ import Cookies from 'js-cookie';
 import { 
   Home, Activity, CheckCircle, FileText, Users, BarChart, 
   UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
-  Lock, Shield, Database, Calendar, Mail, Download, Calculator
+  Lock, Shield, Database, Calendar, Mail, Download, Calculator,
+  Network // Added for Portfolio Tree icon
 } from 'lucide-react';
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
@@ -128,6 +129,29 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         ]
       }
     ],
+    // 🚨 NEW: Integrated exact structure from the Executive prototype image
+    EXECUTIVE: [
+      {
+        category: 'Overview',
+        items: [
+          { name: 'Dashboard', href: '/dashboard/executive', icon: Home }
+        ]
+      },
+      {
+        category: 'Portfolio',
+        items: [
+          { name: 'My Portfolio', href: '/dashboard/executive/portfolio', icon: Network },
+          { name: 'Portfolio Appraisals', href: '/dashboard/executive/appraisals', icon: CheckCircle },
+          { name: 'Portfolio Discipline', href: '/dashboard/executive/discipline', icon: Users }
+        ]
+      },
+      {
+        category: 'Help',
+        items: [
+          { name: 'How it works', href: '/dashboard/executive/help', icon: HelpCircle }
+        ]
+      }
+    ],
     EMPLOYEE: [
       {
         category: 'My Overview',
@@ -161,7 +185,6 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'System Controls',
         items: [
-          // 🚨 UPGRADE: Added Formula Config 
           { name: 'Formula Config', href: '/dashboard/ict/formula', icon: Calculator },
           { name: 'Scorecard Lock', href: '/dashboard/ict/scorecard', icon: Lock },
           { name: 'User Roles', href: '/dashboard/ict/users', icon: Shield },
@@ -199,6 +222,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
   const getBasePath = (r) => {
     if (r === 'HR_ADMIN') return '/dashboard/hr';
     if (r === 'ICT_ADMIN') return '/dashboard/ict';
+    if (r === 'EXECUTIVE') return '/dashboard/executive'; // 🚨 NEW: Added fallback pathing for settings gear
     return `/dashboard/${r.toLowerCase()}`;
   };
   const profileLink = `${getBasePath(activeRole)}/profile`;

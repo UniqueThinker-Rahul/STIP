@@ -3,7 +3,6 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const userController = require('../controllers/userController');
-// 🚨 Ensure Notification is imported so the bell alert works
 const Notification = require('../models/Notification');
 
 // 1. IMPORT MIDDLEWARE 
@@ -23,11 +22,12 @@ router.get('/', async (req, res) => {
       return res.status(403).json({ message: 'Employees do not have directory access.' });
     }
 
-    // 🚨 UPGRADE: Heavy Projection Optimization. We strip out giant data blobs to speed up loading.
+    // Heavy Projection Optimization. We strip out giant data blobs to speed up loading.
     const users = await User.find(query)
       .select('employeeId username personalDetails.firstName personalDetails.lastName personalDetails.notificationEmails employmentDetails.isActive employmentDetails.jobTitle employmentDetails.officeLocation employmentDetails.dateOfHire employmentDetails.salary employmentDetails.prorateValue companyCode security.role security.secondaryRoles')
       .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName')
-      .lean(); // .lean() strips heavy Mongoose wrappers, making the query 5x faster
+      .populate('employmentDetails.executiveTo', 'personalDetails.firstName personalDetails.lastName') // Added Executive population
+      .lean(); 
 
     res.json({ count: users.length, data: users });
   } catch (error) {
@@ -35,10 +35,9 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 🚨 FIX: PATCH /api/v1/users/notification-email (Update or Remove own notification email)
+// PATCH /api/v1/users/notification-email (Update or Remove own notification email)
 router.patch('/notification-email', async (req, res) => {
   try {
-    // FIX: Fallback to the logged-in user's role if the frontend doesn't send a specific targetRole
     const roleKey = req.body.targetRole || req.body.role || req.user.role;
     const emailValue = req.body.newEmail !== undefined ? req.body.newEmail : req.body.email;
     const userId = req.body.userId || req.user.id;
@@ -53,7 +52,6 @@ router.patch('/notification-email', async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    // Ensure map exists
     if (!user.personalDetails) user.personalDetails = {};
     if (!user.personalDetails.notificationEmails) {
       user.personalDetails.notificationEmails = new Map();
@@ -62,14 +60,12 @@ router.patch('/notification-email', async (req, res) => {
     const isMap = user.personalDetails.notificationEmails instanceof Map;
 
     if (!emailValue || emailValue.trim() === '') {
-      // REMOVE the email if the payload is empty
       if (isMap) {
         user.personalDetails.notificationEmails.delete(roleKey);
       } else {
         delete user.personalDetails.notificationEmails[roleKey];
       }
     } else {
-      // UPDATE or ADD the new email
       if (isMap) {
         user.personalDetails.notificationEmails.set(roleKey, emailValue);
       } else {
@@ -96,7 +92,7 @@ router.patch('/notification-email', async (req, res) => {
   }
 });
 
-// 🚨 CORRECTED: PATCH /api/v1/users/:id/alert-email (ICT Admin Route)
+// PATCH /api/v1/users/:id/alert-email (ICT Admin Route)
 router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
   try {
     const { targetRole, newEmail } = req.body;
@@ -108,13 +104,11 @@ router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    // Ensure map exists
     if (!user.personalDetails) user.personalDetails = {};
     if (!user.personalDetails.notificationEmails) {
       user.personalDetails.notificationEmails = new Map();
     }
 
-    // Handle Mongoose Map vs Object safely for the dynamic email storage
     if (user.personalDetails.notificationEmails instanceof Map) {
       if (!newEmail || newEmail.trim() === '') {
         user.personalDetails.notificationEmails.delete(targetRole);
@@ -132,11 +126,9 @@ router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
       }
     }
 
-    // Force Mongoose to recognize the change in the mixed/nested object
     user.markModified('personalDetails.notificationEmails');
     await user.save();
 
-    // Fire the In-App Bell Notification to the user only if email was added
     if (newEmail && newEmail.trim() !== '') {
       await Notification.create({
         recipient: user._id,
@@ -162,7 +154,7 @@ router.patch('/:id/alert-email', roleGuard('ICT_ADMIN'), async (req, res) => {
   }
 });
 
-// 3b. GET /api/v1/users/recycle-bin (The Soft Deleted Users)
+// GET /api/v1/users/recycle-bin (The Soft Deleted Users)
 router.get('/recycle-bin', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
     const deletedUsers = await User.find({ 'employmentDetails.isDeleted': true })
@@ -176,12 +168,11 @@ router.get('/recycle-bin', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req
   }
 });
 
-// 4. GET /api/v1/users/managers (Populates HR dropdowns)
+// GET /api/v1/users/managers (Populates HR dropdowns)
 router.get('/managers', async (req, res) => {
   try {
     const managerRoles = ['MANAGER', 'HR_ADMIN', 'CEO'];
     
-    // 🚨 UPGRADE: Projection Optimization
     const managers = await User.find({
       'employmentDetails.isDeleted': { $ne: true },
       $or: [
@@ -199,15 +190,37 @@ router.get('/managers', async (req, res) => {
   }
 });
 
-// 5. GET /api/v1/users/my-team 
+// 🚨 UPGRADED: Expanded roleGuard to prevent 403 blocks for dual-admins
+router.get('/executives', roleGuard('HR_ADMIN', 'ADMIN', 'ICT_ADMIN', 'admin'), async (req, res) => {
+  try {
+    const executives = await User.find({
+      'employmentDetails.isDeleted': { $ne: true },
+      $or: [
+        { 'security.role': 'EXECUTIVE' },
+        { 'security.secondaryRoles': 'EXECUTIVE' },
+        { 'role': 'EXECUTIVE' } 
+      ]
+    })
+    .select("personalDetails.firstName personalDetails.lastName employeeId security.role security.secondaryRoles")
+    .lean();
+    
+    res.json({ data: executives });
+  } catch (error) {
+    console.error("Error fetching executives:", error);
+    res.status(500).json({ message: 'Error fetching executives.' });
+  }
+});
+
+// GET /api/v1/users/my-team 
 router.get('/my-team', userController.getMyTeam);
 
-// 6. GET /api/v1/users/:id (View a specific profile)
+// GET /api/v1/users/:id (View a specific profile)
 router.get('/:id', async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select('-password -security.currentSessionId')
-      .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName');
+      .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName')
+      .populate('employmentDetails.executiveTo', 'personalDetails.firstName personalDetails.lastName'); 
       
     if (!user) return res.status(404).json({ message: 'User not found.' });
 
@@ -223,10 +236,10 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// 7. POST /api/v1/users (Create new staff)
+// POST /api/v1/users (Create new staff)
 router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
   try {
-    const { employeeId, firstName, lastName, jobTitle, officeLocation, companyCode, dateOfHire, role, reportingTo, prorateValue, isActive, salary } = req.body;
+    const { employeeId, firstName, lastName, jobTitle, officeLocation, companyCode, dateOfHire, role, reportingTo, executiveTo, prorateValue, isActive, salary } = req.body;
     
     const hiringYear = new Date(dateOfHire).getFullYear();
     const username = `${employeeId}${hiringYear}`;
@@ -245,6 +258,7 @@ router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN
         dateOfHire, 
         prorateValue: prorateValue || 12,              
         reportingTo: reportingTo || null,
+        executiveTo: executiveTo || null, 
         isActive: isActive !== undefined ? isActive : true,
         isDeleted: false 
       },
@@ -259,12 +273,12 @@ router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN
   }
 });
 
-// 8. 🚨 UPGRADED: PATCH /api/v1/users/:id/hr-update (Edit Profile)
+// PATCH /api/v1/users/:id/hr-update (Edit Profile)
 router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
   try {
     const { 
       firstName, lastName, jobTitle, officeLocation, companyCode, 
-      dateOfHire, role, secondaryRoles, reportingTo, salary,
+      dateOfHire, role, secondaryRoles, reportingTo, executiveTo, salary,
       notificationEmails
     } = req.body;
 
@@ -278,11 +292,12 @@ router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', '
     if (salary !== undefined) user.employmentDetails.salary = salary;
     if (dateOfHire !== undefined) user.employmentDetails.dateOfHire = dateOfHire;
     if (companyCode !== undefined) user.companyCode = companyCode;
+    
     if (reportingTo !== undefined) user.employmentDetails.reportingTo = reportingTo;
+    if (executiveTo !== undefined) user.employmentDetails.executiveTo = executiveTo; 
 
     if (role) user.security.role = role;
 
-    // Securely handle Array assignment for Secondary Roles
     if (secondaryRoles !== undefined) {
       user.security.secondaryRoles = Array.isArray(secondaryRoles) ? secondaryRoles : [secondaryRoles];
     }
@@ -317,7 +332,7 @@ router.patch('/:id/hr-update', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', '
   }
 });
 
-// 8b. PATCH /api/v1/users/:id/status (Toggle Login Access)
+// PATCH /api/v1/users/:id/status (Toggle Login Access)
 router.patch('/:id/status', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
   try {
     const { isActive } = req.body;
@@ -339,7 +354,7 @@ router.patch('/:id/status', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'adm
   }
 });
 
-// 8c. PATCH /api/v1/users/:id/restore (Restore from Recycle Bin)
+// PATCH /api/v1/users/:id/restore (Restore from Recycle Bin)
 router.patch('/:id/restore', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -361,7 +376,7 @@ router.patch('/:id/restore', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (r
   }
 });
 
-// 9. DELETE /api/v1/users/:id (Move to Recycle Bin - Soft Delete)
+// DELETE /api/v1/users/:id (Move to Recycle Bin - Soft Delete)
 router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', 'ADMIN', 'ict_admin'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -383,7 +398,7 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', '
   }
 });
 
-// 10. DELETE /api/v1/users/:id/permanent (Wipe completely)
+// DELETE /api/v1/users/:id/permanent (Wipe completely)
 router.delete('/:id/permanent', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);

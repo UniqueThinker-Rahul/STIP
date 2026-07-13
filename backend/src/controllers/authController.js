@@ -1,6 +1,69 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 
+// 🚨 UPGRADED: Added support for handling the login mechanism and validating the new EXECUTIVE role
+exports.login = async (req, res) => {
+  try {
+    const { username, password, requestedPortal } = req.body;
+
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+
+    // Role-based Security Clearance Check
+    if (requestedPortal) {
+      if (requestedPortal === 'HR_ADMIN' && user.role !== 'HR_ADMIN') {
+        return res.status(403).json({ message: 'Access Denied. You do not have HR Admin clearance.' });
+      }
+      if (requestedPortal === 'CEO' && user.role !== 'CEO') {
+        return res.status(403).json({ message: 'Access Denied. You do not have CEO clearance.' });
+      }
+      if (requestedPortal === 'ICT_ADMIN' && user.role !== 'ICT_ADMIN') {
+        return res.status(403).json({ message: 'Access Denied. You do not have ICT Admin clearance.' });
+      }
+      // 👇 ADDED: Executive Role Clearance Verification
+      if (requestedPortal === 'EXECUTIVE' && user.role !== 'EXECUTIVE') {
+        return res.status(403).json({ message: 'Access Denied. You do not have Executive clearance.' });
+      }
+      if (requestedPortal === 'MANAGER' && user.role !== 'MANAGER' && user.role !== 'HR_ADMIN' && user.role !== 'CEO' && user.role !== 'EXECUTIVE') {
+        return res.status(403).json({ message: 'Access Denied. You do not have Manager clearance.' });
+      }
+    }
+
+    // Generate JWT (Assuming you have a generateToken function or similar in your original auth controller)
+    const jwt = require('jsonwebtoken');
+    const token = jwt.sign(
+      { id: user._id, role: user.role, employeeId: user.employeeId },
+      process.env.JWT_SECRET || 'fallback_secret_key_change_in_production',
+      { expiresIn: '1d' }
+    );
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: {
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        isFirstLogin: user.isFirstLogin || user.security?.isFirstLogin,
+        firstName: user.personalDetails?.firstName,
+        lastName: user.personalDetails?.lastName
+      }
+    });
+
+  } catch (error) {
+    console.error('Login Error:', error);
+    res.status(500).json({ message: 'Server error during login.' });
+  }
+};
+
+
 exports.updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -15,7 +78,7 @@ exports.updatePassword = async (req, res) => {
       return res.status(400).json({ message: 'Current password is incorrect' });
     }
 
-    // 🚨 FIX: Pass the raw new password! Do NOT use bcrypt here. 
+    // Pass the raw new password! Do NOT use bcrypt here. 
     // The User model's pre('save') hook will hash it automatically.
     user.password = newPassword; 
     
@@ -28,7 +91,7 @@ exports.updatePassword = async (req, res) => {
   }
 };
 
-// 🚨 NEW: Public route to request a password reset ticket
+// Public route to request a password reset ticket
 exports.requestPasswordReset = async (req, res) => {
   try {
     const { employeeId, contactData } = req.body;
@@ -57,7 +120,7 @@ exports.requestPasswordReset = async (req, res) => {
   }
 };
 
-// 🚨 NEW: ICT Admin route to fetch all pending requests
+// ICT Admin route to fetch all pending requests
 exports.getPendingResetRequests = async (req, res) => {
   try {
     const pendingUsers = await User.find({ 'security.resetRequested': true })
@@ -69,7 +132,7 @@ exports.getPendingResetRequests = async (req, res) => {
   }
 };
 
-// 🚨 NEW: ICT Admin route to dismiss an invalid request
+// ICT Admin route to dismiss an invalid request
 exports.dismissResetRequest = async (req, res) => {
   try {
     await User.updateOne(
@@ -82,7 +145,7 @@ exports.dismissResetRequest = async (req, res) => {
   }
 };
 
-// 🚨 UPGRADED: Administrative Force-Reset Password (clears the request queue)
+// Administrative Force-Reset Password (clears the request queue)
 exports.adminResetPassword = async (req, res) => {
   try {
     const { employeeId, username, newPassword } = req.body;
@@ -113,7 +176,7 @@ exports.adminResetPassword = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    // 🚨 Update password, force change on next login, AND clear the request flag from the queue
+    // Update password, force change on next login, AND clear the request flag from the queue
     await User.updateOne(
       { _id: user._id },
       { 

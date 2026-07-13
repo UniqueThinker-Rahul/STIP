@@ -12,7 +12,6 @@ const getInitials = (name) => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-// 🚨 NEW: Universal helper to cleanly split backend merged names
 const splitName = (source) => {
   if (!source) return { firstName: '', middleName: '', lastName: '' };
   
@@ -20,7 +19,6 @@ const splitName = (source) => {
   let middleName = source.middleName || '';
   let lastName = source.lastName || '';
   
-  // If backend merged them (middleName is empty but firstName has spaces)
   if (!middleName && firstName.trim().includes(' ')) {
     const parts = firstName.trim().split(/\s+/);
     firstName = parts[0];
@@ -35,7 +33,8 @@ const ROLE_COLOURS = {
   'MANAGER': { bg: '#FEF3C7', fg: '#92400E', label: 'Line Manager' },
   'HR_ADMIN': { bg: '#DBEAFE', fg: '#1E40AF', label: 'HR Admin' },
   'CEO': { bg: '#EDE9FE', fg: '#4C1D95', label: 'CEO' },
-  'ICT_ADMIN': { bg: '#D1FAE5', fg: '#065F46', label: 'ICT Admin' }
+  'ICT_ADMIN': { bg: '#D1FAE5', fg: '#065F46', label: 'ICT Admin' },
+  'EXECUTIVE': { bg: '#FFE4E6', fg: '#9F1239', label: 'Executive Member' } 
 };
 
 const ALL_ROLES = [
@@ -43,10 +42,10 @@ const ALL_ROLES = [
   { id: 'MANAGER', label: 'Line Manager' },
   { id: 'HR_ADMIN', label: 'HR Admin' },
   { id: 'CEO', label: 'CEO' },
-  { id: 'ICT_ADMIN', label: 'ICT Admin' }
+  { id: 'ICT_ADMIN', label: 'ICT Admin' },
+  { id: 'EXECUTIVE', label: 'Executive Member' } 
 ];
 
-// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
 const SearchableFilterDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -121,8 +120,6 @@ const SearchableFilterDropdown = ({ value, onChange, options, placeholder, width
     </div>
   );
 };
-// ----------------------------------------------
-
 
 export default function StaffManagement() {
   const router = useRouter();
@@ -130,6 +127,7 @@ export default function StaffManagement() {
   const [dbStaff, setDbStaff] = useState([]);
   const [dbRecycleBin, setDbRecycleBin] = useState([]); 
   const [dbManagers, setDbManagers] = useState([]);
+  const [dbExecutives, setDbExecutives] = useState([]); // 🚨 NEW: State for Executives
   
   const [companyCodes, setCompanyCodes] = useState([]);
   const [officeLocations, setOfficeLocations] = useState([]);
@@ -148,20 +146,17 @@ export default function StaffManagement() {
   const [isRecycleBinView, setIsRecycleBinView] = useState(false); 
 
   const [openDropdown, setOpenDropdown] = useState(null);
-  const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '' });
+  const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '', exec: '' });
   const dropdownRef = useRef(null);
 
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
-  // Bulk Selection States
   const [selectedStaffIds, setSelectedStaffIds] = useState([]);
   const [isBulkActing, setIsBulkActing] = useState(false);
 
-  // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Custom Modal State to lock page and center alerts
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
     type: 'alert', 
@@ -192,17 +187,23 @@ export default function StaffManagement() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      setSelectedStaffIds([]); // Clear selection on fetch
-      const [resUsers, resBin, resMgrs, configRes] = await Promise.all([
+      setSelectedStaffIds([]); 
+      const [resUsers, resBin, resMgrs, resExecs, configRes] = await Promise.all([
         api.get('/users'),
         api.get('/users/recycle-bin').catch(() => ({ data: { data: [] } })), 
         api.get('/users/managers').catch(() => ({ data: { data: [] } })),
+        api.get('/users/executives').catch(() => ({ data: { data: [] } })), 
         api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })) 
       ]);
       
       setDbStaff(resUsers.data?.data || []);
       setDbRecycleBin(resBin.data?.data || []);
       setDbManagers(resMgrs.data?.data || []);
+      
+      // 🚨 FIX: Ensure dbExecutives actually receives the data array
+      const execsData = resExecs.data?.data || [];
+      console.log('Fetched Executives:', execsData); // debug log to confirm data
+      setDbExecutives(execsData);
       
       const configData = configRes.data?.data || {};
       setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
@@ -220,7 +221,7 @@ export default function StaffManagement() {
 
   useEffect(() => {
     setCurrentPage(1);
-    setSelectedStaffIds([]); // Clear selection when filters change
+    setSelectedStaffIds([]);
   }, [search, coFilter, roleFilter, managerFilter, isRecycleBinView]);
 
   useEffect(() => {
@@ -239,7 +240,6 @@ export default function StaffManagement() {
   if (search) {
     const s = search.toLowerCase();
     data = data.filter(e => {
-      // 🚨 FIX: Extract separated names for accurate search filtering
       const { firstName, middleName, lastName } = splitName(e.personalDetails);
       return `${firstName} ${middleName} ${lastName} ${e.employeeId}`.toLowerCase().includes(s);
     });
@@ -255,13 +255,11 @@ export default function StaffManagement() {
     }
   }
 
-  // Pagination Logic Extraction
   const totalPages = Math.ceil(data.length / itemsPerPage);
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentItems = data.slice(indexOfFirstItem, indexOfLastItem);
 
-  // Bulk Selection Logic
   const handleSelectAll = (e) => {
     if (e.target.checked) {
       const currentPageIds = currentItems.map(item => item._id);
@@ -282,15 +280,10 @@ export default function StaffManagement() {
 
   const isAllCurrentPageSelected = currentItems.length > 0 && currentItems.every(item => selectedStaffIds.includes(item._id));
 
-  // --- BULK ACTION EXECUTION HANDLERS ---
   const handleBulkDelete = () => {
     if (selectedStaffIds.length === 0) return;
     
-    showDialog(
-      'confirm',
-      'Confirm Bulk Deletion',
-      `Are you sure you want to move ${selectedStaffIds.length} selected employees to the Recycle Bin?`,
-      async () => {
+    showDialog('confirm', 'Confirm Bulk Deletion', `Are you sure you want to move ${selectedStaffIds.length} selected employees to the Recycle Bin?`, async () => {
         closeDialog();
         setIsBulkActing(true);
         try {
@@ -311,11 +304,7 @@ export default function StaffManagement() {
   const handleBulkRestore = () => {
     if (selectedStaffIds.length === 0) return;
 
-    showDialog(
-      'confirm',
-      'Confirm Bulk Restore',
-      `Are you sure you want to restore ${selectedStaffIds.length} selected employees back to the active directory?`,
-      async () => {
+    showDialog('confirm', 'Confirm Bulk Restore', `Are you sure you want to restore ${selectedStaffIds.length} selected employees back to the active directory?`, async () => {
         closeDialog();
         setIsBulkActing(true);
         try {
@@ -336,11 +325,7 @@ export default function StaffManagement() {
   const handleBulkPermanentDelete = () => {
     if (selectedStaffIds.length === 0) return;
 
-    showDialog(
-      'confirm',
-      'Bulk Permanent Deletion',
-      `WARNING: This will permanently erase ${selectedStaffIds.length} selected employees from the database. This action CANNOT be undone. Are you sure?`,
-      async () => {
+    showDialog('confirm', 'Bulk Permanent Deletion', `WARNING: This will permanently erase ${selectedStaffIds.length} selected employees from the database. This action CANNOT be undone. Are you sure?`, async () => {
         closeDialog();
         setIsBulkActing(true);
         try {
@@ -361,7 +346,6 @@ export default function StaffManagement() {
   const handleSaveEdit = async () => {
     if (!editingStaff) return;
     try {
-      // 🚨 FIX: Re-combine first and middle name into the backend's expected structure before saving
       const fName = editingStaff.personalDetails?.firstName?.trim() || '';
       const mName = editingStaff.personalDetails?.middleName?.trim() || '';
       const combinedFirstName = mName ? `${fName} ${mName}` : fName;
@@ -376,7 +360,8 @@ export default function StaffManagement() {
         companyCode: editingStaff.companyCode,
         role: editingStaff.security?.role,
         secondaryRoles: editingStaff.security?.secondaryRoles || [],
-        reportingTo: editingStaff.employmentDetails?.reportingTo?._id || editingStaff.employmentDetails?.reportingTo || null
+        reportingTo: editingStaff.employmentDetails?.reportingTo?._id || editingStaff.employmentDetails?.reportingTo || null,
+        executiveTo: editingStaff.employmentDetails?.executiveTo?._id || editingStaff.employmentDetails?.executiveTo || null
       });
       
       setSuccessMsg(`${fName}'s profile updated successfully.`);
@@ -392,7 +377,6 @@ export default function StaffManagement() {
 
   const handleDelete = () => {
     if (!editingStaff) return;
-    
     showDialog('confirm', 'Confirm Deletion', `Are you sure you want to move ${editingStaff.personalDetails?.firstName} to the Recycle Bin?`, async () => {
       closeDialog();
       try {
@@ -409,22 +393,12 @@ export default function StaffManagement() {
 
   const handleMassDelete = () => {
     if (dbStaff.length === 0) return showDialog('alert', 'Notice', "No active staff to delete.");
-    
-    showDialog(
-      'confirm', 
-      'Mass Deletion Warning', 
-      `WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`, 
-      () => {
-        showDialog(
-          'prompt',
-          'Confirm MASSIVE Action',
-          'To confirm this mass deletion, please type "DELETE ALL" below:',
-          async (inputValue) => {
+    showDialog('confirm', 'Mass Deletion Warning', `WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`, () => {
+        showDialog('prompt', 'Confirm MASSIVE Action', 'To confirm this mass deletion, please type "DELETE ALL" below:', async (inputValue) => {
             if (inputValue !== "DELETE ALL") {
               showDialog('alert', 'Action Cancelled', 'Mass deletion cancelled.');
               return;
             }
-            
             closeDialog();
             try {
               setIsDeletingAll(true);
@@ -433,7 +407,7 @@ export default function StaffManagement() {
               fetchData();
               setTimeout(() => setSuccessMsg(''), 5000);
             } catch (e) { 
-              showDialog('alert', 'Error', "Failed to execute mass deletion. Make sure the backend route exists."); 
+              showDialog('alert', 'Error', "Failed to execute mass deletion."); 
             } finally {
               setIsDeletingAll(false);
             }
@@ -455,11 +429,7 @@ export default function StaffManagement() {
   };
 
   const handlePermanentDelete = (userId) => {
-    showDialog(
-      'confirm', 
-      'Permanent Deletion', 
-      "WARNING: This will permanently erase the employee from the database. This action cannot be undone. Are you sure?", 
-      async () => {
+    showDialog('confirm', 'Permanent Deletion', "WARNING: This will permanently erase the employee from the database. This action cannot be undone. Are you sure?", async () => {
         closeDialog();
         try {
           await api.delete(`/users/${userId}/permanent`);
@@ -476,17 +446,21 @@ export default function StaffManagement() {
   const handleDownloadCSV = () => {
     if (data.length === 0) return showDialog('alert', 'Notice', "No data to download.");
     
-    const headers = ['Employee ID', 'First Name', 'Middle Name', 'Last Name', 'Company', 'Office Location', 'Job Title', 'Base Salary', 'Hire Date', 'Primary Role', 'Secondary Roles', 'Reporting Manager'];
+    const headers = ['Employee ID', 'First Name', 'Middle Name', 'Last Name', 'Company', 'Office Location', 'Job Title', 'Base Salary', 'Hire Date', 'Primary Role', 'Secondary Roles', 'Reporting Manager', 'Executive Oversight'];
     const csvRows = [headers.join(',')];
     
     data.forEach(e => {
-      // 🚨 FIX: Extract separated names for CSV Export
       const { firstName, middleName, lastName } = splitName(e.personalDetails);
       const mgr = e.employmentDetails?.reportingTo?.personalDetails;
       const mgrNames = splitName(mgr);
       const mgrMName = mgrNames.middleName ? `${mgrNames.middleName} ` : '';
       const mgrName = mgr ? `${mgrNames.firstName} ${mgrMName}${mgrNames.lastName}` : 'Unassigned';
       
+      const exec = e.employmentDetails?.executiveTo?.personalDetails;
+      const execNames = splitName(exec);
+      const execMName = execNames.middleName ? `${execNames.middleName} ` : '';
+      const execName = exec ? `${execNames.firstName} ${execMName}${execNames.lastName}` : 'Unassigned';
+
       const secondaryRoles = (e.security?.secondaryRoles || []).map(r => ROLE_COLOURS[r]?.label).join(' & ');
       
       const row = [
@@ -501,7 +475,8 @@ export default function StaffManagement() {
         e.employmentDetails?.dateOfHire ? new Date(e.employmentDetails.dateOfHire).toLocaleDateString() : '',
         ROLE_COLOURS[e.security?.role]?.label || 'Staff',
         `"${secondaryRoles}"`,
-        `"${mgrName}"`
+        `"${mgrName}"`,
+        `"${execName}"`
       ];
       csvRows.push(row.join(','));
     });
@@ -536,6 +511,7 @@ export default function StaffManagement() {
     });
   };
 
+  // 🚨 FIX: ensure options are passed properly for the executive dropdown
   const renderSearchableDropdown = (fieldKey, dbFieldObj, dbFieldProp, options, placeholder, displayKey, valueKey = null) => {
     const isOpen = openDropdown === fieldKey;
     const query = searchQueries[fieldKey] || '';
@@ -550,7 +526,7 @@ export default function StaffManagement() {
         ? editingStaff[dbFieldObj]?.[dbFieldProp] 
         : editingStaff[dbFieldObj];
         
-    const safeCurrentValue = (fieldKey === 'mgr' && typeof currentValue === 'object' && currentValue !== null) 
+    const safeCurrentValue = (['mgr', 'exec'].includes(fieldKey) && typeof currentValue === 'object' && currentValue !== null) 
         ? currentValue._id 
         : currentValue;
 
@@ -601,12 +577,12 @@ export default function StaffManagement() {
             </div>
             
             <div className="max-h-[180px] overflow-y-auto overflow-x-hidden custom-scrollbar">
-              {fieldKey === 'mgr' && !query && (
+              {['mgr', 'exec'].includes(fieldKey) && !query && (
                 <div 
                     onClick={() => handleSelect(null)}
                     className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#0D2B55] hover:text-white transition-colors truncate ${!safeCurrentValue ? 'bg-blue-50 font-bold text-[#0D2B55]' : 'text-slate-500 italic'}`}
                 >
-                    -- Unassigned / CEO --
+                    -- Unassigned --
                 </div>
               )}
               {filteredOptions.length === 0 ? (
@@ -635,7 +611,6 @@ export default function StaffManagement() {
     );
   };
 
-  // Generate page numbers for pagination
   const getPageNumbers = () => {
     let pages = [];
     if (totalPages <= 5) {
@@ -655,7 +630,7 @@ export default function StaffManagement() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 relative pb-24">
+    <div className="p-6 max-w-7xl mx-auto space-y-6 relative pb-24 font-sans">
       
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200 gap-4">
@@ -675,7 +650,7 @@ export default function StaffManagement() {
             {isRecycleBinView ? <><Users className="w-4 h-4"/> Back to Active Directory</> : <><Trash2 className="w-4 h-4"/> View Recycle Bin ({dbRecycleBin.length})</>}
           </button>
           {!isRecycleBinView && (
-            <button onClick={() => router.push('/dashboard/hr/add-staff')} className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+            <button onClick={() => router.push('/dashboard/hr/add-staff')} className="px-5 py-2.5 bg-[#0D2B55] hover:bg-[#1a3d6e] text-white text-sm font-semibold rounded-lg shadow transition-colors">
               + Add New Staff
             </button>
           )}
@@ -740,6 +715,7 @@ export default function StaffManagement() {
               { value: 'EMPLOYEE', label: 'Staff / Employee' },
               { value: 'MANAGER', label: 'Line Manager' },
               { value: 'HR_ADMIN', label: 'HR Admin' },
+              { value: 'EXECUTIVE', label: 'Executive Member' }, 
               { value: 'CEO', label: 'CEO' },
               { value: 'ICT_ADMIN', label: 'ICT Admin' }
             ]}
@@ -752,7 +728,6 @@ export default function StaffManagement() {
             widthClass="w-full md:w-64"
             options={[
               { value: 'unassigned', label: '-- Unassigned / CEO --' },
-              // 🚨 FIX: Safe extraction for Search dropdown
               ...dbManagers.map(m => {
                 const { firstName, middleName, lastName } = splitName(m.personalDetails || m);
                 const mNameStr = middleName ? ` ${middleName}` : '';
@@ -816,11 +791,10 @@ export default function StaffManagement() {
                 <tr><td colSpan="7" className="py-12 text-center text-slate-400">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching filters.'}</td></tr>
               ) : currentItems.map((e) => {
                 const roleKey = e.security?.role || 'EMPLOYEE';
-                const roleInfo = ROLE_COLOURS[roleKey];
+                const roleInfo = ROLE_COLOURS[roleKey] || ROLE_COLOURS['EMPLOYEE'];
                 const secondaryRoles = e.security?.secondaryRoles || [];
                 const mgr = e.employmentDetails?.reportingTo?.personalDetails;
                 
-                // 🚨 FIX: Safe extraction for table
                 const mgrNames = splitName(mgr);
                 const mgrMName = mgrNames.middleName ? `${mgrNames.middleName} ` : '';
                 const mgrName = mgr ? `${mgrNames.firstName} ${mgrMName}${mgrNames.lastName}` : 'Unassigned';
@@ -859,8 +833,8 @@ export default function StaffManagement() {
                         {secondaryRoles.length > 0 && (
                           <div className="flex gap-1">
                             {secondaryRoles.map(r => (
-                              <div key={r} style={{ backgroundColor: ROLE_COLOURS[r].bg, color: ROLE_COLOURS[r].fg }} className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`} title={`Also has ${ROLE_COLOURS[r].label} access`}>
-                                {ROLE_COLOURS[r].label.charAt(0)}
+                              <div key={r} style={{ backgroundColor: ROLE_COLOURS[r]?.bg || '#f1f5f9', color: ROLE_COLOURS[r]?.fg || '#000' }} className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`} title={`Also has ${ROLE_COLOURS[r]?.label || r} access`}>
+                                {(ROLE_COLOURS[r]?.label || r).charAt(0)}
                               </div>
                             ))}
                           </div>
@@ -881,7 +855,6 @@ export default function StaffManagement() {
                       ) : (
                         <div className="flex items-center justify-center gap-2">
                           <button onClick={() => {
-                            // 🚨 FIX: Intercept data and un-merge the name for the View Modal
                             const staffToView = JSON.parse(JSON.stringify(e));
                             if (staffToView.personalDetails) {
                               const { firstName, middleName, lastName } = splitName(staffToView.personalDetails);
@@ -894,7 +867,6 @@ export default function StaffManagement() {
                             <Eye className="w-3 h-3" /> View
                           </button>
                           <button onClick={() => {
-                            // 🚨 FIX: Intercept data and un-merge the name for the Edit Modal
                             const staffToEdit = JSON.parse(JSON.stringify(e));
                             if (staffToEdit.personalDetails) {
                               const { firstName, middleName, lastName } = splitName(staffToEdit.personalDetails);
@@ -1048,7 +1020,7 @@ export default function StaffManagement() {
               {/* Employment Details */}
               <div>
                 <h4 className="text-xs font-bold text-[#0D2B55] uppercase tracking-wider mb-3 border-b pb-1">Employment Details</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                     <div className="text-[10px] font-bold text-slate-400 uppercase">Job Title</div>
                     <div className="text-sm font-medium text-slate-800 mt-0.5">{viewingStaff.employmentDetails?.jobTitle || 'N/A'}</div>
@@ -1072,13 +1044,23 @@ export default function StaffManagement() {
                   <div>
                     <div className="text-[10px] font-bold text-slate-400 uppercase">Line Manager</div>
                     <div className="text-sm font-medium text-slate-800 mt-0.5">
-                      {/* 🚨 FIX: Included middleName safely in the View Modal */}
                       {viewingStaff.employmentDetails?.reportingTo?.personalDetails 
                         ? (() => {
                             const mgrNames = splitName(viewingStaff.employmentDetails.reportingTo.personalDetails);
                             return `${mgrNames.firstName} ${mgrNames.middleName ? mgrNames.middleName + ' ' : ''}${mgrNames.lastName}`;
                           })()
                         : 'Unassigned / CEO'}
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Executive Oversight</div>
+                    <div className="text-sm font-medium text-slate-800 mt-0.5">
+                      {viewingStaff.employmentDetails?.executiveTo?.personalDetails 
+                        ? (() => {
+                            const execNames = splitName(viewingStaff.employmentDetails.executiveTo.personalDetails);
+                            return `${execNames.firstName} ${execNames.middleName ? execNames.middleName + ' ' : ''}${execNames.lastName}`;
+                          })()
+                        : 'Unassigned'}
                     </div>
                   </div>
                 </div>
@@ -1200,7 +1182,7 @@ export default function StaffManagement() {
               <div className="bg-[#0D2B55]/5 border border-[#0D2B55]/10 rounded-xl p-5 mt-2 shadow-sm">
                 <h4 className="text-xs font-bold text-[#0D2B55] flex items-center gap-1.5 mb-4"><Shield className="w-4 h-4" /> System Access & Hierarchy</h4>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-5">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Primary Role Dashboard</label>
                     <select className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-semibold bg-white shadow-sm" value={editingStaff.security?.role || 'EMPLOYEE'} onChange={e => setEditingStaff({...editingStaff, security: {...editingStaff.security, role: e.target.value}})}>
@@ -1212,13 +1194,22 @@ export default function StaffManagement() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Line Manager</label>
-                    {/* 🚨 FIX: Safe extraction for Line Manager dropdown */}
                     {renderSearchableDropdown('mgr', 'employmentDetails', 'reportingTo', dbManagers, 'Search for Manager...', (m) => {
                        if (!m) return '';
                        const { firstName, middleName, lastName } = splitName(m.personalDetails || m);
                        const mNameStr = middleName ? ` ${middleName}` : '';
                        const isSecondary = !['MANAGER', 'HR_ADMIN', 'CEO'].includes(m.security?.role);
                        return `${firstName}${mNameStr} ${lastName}${isSecondary ? ` (${m.security?.role})` : ''}`.trim();
+                    })}
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#9F1239] uppercase mb-1">Executive Member (Oversight)</label>
+                    {/* 🚨 FIX: Pass dbExecutives array explicitly here instead of depending on older closure references */}
+                    {renderSearchableDropdown('exec', 'employmentDetails', 'executiveTo', dbExecutives, 'Assign to Executive...', (m) => {
+                       if (!m) return '';
+                       const { firstName, middleName, lastName } = splitName(m.personalDetails || m);
+                       const mNameStr = middleName ? ` ${middleName}` : '';
+                       return `${firstName}${mNameStr} ${lastName}`.trim();
                     })}
                   </div>
                 </div>

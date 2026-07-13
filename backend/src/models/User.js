@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema({
     prorateValue: { type: Number, default: 12 },
     rawManagerName: { type: String }, 
     reportingTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    executiveTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     isActive: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false } 
   },
@@ -32,12 +33,12 @@ const userSchema = new mongoose.Schema({
   security: {
     role: {
       type: String,
-      enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN'],
+      enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN', 'EXECUTIVE'],
       default: 'EMPLOYEE'
     },
     secondaryRoles: [{
       type: String,
-      enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN']
+      enum: ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'CEO', 'ICT_ADMIN', 'EXECUTIVE']
     }],
     isFirstLogin: {
       type: Boolean,
@@ -72,5 +73,10 @@ userSchema.pre('save', async function () {
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
+
+// 🚀 UPGRADE: Added indexes to fix the hanging Staff Directory load times
+userSchema.index({ 'security.role': 1, 'employmentDetails.isDeleted': 1 });
+userSchema.index({ 'employmentDetails.reportingTo': 1 });
+userSchema.index({ 'employmentDetails.executiveTo': 1 });
 
 module.exports = mongoose.model('User', userSchema);

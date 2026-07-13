@@ -84,3 +84,12 @@ exports.updateUserByHR = async (req, res) => {
     res.status(500).json({ success: false, message: "Error updating employee" });
   }
 };
+// 🚨 NEW: Fetch all executives for the HR dropdowns
+exports.getExecutives = async (req, res) => {
+  try {
+    const executives = await User.find({ role: 'EXECUTIVE' }).select('-password');
+    res.status(200).json({ success: true, data: executives });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server Error fetching executives.' });
+  }
+};
