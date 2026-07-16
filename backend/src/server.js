@@ -79,6 +79,7 @@ app.use('/api/v1/config', configRoutes);
 app.use('/api/v1/backup', backupRoutes);
 app.use('/api/v1/quarterly-scorecards', require('./routes/quarterlyScorecardRoutes'));
 app.use('/api/v1/executive', require('./routes/executiveRoutes'));
+app.use('/api/v1/reports', require('./routes/boardReportRoutes'));
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

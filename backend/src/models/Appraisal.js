@@ -47,4 +47,5 @@ const appraisalSchema = new mongoose.Schema({
   
 }, { timestamps: true });
 
-module.exports = mongoose.model('Appraisal', appraisalSchema);
+// 🚨 UPGRADE: Safe export to prevent "find is not a function" crash during server hot-reloads
+module.exports = mongoose.models.Appraisal || mongoose.model('Appraisal', appraisalSchema);

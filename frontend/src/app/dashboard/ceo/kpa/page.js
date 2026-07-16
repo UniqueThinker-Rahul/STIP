@@ -13,14 +13,6 @@ const KPAS = [
   { name: 'Reputational Capital', wt: 3, color: '#8B5CF6' }
 ];
 
-// 🚨 UPGRADED: Replaced static months with dynamic quarterly mapping
-const QUARTERS = [
-  { val: 1, label: 'Q1' }, 
-  { val: 2, label: 'Q2' }, 
-  { val: 3, label: 'Q3' },
-  { val: 4, label: 'Q4' }
-];
-
 export default function KPAScorecard() {
   const router = useRouter();
   
@@ -36,8 +28,9 @@ export default function KPAScorecard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  // 🚨 UPGRADED: Dynamically calculates the current real-time quarter (1-4) based on system clock
   const [selectedQuarter, setSelectedQuarter] = useState(Math.ceil((new Date().getMonth() + 1) / 3));
+
+  const [availableQuarters, setAvailableQuarters] = useState([]);
 
   // Live clock tick
   useEffect(() => {
@@ -45,12 +38,57 @@ export default function KPAScorecard() {
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch data when Year or Quarter changes
+  // 🚨 UPGRADED: Directly fetch available quarters ONLY from the saved Quarterly Scorecards
+  useEffect(() => {
+    const fetchDynamicQuarters = async () => {
+      try {
+        const res = await api.get(`/quarterly-scorecards/${selectedYear}`);
+        const data = res.data?.data || [];
+        
+        if (data && data.length > 0) {
+          const mapped = data.map(q => {
+            const label = q.quarter; // Uses the exact 'Q1', 'Q2' string saved by the CEO
+            const val = parseInt(String(label).replace(/[^0-9]/g, '')) || 1;
+            return { val, label: `Q${val}` };
+          });
+
+          // Deduplicate the quarters safely
+          const uniqueQuarters = [];
+          const map = new Map();
+          for (const item of mapped) {
+              if(!map.has(item.val)){
+                  map.set(item.val, true);
+                  uniqueQuarters.push(item);
+              }
+          }
+          uniqueQuarters.sort((a, b) => a.val - b.val);
+          
+          setAvailableQuarters(uniqueQuarters);
+          
+          // Auto-select the latest valid quarter if the current one isn't in the list
+          if (!uniqueQuarters.some(m => m.val === selectedQuarter)) {
+            setSelectedQuarter(uniqueQuarters[uniqueQuarters.length - 1].val);
+          }
+        } else {
+          setAvailableQuarters([]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch saved quarters from DB", err);
+        setAvailableQuarters([]);
+      }
+    };
+    fetchDynamicQuarters();
+  }, [selectedYear]);
+
+  // Fetch KPA Matrix Data
   useEffect(() => {
     const fetchData = async () => {
+      if (!selectedQuarter || availableQuarters.length === 0) {
+         setLoading(false);
+         return; 
+      }
       try {
         setLoading(true);
-        // Using the Quarter integer to map seamlessly to the existing backend endpoint
         const res = await api.get(`/company-metrics/${selectedYear}/${selectedQuarter}`).catch(() => ({ data: { data: null } }));
         const metrics = res.data?.data;
         
@@ -82,11 +120,11 @@ export default function KPAScorecard() {
       }
     };
     fetchData();
-  }, [selectedYear, selectedQuarter]);
+  }, [selectedYear, selectedQuarter, availableQuarters.length]);
 
   const isCurrentYear = selectedYear === currentTime.getFullYear();
-  // Disable entry if the scorecard is locked OR if the selected year is not the current active year
-  const isEntryDisabled = locked || !isCurrentYear;
+  // Disable entry if the scorecard is locked, wrong year, or no quarters exist
+  const isEntryDisabled = locked || !isCurrentYear || availableQuarters.length === 0;
 
   // Real-time calculations
   const handleInput = (idx, val) => {
@@ -118,7 +156,7 @@ export default function KPAScorecard() {
       setSaving(true);
       const payload = {
         reviewYear: selectedYear,
-        reviewMonth: selectedQuarter, // Saved as reviewMonth to preserve existing backend schema logic perfectly
+        reviewMonth: selectedQuarter,
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -136,7 +174,7 @@ export default function KPAScorecard() {
         show: true,
         icon: '💾',
         title: 'KPA Scores Saved',
-        detail: `${filled} of 5 KPA scores saved for ${QUARTERS.find(q=>q.val===selectedQuarter).label} ${selectedYear}. ${5 - filled > 0 ? 'Enter the remaining ' + (5 - filled) + ' scores before locking.' : 'All scores entered — ready to lock when Board approves.'}`
+        detail: `${filled} of 5 KPA scores saved for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear}. ${5 - filled > 0 ? 'Enter the remaining ' + (5 - filled) + ' scores before locking.' : 'All scores entered — ready to lock when Board approves.'}`
       });
     } catch (error) {
       alert("Failed to save KPA scores");
@@ -162,7 +200,7 @@ export default function KPAScorecard() {
       setSaving(true);
       const payload = {
         reviewYear: selectedYear,
-        reviewMonth: selectedQuarter, // Saved as reviewMonth to preserve existing backend schema logic perfectly
+        reviewMonth: selectedQuarter, 
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -184,7 +222,7 @@ export default function KPAScorecard() {
         show: true,
         icon: '🔒',
         title: 'Scorecard Locked',
-        detail: `CP for ${QUARTERS.find(q=>q.val===selectedQuarter).label} ${selectedYear} has been permanently set to ${cpPct.toFixed(2)}%. The scorecard is now read-only.`
+        detail: `CP for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear} has been permanently set to ${cpPct.toFixed(2)}%. The scorecard is now read-only.`
       });
     } catch (error) {
       alert("Failed to lock the scorecard.");
@@ -221,13 +259,14 @@ export default function KPAScorecard() {
         
         <div className="flex flex-wrap items-center gap-[10px]">
           <div className="flex items-center gap-[6px] bg-slate-50 border border-[#E2DDD4] p-[4px] rounded-[8px]">
-             {/* 🚨 UPGRADED: Dynamic Quarter Selection */}
              <select 
                value={selectedQuarter} 
                onChange={(e) => setSelectedQuarter(parseInt(e.target.value))}
                className="bg-white border border-[#E2DDD4] p-[6px_10px] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer"
+               disabled={availableQuarters.length === 0}
              >
-                {QUARTERS.map(q => (
+                {availableQuarters.length === 0 && <option value={selectedQuarter}>No Quarters Saved</option>}
+                {availableQuarters.map(q => (
                    <option key={q.val} value={q.val}>{q.label}</option>
                 ))}
              </select>
@@ -259,10 +298,10 @@ export default function KPAScorecard() {
         </div>
       </div>
 
-      {!isCurrentYear && !locked && (
+      {!isCurrentYear && !locked && availableQuarters.length > 0 && (
         <div className="bg-amber-50 border-[1.5px] border-amber-200 rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
           <div className="text-[18px] text-amber-700">&#9888;</div>
-          <div className="text-[13px] text-amber-800">You are viewing <strong>{QUARTERS.find(q=>q.val===selectedQuarter).label} {selectedYear}</strong>. You can only enter or lock data for quarters within the <strong>current active financial year</strong> ({currentTime.getFullYear()}).</div>
+          <div className="text-[13px] text-amber-800">You are viewing <strong>{availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} {selectedYear}</strong>. You can only enter or lock data for quarters within the <strong>current active financial year</strong> ({currentTime.getFullYear()}).</div>
         </div>
       )}
 
@@ -271,7 +310,7 @@ export default function KPAScorecard() {
           <div className="bg-[#D1FAE5] border-[1.5px] border-[#A7F3D0] rounded-[12px] p-[16px_20px] mb-[14px] flex items-center gap-[16px] shadow-sm">
             <div className="text-[28px] shrink-0">&#128274;</div>
             <div className="flex-1">
-              <div className="text-[15px] font-[800] text-[#065F46] mb-[3px]">Scorecard Locked — {QUARTERS.find(q=>q.val===selectedQuarter).label} {selectedYear}</div>
+              <div className="text-[15px] font-[800] text-[#065F46] mb-[3px]">Scorecard Locked — {availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} {selectedYear}</div>
               <div className="text-[12px] text-[#065F46] leading-[1.6]">
                 Locked by: <strong className="font-[800]">{lockedBy || '—'}</strong> &nbsp;|&nbsp; Timestamp: <strong className="font-[800]">{lockedAt || '—'}</strong><br/>
                 KPA scores are now <strong className="font-[800]">read-only for everyone</strong> &middot; Award generation unlocked for HR Admin
@@ -311,7 +350,7 @@ export default function KPAScorecard() {
         </div>
       )}
 
-      {isCurrentYear && !locked && (
+      {isCurrentYear && !locked && availableQuarters.length > 0 && (
         <div className="bg-[#FEF2F2] border-[1.5px] border-[#FECACA] rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
           <div className="text-[18px] text-[#991B1B]">&#9888;</div>
           <div className="text-[13px] text-[#991B1B]">Locking is <strong className="font-[800]">permanent and irreversible</strong>. Once locked, KPA scores cannot be edited by anyone. Only lock after Board approval.</div>
@@ -493,7 +532,7 @@ export default function KPAScorecard() {
             </div>
             <div className="p-[30px_22px] text-center">
               <div className="text-[48px] mb-[16px] leading-none">🔒</div>
-              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock {QUARTERS.find(q=>q.val===selectedQuarter).label} {selectedYear} Scorecard?</div>
+              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock {availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} {selectedYear} Scorecard?</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 This action is <strong>irreversible</strong> from the CEO panel. 
                 Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{cpPct.toFixed(2)}%</strong>?

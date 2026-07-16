@@ -66,7 +66,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'System',
         items: [
-          { name: 'Reports', href: '/dashboard/ceo/reports', icon: BarChart }
+          { name: 'Reports', href: '/dashboard/ceo/reports', icon: BarChart },
+          { name: 'Board Reports', href: '/dashboard/ceo/BoardReport', icon: BarChart }
         ]
       }
     ],
@@ -103,7 +104,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Reports',
         items: [
-          { name: 'Reports', href: '/dashboard/hr/reports', icon: BarChart }
+          { name: 'Reports', href: '/dashboard/hr/reports', icon: BarChart },
+          { name: 'Board Reports', href: '/dashboard/hr/BoardReport', icon: BarChart }
         ]
       }
     ],

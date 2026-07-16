@@ -12,20 +12,24 @@ const getInitials = (name) => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
+// 🚨 FIX: Added EXECUTIVE to Role Colours to prevent crashes when rendering UI
 const ROLE_COLOURS = {
   'EMPLOYEE': { bg: '#F1F5F9', fg: '#475569', label: 'Staff' },
   'MANAGER': { bg: '#FEF3C7', fg: '#92400E', label: 'Line Manager' },
   'HR_ADMIN': { bg: '#DBEAFE', fg: '#1E40AF', label: 'HR Admin' },
   'CEO': { bg: '#EDE9FE', fg: '#4C1D95', label: 'CEO' },
-  'ICT_ADMIN': { bg: '#D1FAE5', fg: '#065F46', label: 'ICT Admin' }
+  'ICT_ADMIN': { bg: '#D1FAE5', fg: '#065F46', label: 'ICT Admin' },
+  'EXECUTIVE': { bg: '#FCE7F3', fg: '#991B1B', label: 'Executive' } 
 };
 
+// 🚨 FIX: Added EXECUTIVE to Available Roles Dropdown
 const ALL_ROLES = [
   { id: 'EMPLOYEE', label: 'Staff' },
   { id: 'MANAGER', label: 'Line Manager' },
   { id: 'HR_ADMIN', label: 'HR Admin' },
   { id: 'CEO', label: 'CEO' },
-  { id: 'ICT_ADMIN', label: 'ICT Admin' }
+  { id: 'ICT_ADMIN', label: 'ICT Admin' },
+  { id: 'EXECUTIVE', label: 'Executive' }
 ];
 
 export default function ICTStaffDataManagement() {
@@ -176,7 +180,6 @@ export default function ICTStaffDataManagement() {
     return pages;
   };
 
-  // 🚨 ICT SPECIFIC: Toggle User Login Access
   const handleToggleAccess = async (userId, currentStatus) => {
     try {
       setActionLoading(true);
@@ -448,11 +451,9 @@ export default function ICTStaffDataManagement() {
           
           <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none bg-white font-medium">
             <option value="">All Security Roles</option>
-            <option value="EMPLOYEE">Staff / Employee</option>
-            <option value="MANAGER">Line Manager</option>
-            <option value="HR_ADMIN">HR Admin</option>
-            <option value="CEO">CEO</option>
-            <option value="ICT_ADMIN">ICT Admin</option>
+            {ALL_ROLES.map(role => (
+              <option key={`filter-role-${role.id}`} value={role.id}>{role.label}</option>
+            ))}
           </select>
 
           <select value={accessFilter} onChange={e => setAccessFilter(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none bg-white font-medium">
@@ -489,7 +490,8 @@ export default function ICTStaffDataManagement() {
                 <tr><td colSpan="5" className="py-12 text-center text-slate-400 font-medium">{isRecycleBinView ? 'Recycle bin is empty.' : 'No active staff found matching query parameters.'}</td></tr>
               ) : currentItems.map((e) => {
                 const roleKey = e.security?.role || 'EMPLOYEE';
-                const roleInfo = ROLE_COLOURS[roleKey];
+                // 🚨 FIX: Failsafe default if a random role is assigned in the database
+                const roleInfo = ROLE_COLOURS[roleKey] || { bg: '#F1F5F9', fg: '#475569', label: roleKey };
                 const secondaryRoles = e.security?.secondaryRoles || [];
                 const isActive = e.employmentDetails?.isActive !== false;
 
@@ -521,11 +523,15 @@ export default function ICTStaffDataManagement() {
                         </span>
                         {secondaryRoles.length > 0 && (
                           <div className="flex gap-1">
-                             {secondaryRoles.map(r => (
-                               <div key={r} style={{ backgroundColor: ROLE_COLOURS[r].bg, color: ROLE_COLOURS[r].fg }} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-black shadow-sm border border-black/5 ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`} title={`Secondary Role: ${ROLE_COLOURS[r].label}`}>
-                                 {ROLE_COLOURS[r].label.charAt(0)}
-                               </div>
-                             ))}
+                             {secondaryRoles.map(r => {
+                               // 🚨 FIX: Failsafe for undefined secondary roles
+                               const sRoleInfo = ROLE_COLOURS[r] || { bg: '#F1F5F9', fg: '#475569', label: r };
+                               return (
+                                 <div key={r} style={{ backgroundColor: sRoleInfo.bg, color: sRoleInfo.fg }} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-black shadow-sm border border-black/5 ${isRecycleBinView ? 'opacity-50 grayscale' : ''}`} title={`Secondary Role: ${sRoleInfo.label}`}>
+                                   {sRoleInfo.label.charAt(0)}
+                                 </div>
+                               );
+                             })}
                           </div>
                         )}
                       </div>
