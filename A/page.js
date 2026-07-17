@@ -38,25 +38,16 @@ export default function KPAScorecard() {
     return () => clearInterval(timer);
   }, []);
 
-  // 🚨 UPGRADED: Bulletproof Real-time Database Fetch to pull available Quarters
+  // 🚨 UPGRADED: Directly fetch available quarters ONLY from the saved Quarterly Scorecards
   useEffect(() => {
     const fetchDynamicQuarters = async () => {
       try {
-        let data = [];
-        
-        // Attempt 1: Fetch from Appraisal Quarters via query param
-        try {
-          const res1 = await api.get('/appraisal-quarters', { params: { year: selectedYear } });
-          data = res1.data?.data || res1.data || [];
-        } catch (err1) {
-          // Attempt 2: Fallback to Quarterly Scorecards to extract the periods HR created
-          const res2 = await api.get(`/quarterly-scorecards/${selectedYear}`);
-          data = res2.data?.data || [];
-        }
+        const res = await api.get(`/quarterly-scorecards/${selectedYear}`);
+        const data = res.data?.data || [];
         
         if (data && data.length > 0) {
           const mapped = data.map(q => {
-            const label = typeof q === 'string' ? q : (q.quarter || q.name || q.period || String(q));
+            const label = q.quarter; // Uses the exact 'Q1', 'Q2' string saved by the CEO
             const val = parseInt(String(label).replace(/[^0-9]/g, '')) || 1;
             return { val, label: `Q${val}` };
           });
@@ -82,14 +73,14 @@ export default function KPAScorecard() {
           setAvailableQuarters([]);
         }
       } catch (err) {
-        console.error("Failed to fetch available quarters from DB", err);
+        console.error("Failed to fetch saved quarters from DB", err);
         setAvailableQuarters([]);
       }
     };
     fetchDynamicQuarters();
   }, [selectedYear]);
 
-  // 🚨 UPGRADED: Fetch KPA Matrix Data mapped exactly to the Quarterly Scorecard schema
+  // Fetch KPA Matrix Data
   useEffect(() => {
     const fetchData = async () => {
       if (!selectedQuarter || availableQuarters.length === 0) {
@@ -98,21 +89,16 @@ export default function KPAScorecard() {
       }
       try {
         setLoading(true);
-        // Map selectedQuarter (1-4) to actual reviewMonth (3, 6, 9, 12) so data links perfectly
-        const targetMonth = selectedQuarter * 3;
-        const res = await api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }));
+        const res = await api.get(`/company-metrics/${selectedYear}/${selectedQuarter}`).catch(() => ({ data: { data: null } }));
         const metrics = res.data?.data;
         
         if (metrics) {
-          // 🚨 UPGRADED: Enforce strict 2-decimal formatting on fetched data
-          const format2Dec = (v) => v !== null && v !== undefined && v !== '' ? Number(parseFloat(v).toFixed(2)) : null;
-          
           setKpaActuals([
-            format2Dec(metrics.financialResilience),
-            format2Dec(metrics.operationalEffectiveness),
-            format2Dec(metrics.humanCapital),
-            format2Dec(metrics.safetyEnvironment),
-            format2Dec(metrics.reputationalCapital)
+            metrics.financialResilience,
+            metrics.operationalEffectiveness,
+            metrics.humanCapital,
+            metrics.safetyEnvironment,
+            metrics.reputationalCapital
           ]);
           setLocked(metrics.locked || false);
           if (metrics.lockedAt) {
@@ -137,24 +123,16 @@ export default function KPAScorecard() {
   }, [selectedYear, selectedQuarter, availableQuarters.length]);
 
   const isCurrentYear = selectedYear === currentTime.getFullYear();
+  // Disable entry if the scorecard is locked, wrong year, or no quarters exist
   const isEntryDisabled = locked || !isCurrentYear || availableQuarters.length === 0;
 
   // Real-time calculations
   const handleInput = (idx, val) => {
     if (isEntryDisabled) return;
-    const v = val === '' ? null : parseFloat(val);
+    const v = val === '' ? null : Math.min(100, Math.max(0, parseFloat(val) || 0));
     const newArr = [...kpaActuals];
-    newArr[idx] = v !== null ? Math.min(100, Math.max(0, v)) : null;
+    newArr[idx] = v;
     setKpaActuals(newArr);
-  };
-
-  // 🚨 UPGRADED: Rounding handler to enforce 2 decimals on user input blur
-  const handleBlur = (idx) => {
-    if (kpaActuals[idx] !== null && kpaActuals[idx] !== '') {
-      const newArr = [...kpaActuals];
-      newArr[idx] = Number(parseFloat(newArr[idx]).toFixed(2));
-      setKpaActuals(newArr);
-    }
   };
 
   let bscRaw = null;
@@ -176,10 +154,9 @@ export default function KPAScorecard() {
     }
     try {
       setSaving(true);
-      const targetMonth = selectedQuarter * 3;
       const payload = {
         reviewYear: selectedYear,
-        reviewMonth: targetMonth, // 🚨 UPGRADED: Safely mapped to Quarterly Scorecard schema
+        reviewMonth: selectedQuarter,
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -221,10 +198,9 @@ export default function KPAScorecard() {
   const confirmLock = async () => {
     try {
       setSaving(true);
-      const targetMonth = selectedQuarter * 3;
       const payload = {
         reviewYear: selectedYear,
-        reviewMonth: targetMonth, 
+        reviewMonth: selectedQuarter, 
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -236,11 +212,6 @@ export default function KPAScorecard() {
       };
       
       await api.post('/company-metrics', payload);
-      
-      // 🚨 UPGRADED: Cross-Page Lock Synchronization. Also locks the exact same quarter in Quarterly Scorecard DB
-      await api.post(`/quarterly-scorecards/${selectedYear}/Q${selectedQuarter}`, {
-         locked: true
-      }).catch(err => console.log('Silent fallback if Quarterly Scorecard not yet initialized', err));
       
       setLocked(true);
       setLockedBy('Board Admin'); 
@@ -294,7 +265,7 @@ export default function KPAScorecard() {
                className="bg-white border border-[#E2DDD4] p-[6px_10px] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer"
                disabled={availableQuarters.length === 0}
              >
-                {availableQuarters.length === 0 && <option value={selectedQuarter}>No Quarters Created</option>}
+                {availableQuarters.length === 0 && <option value={selectedQuarter}>No Quarters Saved</option>}
                 {availableQuarters.map(q => (
                    <option key={q.val} value={q.val}>{q.label}</option>
                 ))}
@@ -426,12 +397,11 @@ export default function KPAScorecard() {
                   <div className="w-[120px] pl-[10px]">
                     <input 
                       className="w-full bg-[#FAF8F4] border-[1.5px] border-[#E2DDD4] rounded-[8px] p-[8px] text-center text-[15px] font-[800] text-[#0D2B55] outline-none focus:border-[#0D2B55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
-                      type="number" min="0" max="100" step="0.01" // 🚨 UPGRADED: Allows 2 decimal step entry
+                      type="number" min="0" max="100" step="0.1"
                       value={kpaActuals[i] !== null ? kpaActuals[i] : ''}
-                      placeholder="0.00" 
+                      placeholder="0–100" 
                       disabled={isEntryDisabled}
                       onChange={(e) => handleInput(i, e.target.value)}
-                      onBlur={() => handleBlur(i)} // 🚨 UPGRADED: Triggers strict 2-decimal formatting safely on blur
                     />
                   </div>
                   <div className="w-[120px] text-center text-[15px] font-[800] text-[#059669]">
