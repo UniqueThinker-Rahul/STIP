@@ -239,14 +239,8 @@ async function makeXlsx(d) {
     });
     ws["F" + rw] = cell(r.rated, { font: { color: { rgb: "FF" + MUT } }, fill: { fgColor: { rgb: z } }, border, alignment: { horizontal: "center" } });
   });
-  const tr = 6 + d.critRows.length;
-  ws["A" + tr] = cell("Total ratings given", { font: { bold: true, color: { rgb: "FF" + NAVY } }, fill: { fgColor: { rgb: "FFEEF2F7" } }, border, alignment: { horizontal: "left" } });
-  RB.forEach((b, j) => {
-    ws[A[j + 1] + tr] = cell(d.totals[b.k], { font: { bold: true, color: { rgb: "FF" + NAVY } }, fill: { fgColor: { rgb: "FFEEF2F7" } }, border, alignment: { horizontal: "center" } });
-  });
-  ws["F" + tr] = cell(d.totalRatings, { font: { bold: true, color: { rgb: "FF" + NAVY } }, fill: { fgColor: { rgb: "FFEEF2F7" } }, border, alignment: { horizontal: "center" } });
-
-  const nr = tr + 2;
+  
+  const nr = 6 + d.critRows.length + 1;
   ws["A" + nr] = cell(`Every employee is rated on all six criteria, so each criterion row totals ${d.N}. The chart reads these cells \u2014 edit a figure and it redraws.`,
     { font: { italic: true, sz: 9, color: { rgb: "FF" + MUT } } });
 
@@ -304,7 +298,6 @@ async function makePdf(d) {
   doc.text("How many employees received each rating, in each criterion.", 14, 45);
 
   const body = d.critRows.map((r) => [r.cat.label, r.counts.LS, r.counts.NI, r.counts.E, r.counts.EP, r.rated]);
-  body.push(["Total ratings given", d.totals.LS, d.totals.NI, d.totals.E, d.totals.EP, d.totalRatings]);
   doc.autoTable({
     head: [["Criterion", "0", "0.7", "1", "1.3", "Total"]], body, startY: 49, theme: "grid",
     styles: { fontSize: 9, cellPadding: 2.4, lineColor: [228, 224, 216], lineWidth: 0.2, halign: "center" },
@@ -319,8 +312,7 @@ async function makePdf(d) {
         h.cell.styles.fontSize = 11;
       }
       if (h.section === "body") {
-        if (h.row.index === d.critRows.length) { h.cell.styles.fillColor = [238, 242, 247]; h.cell.styles.textColor = [13, 43, 85]; h.cell.styles.fontStyle = "bold"; }
-        else if (h.column.index === 0) h.cell.styles.textColor = hx(noHash(d.critRows[h.row.index].cat.color));
+        if (h.column.index === 0) h.cell.styles.textColor = hx(noHash(d.critRows[h.row.index].cat.color));
       }
     },
   });
@@ -437,8 +429,6 @@ function BoardDonut({ d }) {
   return (
     <svg viewBox="0 0 128 128" style={{ width: 128, height: 128 }}>
       {arcs}
-      <text x={cx} y={cy - 2} textAnchor="middle" fontSize="17" fontWeight="800" fill={T.navy}>{tot}</text>
-      <text x={cx} y={cy + 12} textAnchor="middle" fontSize="8" fill={T.muted}>ratings</text>
     </svg>
   );
 }
@@ -518,7 +508,6 @@ export default function BoardReportPage() {
       [],
       ["Criterion", "0", "0.7", "1", "1.3", "Total", "Weight %", "Average", "Contribution"],
       ...d.critRows.map((r) => [r.cat.label, r.counts.LS, r.counts.NI, r.counts.E, r.counts.EP, r.rated, r.cat.weight, r.avg.toFixed(2), r.contrib.toFixed(3)]),
-      ["Total ratings given", d.totals.LS, d.totals.NI, d.totals.E, d.totals.EP, d.totalRatings, "100%", "", ""],
     ];
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["\ufeff" + rows.map((r) => r.map(esc).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }));
@@ -608,11 +597,6 @@ export default function BoardReportPage() {
                       <td className="px-2 py-3 text-center font-bold" style={{ color: T.muted }}>{r.rated}</td>
                     </tr>
                   ))}
-                  <tr style={{ background: "#F6F4EF" }}>
-                    <td className="px-2 py-3"><b style={{ color: T.navy }}>Total ratings given</b></td>
-                    {RB.map((b) => (<td key={b.k} className="px-2 py-3 text-center text-base font-extrabold" style={{ color: T.navy }}>{d.totals[b.k]}</td>))}
-                    <td className="px-2 py-3 text-center font-extrabold" style={{ color: T.navy }}>{d.totalRatings}</td>
-                  </tr>
                 </tbody>
               </table>
               <p className="mt-2 text-xs" style={{ color: T.muted }}>Every employee is rated on all six criteria, so each row totals {d.N}.</p>

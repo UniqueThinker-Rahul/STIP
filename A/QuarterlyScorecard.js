@@ -6,7 +6,6 @@ const quarterlyScorecardSchema = new mongoose.Schema({
   actuals: { type: mongoose.Schema.Types.Mixed, default: {} },
   notes: { type: mongoose.Schema.Types.Mixed, default: {} },
   important: { type: mongoose.Schema.Types.Mixed, default: {} },
-  maxes: { type: mongoose.Schema.Types.Mixed, default: {} }, // 🚨 Added to safely support custom editable maximums
   locked: { type: Boolean, default: false },
   lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   lockedAt: { type: Date, default: null },
@@ -16,7 +15,7 @@ const quarterlyScorecardSchema = new mongoose.Schema({
 quarterlyScorecardSchema.index({ year: 1, quarter: 1 }, { unique: true });
 quarterlyScorecardSchema.index({ lastSavedAt: -1 });
 
-// Safe export to prevent "find is not a function" crashes during server reloads
+// Safe export to prevent "find is not a function" crashes
 const QuarterlyScorecard = mongoose.models.QuarterlyScorecard || mongoose.model('QuarterlyScorecard', quarterlyScorecardSchema);
 
 module.exports = QuarterlyScorecard;

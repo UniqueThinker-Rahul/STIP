@@ -28,7 +28,6 @@ exports.getScorecardsByYear = async (req, res) => {
       doc.actuals = restoreKeys(doc.actuals);
       doc.notes = restoreKeys(doc.notes);
       doc.important = restoreKeys(doc.important);
-      if (doc.maxes) doc.maxes = restoreKeys(doc.maxes); // Restore custom maxes
       return doc;
     });
 
@@ -43,35 +42,25 @@ exports.saveScorecard = async (req, res) => {
   try {
     const year = parseInt(req.params.year) || new Date().getFullYear();
     const quarter = req.params.quarter;
-    const { actuals, notes, important, maxes, locked } = req.body;
+    const { actuals, notes, important, locked } = req.body;
 
     const existing = await QuarterlyScorecard.findOne({ year, quarter }).lean();
-    
-    // Prevent editing if locked (unless user is ICT_ADMIN unlocking it or lock flag is being updated)
-    if (existing && existing.locked && locked !== false && (!req.user || !req.user.role.includes('ICT_ADMIN'))) {
+    if (existing && existing.locked && (!req.user || !req.user.role.includes('ICT_ADMIN'))) {
        return res.status(403).json({ success: false, message: "Scorecard is permanently locked." });
     }
 
     const updateData = {
+      actuals: sanitizeKeys(actuals),
+      notes: sanitizeKeys(notes),
+      important: sanitizeKeys(important),
       lastSavedAt: new Date()
     };
-
-    // 🚨 FIXED: Prevent Data Wiping! 
-    // Only update these fields if they are explicitly sent in the payload.
-    if (actuals !== undefined) updateData.actuals = sanitizeKeys(actuals);
-    if (notes !== undefined) updateData.notes = sanitizeKeys(notes);
-    if (important !== undefined) updateData.important = sanitizeKeys(important);
-    if (maxes !== undefined) updateData.maxes = sanitizeKeys(maxes);
 
     if (locked !== undefined) {
        updateData.locked = locked;
        if (locked) {
            updateData.lockedBy = req.user ? req.user.id : null;
            updateData.lockedAt = new Date();
-       } else {
-           // Clear lock data when unlocking
-           updateData.lockedBy = null;
-           updateData.lockedAt = null;
        }
     }
 
@@ -84,7 +73,6 @@ exports.saveScorecard = async (req, res) => {
     scorecard.actuals = restoreKeys(scorecard.actuals);
     scorecard.notes = restoreKeys(scorecard.notes);
     scorecard.important = restoreKeys(scorecard.important);
-    if (scorecard.maxes) scorecard.maxes = restoreKeys(scorecard.maxes);
 
     res.status(200).json({ success: true, message: 'Scorecard saved successfully.', data: scorecard });
   } catch (error) {

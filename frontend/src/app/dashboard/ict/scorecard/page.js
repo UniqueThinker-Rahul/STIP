@@ -11,6 +11,13 @@ const MONTHS = [
   { val: 10, label: 'October' }, { val: 11, label: 'November' }, { val: 12, label: 'December' }
 ];
 
+const QUARTERS = [
+  { val: 'Q1', month: 3, label: 'Quarter 1 (Q1)' },
+  { val: 'Q2', month: 6, label: 'Quarter 2 (Q2)' },
+  { val: 'Q3', month: 9, label: 'Quarter 3 (Q3)' },
+  { val: 'Q4', month: 12, label: 'Quarter 4 (Q4)' }
+];
+
 export default function ICTScorecardControl() {
   const router = useRouter();
 
@@ -19,19 +26,27 @@ export default function ICTScorecardControl() {
   const [confirmModal, setConfirmModal] = useState({ open: false, type: '' });
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Custom Alert Modal state to replace native window.alert()
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: '' });
 
-  // 🚨 UPGRADE: Month and Year Selection States
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
 
-  // 🚨 UPGRADE: Fetch metrics dynamically by Month and Year
+  const [controlMode, setControlMode] = useState('monthly'); // 'monthly' or 'quarterly'
+  const [selectedQuarter, setSelectedQuarter] = useState('Q2');
+
   const fetchMetrics = async () => {
     try {
       setLoading(true);
-      const res = await api.get(`/company-metrics/${selectedYear}/${selectedMonth}`).catch(() => ({ data: { data: null } }));
-      setMetrics(res.data?.data || null);
+      if (controlMode === 'monthly') {
+        const res = await api.get(`/company-metrics/${selectedYear}/${selectedMonth}`).catch(() => ({ data: { data: null } }));
+        setMetrics(res.data?.data || null);
+      } else {
+        // Quarterly mode: Query the quarterly scorecards collection
+        const res = await api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } }));
+        const list = res.data?.data || [];
+        const match = list.find(item => item.quarter === selectedQuarter);
+        setMetrics(match || null);
+      }
     } catch (error) {
       console.error('Failed to load metrics status', error);
     } finally {
@@ -41,28 +56,47 @@ export default function ICTScorecardControl() {
 
   useEffect(() => {
     fetchMetrics();
-  }, [selectedYear, selectedMonth]);
+  }, [selectedYear, selectedMonth, selectedQuarter, controlMode]);
 
   const handleLockAction = async () => {
     try {
       setIsProcessing(true);
       const newLockState = confirmModal.type === 'lock';
       
-      // 🚨 UPGRADE: Send the specific month and year to be locked/unlocked
-      await api.post('/company-metrics', {
-        reviewYear: selectedYear,
-        reviewMonth: selectedMonth,
-        locked: newLockState
-      });
+      if (controlMode === 'monthly') {
+        // Standard Monthly Action
+        await api.post('/company-metrics', {
+          reviewYear: selectedYear,
+          reviewMonth: selectedMonth,
+          locked: newLockState
+        });
+      } else {
+        // Quarterly Action: Simultaneously locks/unlocks BOTH database endpoints to maintain sync
+        const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
+        
+        await Promise.all([
+          api.post(`/quarterly-scorecards/${selectedYear}/${selectedQuarter}`, {
+            locked: newLockState
+          }),
+          api.post('/company-metrics', {
+            reviewYear: selectedYear,
+            reviewMonth: targetMonth,
+            locked: newLockState
+          })
+        ]);
+      }
 
-      // Close modal and refresh data
       setConfirmModal({ open: false, type: '' });
       await fetchMetrics();
       
+      const periodLabel = controlMode === 'monthly' 
+        ? `${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}`
+        : `${selectedQuarter} ${selectedYear}`;
+
       setAlertModal({ 
         show: true, 
         title: 'Action Successful', 
-        message: `Scorecard for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
+        message: `Scorecard for ${periodLabel} successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
         type: 'success' 
       });
 
@@ -82,13 +116,15 @@ export default function ICTScorecardControl() {
   };
 
   const scorecardLocked = metrics?.locked || false;
-  const lockedBy = metrics?.lockedBy ? `${metrics.lockedBy.personalDetails?.firstName || ''} ${metrics.lockedBy.personalDetails?.lastName || ''}`.trim() : 'CEO';
+  const lockedBy = metrics?.lockedBy ? (typeof metrics.lockedBy === 'object' ? `${metrics.lockedBy.personalDetails?.firstName || ''} ${metrics.lockedBy.personalDetails?.lastName || ''}`.trim() : 'CEO') : 'CEO';
   const lockedAt = metrics?.lockedAt ? new Date(metrics.lockedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
-  const cpPct = metrics?.cpPct !== null && metrics?.cpPct !== undefined ? `${metrics.cpPct.toFixed(2)}%` : 'Not entered';
+  
+  // Calculate CP% safely based on monthly or quarterly schema fields
+  const cpPct = metrics ? (metrics.cpPct !== undefined && metrics.cpPct !== null 
+    ? `${metrics.cpPct.toFixed(2)}%` 
+    : (metrics.actuals ? 'Data entered' : 'Not entered')) : 'Not entered';
 
   const ts = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  // Generate Year Options
   const currentY = new Date().getFullYear();
   const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
 
@@ -106,17 +142,39 @@ export default function ICTScorecardControl() {
           </div>
         </div>
 
-        {/* 🚨 UPGRADE: Month and Year Selectors */}
-        <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+        <div className="flex flex-wrap items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
            <select 
-             value={selectedMonth} 
-             onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-             className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+             value={controlMode} 
+             onChange={(e) => setControlMode(e.target.value)}
+             className="bg-transparent text-[12px] font-[800] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
            >
-              {MONTHS.map(m => (
-                 <option key={m.val} value={m.val}>{m.label}</option>
-              ))}
+              <option value="monthly">Monthly Pulse Matrix</option>
+              <option value="quarterly">Quarterly Scorecard</option>
            </select>
+           <span className="text-[#E2DDD4]">|</span>
+           
+           {controlMode === 'monthly' ? (
+             <select 
+               value={selectedMonth} 
+               onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+               className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+             >
+                {MONTHS.map(m => (
+                   <option key={m.val} value={m.val}>{m.label}</option>
+                ))}
+             </select>
+           ) : (
+             <select 
+               value={selectedQuarter} 
+               onChange={(e) => setSelectedQuarter(e.target.value)}
+               className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+             >
+                {QUARTERS.map(q => (
+                   <option key={q.val} value={q.val}>{q.label}</option>
+                ))}
+             </select>
+           )}
+           
            <span className="text-[#E2DDD4]">|</span>
            <select 
              value={selectedYear} 
@@ -125,8 +183,8 @@ export default function ICTScorecardControl() {
            >
               {yearOptions.map(y => (
                  <option key={y} value={y}>{y}</option>
-              ))}
-           </select>
+                ))}
+             </select>
         </div>
       </div>
 
@@ -143,7 +201,9 @@ export default function ICTScorecardControl() {
             <div className="w-[36px] h-[36px] rounded-[8px] bg-[#FEF3C7] flex items-center justify-center text-[16px]">&#128274;</div>
             <div>
               <div className="text-[15px] font-[800] text-[#0D2B55]">Current Scorecard Status</div>
-              <div className="text-[12px] font-[500] text-[#6b7280]">Viewing status for {MONTHS.find(m=>m.val===selectedMonth).label} {selectedYear}</div>
+              <div className="text-[12px] font-[500] text-[#6b7280]">
+                Viewing status for {controlMode === 'monthly' ? `${MONTHS.find(m=>m.val===selectedMonth).label}` : selectedQuarter} {selectedYear}
+              </div>
             </div>
           </div>
           <span 
@@ -174,7 +234,7 @@ export default function ICTScorecardControl() {
                   <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedAt : '—'}</span>
                 </div>
                 <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
-                  <span className="text-[#6b7280] font-[600]">CP%</span>
+                  <span className="text-[#6b7280] font-[600]">{controlMode === 'monthly' ? 'CP%' : 'Calculated Value Status'}</span>
                   <span className="font-[800] text-[#0D2B55]">{cpPct}</span>
                 </div>
                 <div className="flex justify-between items-center py-[12px]">
@@ -266,8 +326,8 @@ export default function ICTScorecardControl() {
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{confirmModal.type === 'unlock' ? 'Reset Scorecard Lock?' : 'Force Scorecard Lock?'}</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 {confirmModal.type === 'unlock' 
-                  ? `This will open the scorecard for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear} for the CEO to make edits. You must verify that you have written Board approval before proceeding.`
-                  : `This will permanently lock the scorecard for ${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}. Are you sure you want to force this lock manually?`}
+                  ? `This will open the scorecard for ${controlMode === 'monthly' ? MONTHS.find(m=>m.val===selectedMonth).label : selectedQuarter} ${selectedYear} for the CEO to make edits. You must verify that you have written Board approval before proceeding.`
+                  : `This will permanently lock the scorecard for ${controlMode === 'monthly' ? MONTHS.find(m=>m.val===selectedMonth).label : selectedQuarter} ${selectedYear}. Are you sure you want to force this lock manually?`}
               </div>
               <div className="flex gap-[12px] justify-center">
                 <button 

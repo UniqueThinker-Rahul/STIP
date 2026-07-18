@@ -6,8 +6,7 @@ import * as XLSX from "xlsx";
 
 // --- EMBEDDED DATA ---
 const QS = ['Q1', 'Q2', 'Q3', 'Q4'];
-const MAXCP = 8.87;
-const TOTAL_MAX = 887; 
+const TOTAL_MAX_DEFAULT = 887; 
 const FACTORS = [
   ['Needs Improvement', 0.7], 
   ['Fully Effective', 1.0], 
@@ -70,21 +69,29 @@ const QKPAS = [
 ];
 
 const formatNum = (num, dec) => (num == null || isNaN(num)) ? '0' : Number(num).toFixed(dec);
-const kpaMax = (kpa) => kpa.inds.reduce((sum, ind) => sum + ind.max, 0);
+
+const kpaMax = (qtr, kpa, qtrMaxObj) => kpa.inds.reduce((sum, ind) => {
+    const customM = qtrMaxObj && qtrMaxObj[qtr] && qtrMaxObj[qtr][ind.c];
+    return sum + (customM !== undefined && customM !== null ? customM : ind.max);
+}, 0);
+
+const getQtrTotalMax = (qtr, qtrMaxObj) => QKPAS.reduce((sum, kpa) => sum + kpaMax(qtr, kpa, qtrMaxObj), 0);
+
 const kpaAct = (qtr, kpa, allAct) => kpa.inds.reduce((sum, ind) => sum + (allAct[qtr]?.[ind.c] || 0), 0);
 const totAct = (qtr, allAct) => QKPAS.reduce((sum, kpa) => sum + kpaAct(qtr, kpa, allAct), 0);
 const getQtrCp = (qtr, allAct) => totAct(qtr, allAct) / 100;
 const hasQtrData = (qtr, allAct) => Object.keys(allAct[qtr] || {}).length > 0;
-const getTierOf = (cp) => {
-  if (cp >= MAXCP) return 0.15;
-  if (cp >= MAXCP * 0.8) return 0.10;
-  if (cp >= MAXCP * 0.8 * 0.6) return 0.05;
+
+const getTierOf = (cp, maxCp) => {
+  if (cp >= maxCp) return 0.15;
+  if (cp >= maxCp * 0.8) return 0.10;
+  if (cp >= maxCp * 0.8 * 0.6) return 0.05;
   return 0;
 };
-const getTierLabel = (cp) => {
-  if (cp >= MAXCP) return 'Exceeds Target (15%)';
-  if (cp >= MAXCP * 0.8) return 'Meets Majority (10%)';
-  if (cp >= MAXCP * 0.8 * 0.6) return 'Improvement Areas (5%)';
+const getTierLabel = (cp, maxCp) => {
+  if (cp >= maxCp) return 'Exceeds Target (15%)';
+  if (cp >= maxCp * 0.8) return 'Meets Majority (10%)';
+  if (cp >= maxCp * 0.8 * 0.6) return 'Improvement Areas (5%)';
   return 'Fails Majority (0%)';
 };
 const getTierColor = (t) => {
@@ -108,9 +115,11 @@ const fromDB = (obj) => {
   return res;
 };
 
+// 🚨 FIXED: Helper function restored to resolve ReferenceError
 const getMonthFromQtr = (qtr) => {
+  if (!qtr) return 3;
   const map = { 'Q1': 3, 'Q2': 6, 'Q3': 9, 'Q4': 12 };
-  return map[qtr] || 3;
+  return map[String(qtr).toUpperCase()] || 3;
 };
 
 // --- BASE64 EXCEL TEMPLATE ---
@@ -130,39 +139,53 @@ export default function QuarterlyScorecard() {
   const [lockedBy, setLockedBy] = useState('');
   const [lockedAt, setLockedAt] = useState('');
   const [lastSaved, setLastSaved] = useState('');
-  const [lockModal, setLockModal] = useState(false);
   const [downloadMenu, setDownloadMenu] = useState(false); 
   const [saving, setSaving] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
 
+  // Unified Alert Modal replaces native window.alert
+  const [alertModal, setAlertModal] = useState({ show: false, icon: '', title: '', detail: '', type: '' });
+  const [confirmLockModal, setConfirmLockModal] = useState(false);
+
   const [availableQuarters, setAvailableQuarters] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 🚨 FIXED: Real-time Database Fetch to pull available Quarters dynamically
+  const [editMaxMode, setEditMaxMode] = useState(false);
+  const [qtrMax, setQtrMax] = useState({});
+
+  const showAlert = (title, detail, type = 'error') => {
+    setAlertModal({
+      show: true,
+      icon: type === 'success' ? '✅' : type === 'warning' ? '⚠️' : '❌',
+      title,
+      detail,
+      type
+    });
+  };
+
   useEffect(() => {
     const fetchDynamicQuarters = async () => {
       setLoading(true);
       try {
         let data = [];
-        
-        // Attempt 1: Fetch from Appraisal Quarters
         try {
-          const res1 = await api.get('/appraisal-quarters', { params: { year: selectedYear } });
+          const res1 = await api.get('/quarters');
           data = res1.data?.data || res1.data || [];
         } catch (err1) {
-          // Attempt 2: Fallback to Quarterly Scorecards to extract the periods HR created
           const res2 = await api.get(`/quarterly-scorecards/${selectedYear}`);
           data = res2.data?.data || [];
         }
         
-        if (data && data.length > 0) {
-          const mapped = data.map(q => {
-            const label = typeof q === 'string' ? q : (q.quarter || q.name || q.period || String(q));
-            const val = parseInt(String(label).replace(/[^0-9]/g, '')) || 1;
+        const yearData = data.filter(q => q.year === selectedYear || q.quarter);
+
+        if (yearData && yearData.length > 0) {
+          const mapped = yearData.map(q => {
+            const label = typeof q === 'string' ? q : (q.name || q.quarter || q.period || String(q));
+            const valMatch = label.match(/Q([1-4])/i);
+            const val = valMatch ? parseInt(valMatch[1]) : 1;
             return { val, label: `Q${val}` };
           });
 
-          // Deduplicate the quarters safely
           const uniqueQuarters = [];
           const map = new Map();
           for (const item of mapped) {
@@ -175,7 +198,6 @@ export default function QuarterlyScorecard() {
           
           setAvailableQuarters(uniqueQuarters);
           
-          // Auto-select the latest valid quarter if the current one isn't in the list
           setCurQ((prevQ) => {
              if (!uniqueQuarters.some(m => m.label === prevQ)) {
                return uniqueQuarters[uniqueQuarters.length - 1].label;
@@ -196,7 +218,6 @@ export default function QuarterlyScorecard() {
     fetchDynamicQuarters();
   }, [selectedYear]);
 
-  // Fetch KPA Scorecard Sync & Actual Values
   useEffect(() => {
     const fetchScorecards = async () => {
       if (availableQuarters.length === 0) return;
@@ -209,9 +230,15 @@ export default function QuarterlyScorecard() {
         const newNotes = {};
         const newImportant = {}; 
         const newLocks = {}; 
+        const newMax = {};
         
         data.forEach((doc) => {
-          // Strict 2-decimal fetch format
+          let qKey = doc.quarter || (doc.period && doc.period.quarter) || '';
+          if (typeof qKey === 'number' || (typeof qKey === 'string' && !qKey.toUpperCase().startsWith('Q'))) {
+             qKey = `Q${qKey}`;
+          }
+          qKey = String(qKey).toUpperCase();
+
           const formattedActuals = {};
           if(doc.actuals) {
               Object.keys(doc.actuals).forEach(k => {
@@ -220,11 +247,13 @@ export default function QuarterlyScorecard() {
               });
           }
 
-          newAct[doc.quarter] = fromDB(formattedActuals);
-          newNotes[doc.quarter] = fromDB(doc.notes);
-          newImportant[doc.quarter] = fromDB(doc.important); 
+          newAct[qKey] = fromDB(formattedActuals);
+          newNotes[qKey] = fromDB(doc.notes);
+          newImportant[qKey] = fromDB(doc.important); 
           
-          newLocks[doc.quarter] = {
+          newMax[qKey] = doc.maxes ? fromDB(doc.maxes) : {}; 
+          
+          newLocks[qKey] = {
             locked: doc.locked || false,
             lockedBy: doc.lockedBy ? 'System Admin' : '',
             lockedAt: doc.lockedAt ? new Date(doc.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
@@ -235,6 +264,7 @@ export default function QuarterlyScorecard() {
         setQtrAct(newAct);
         setQtrNotes(newNotes);
         setQtrImportant(newImportant);
+        setQtrMax(newMax);
         setQtrLocks(newLocks); 
         setDirty(false);
       } catch (error) {
@@ -244,29 +274,35 @@ export default function QuarterlyScorecard() {
     fetchScorecards();
   }, [selectedYear, availableQuarters.length]); 
 
-  // Lock Sync - Actively listens to KPA locks on the same quarter
   useEffect(() => {
     const checkMetricLock = async () => {
        if (!curQ || availableQuarters.length === 0) return;
        try {
            const targetMonth = parseInt(curQ.replace('Q', '')) * 3;
-           const metricRes = await api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(()=>null);
-           const metrics = metricRes?.data?.data;
+           const [metricRes, qtrRes] = await Promise.all([
+               api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(()=>({ data: { data: null } })),
+               api.get(`/quarterly-scorecards/${selectedYear}`).catch(()=>({ data: { data: [] } }))
+           ]);
            
-           if(metrics && metrics.locked) {
+           const metrics = metricRes.data?.data;
+           const qtrMatch = (qtrRes.data?.data || []).find(d => {
+              const dQ = d.quarter || (d.period && d.period.quarter);
+              return String(dQ).toUpperCase() === curQ || `Q${dQ}` === curQ;
+           });
+           
+           const isMLocked = metrics?.locked || false;
+           const isQLocked = qtrMatch?.locked || false;
+
+           if (isMLocked || isQLocked) {
                setLocked(true);
-               setLockedBy('Board Admin');
-               setLockedAt(new Date(metrics.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
-           } else if (qtrLocks[curQ]) {
-               setLocked(qtrLocks[curQ].locked);
-               setLockedBy(qtrLocks[curQ].lockedBy);
-               setLockedAt(qtrLocks[curQ].lockedAt);
-               setLastSaved(qtrLocks[curQ].lastSavedAt);
+               const lockSource = isMLocked ? metrics : qtrMatch;
+               setLockedBy(lockSource.lockedBy ? (lockSource.lockedBy.personalDetails ? `${lockSource.lockedBy.personalDetails.firstName} ${lockSource.lockedBy.personalDetails.lastName}` : 'System Admin') : 'Board Admin');
+               setLockedAt(lockSource.lockedAt ? new Date(lockSource.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleDateString());
            } else {
                setLocked(false);
                setLockedBy('');
                setLockedAt('');
-               setLastSaved('');
+               setLastSaved(qtrLocks[curQ]?.lastSavedAt || '');
            }
        } catch(err) {
            console.log("Silent metric fetch fallback");
@@ -275,25 +311,54 @@ export default function QuarterlyScorecard() {
     checkMetricLock();
   }, [curQ, qtrLocks, selectedYear, availableQuarters.length]);
 
-  const c = getQtrCp(curQ, qtrAct);
-  const t = getTierOf(c);
-  const tc = getTierColor(t);
-  const ach = c / MAXCP;
+  const currentTotalMax = getQtrTotalMax(curQ, qtrMax) || TOTAL_MAX_DEFAULT;
+  const currentMaxCp = currentTotalMax / 100;
 
-  // 🚨 FIXED: Uncapped Actual value entry allowing > 100% inputs
+  const c = getQtrCp(curQ, qtrAct);
+  const t = getTierOf(c, currentMaxCp);
+  const tc = getTierColor(t);
+  const ach = currentMaxCp ? c / currentMaxCp : 0;
+
   const handleActChange = (indCode, val) => {
     if (locked) return;
     let v = val === '' ? null : parseFloat(val);
-    
-    if (v !== null && v < 0) {
-      v = 0; // Prevent negative scores, but no upper limit cap
-    }
+    if (v !== null && v < 0) v = 0; 
 
     setQtrAct(prev => ({
       ...prev,
       [curQ]: { ...(prev[curQ] || {}), [indCode]: v }
     }));
     setDirty(true);
+  };
+
+  const handleMaxChange = (indCode, val) => {
+    if (locked) return;
+    let v = val === '' ? null : parseFloat(val);
+    if (v !== null && v < 0) v = 0;
+
+    setQtrMax(prev => {
+      const cur = prev[curQ] || {};
+      if (v === null) {
+        const newCur = { ...cur };
+        delete newCur[indCode]; 
+        return { ...prev, [curQ]: newCur };
+      }
+      return { ...prev, [curQ]: { ...cur, [indCode]: v } };
+    });
+    setDirty(true);
+  };
+
+  const handleBlur = (indCode) => {
+    if (locked) return;
+    if (qtrAct[curQ] && qtrAct[curQ][indCode] !== null && qtrAct[curQ][indCode] !== undefined) {
+       setQtrAct(prev => ({
+          ...prev,
+          [curQ]: {
+             ...(prev[curQ] || {}),
+             [indCode]: Number(parseFloat(prev[curQ][indCode]).toFixed(2))
+          }
+       }));
+    }
   };
 
   const handleNoteChange = (indCode, val) => {
@@ -316,17 +381,30 @@ export default function QuarterlyScorecard() {
 
   const save = async () => {
     if (locked) return;
+    
+    // Check if the selected quarter belongs to the current year
+    const currentY = new Date().getFullYear();
+    if (selectedYear !== currentY) {
+       showAlert("Save Blocked", "You can only save scores for quarters within the current active financial year.", "error");
+       return;
+    }
+
     try {
       setSaving(true);
       
       const kpaSyncData = [0, 0, 0, 0, 0];
       let rawSum = 0;
+      let filled = 0;
       
       QKPAS.forEach((k, idx) => {
-        const kMax = kpaMax(k);
+        const kMax = kpaMax(curQ, k, qtrMax);
         const kAct = kpaAct(curQ, k, qtrAct);
         kpaSyncData[idx] = kMax ? (kAct / kMax) * 100 : 0;
         rawSum += kAct;
+
+        k.inds.forEach(i => {
+          if (qtrAct[curQ] && qtrAct[curQ][i.c] !== null && qtrAct[curQ][i.c] !== undefined) filled++;
+        });
       });
 
       const syncedCp = rawSum / 100;
@@ -335,6 +413,7 @@ export default function QuarterlyScorecard() {
         actuals: toDB(qtrAct[curQ]),
         notes: toDB(qtrNotes[curQ]),
         important: toDB(qtrImportant[curQ]), 
+        maxes: toDB(qtrMax[curQ]), 
         locked: false
       });
 
@@ -362,6 +441,14 @@ export default function QuarterlyScorecard() {
         [curQ]: { ...prev[curQ], lastSavedAt: timeStr }
       }));
       
+      const totalInds = QKPAS.reduce((s,k) => s + k.inds.length, 0);
+      
+      showAlert(
+        'KPA Scores Saved', 
+        `${filled} of ${totalInds} indicators saved for ${availableQuarters.find(q=>q.label===curQ)?.label || curQ} ${selectedYear}.`, 
+        'success'
+      );
+
       const statusEl = document.getElementById('qscSaveStatus');
       if (statusEl) {
         statusEl.style.transition = 'none';
@@ -372,13 +459,19 @@ export default function QuarterlyScorecard() {
         }, 30);
       }
     } catch (error) {
-      alert("Failed to save scorecard to database.");
+      showAlert("Save Failed", "Failed to save scorecard to database.", "error");
     } finally {
       setSaving(false);
     }
   };
 
   const attemptLock = () => {
+    const currentY = new Date().getFullYear();
+    if (selectedYear !== currentY) {
+      showAlert("Action Blocked", "You can only lock scores for quarters within the current active financial year.", "error");
+      return;
+    }
+
     let totalIndicators = 0;
     let filledIndicators = 0;
     
@@ -392,11 +485,11 @@ export default function QuarterlyScorecard() {
     });
 
     if (filledIndicators < totalIndicators) {
-      alert(`Cannot lock: Missing data. Only ${filledIndicators} out of ${totalIndicators} indicators have been filled for ${curQ}.`);
+      showAlert("Missing Data", `Cannot lock: Only ${filledIndicators} out of ${totalIndicators} indicators have been filled for ${curQ}. All indicators must have a score before locking.`, "warning");
       return;
     }
 
-    setLockModal(true);
+    setConfirmLockModal(true);
   };
 
   const confirmLock = async () => {
@@ -407,7 +500,7 @@ export default function QuarterlyScorecard() {
       let rawSum = 0;
       
       QKPAS.forEach((k, idx) => {
-        const kMax = kpaMax(k);
+        const kMax = kpaMax(curQ, k, qtrMax);
         const kAct = kpaAct(curQ, k, qtrAct);
         kpaSyncData[idx] = kMax ? (kAct / kMax) * 100 : 0;
         rawSum += kAct;
@@ -419,6 +512,7 @@ export default function QuarterlyScorecard() {
         actuals: toDB(qtrAct[curQ]),
         notes: toDB(qtrNotes[curQ]),
         important: toDB(qtrImportant[curQ]),
+        maxes: toDB(qtrMax[curQ]),
         locked: true
       });
 
@@ -446,14 +540,14 @@ export default function QuarterlyScorecard() {
         [curQ]: { ...prev[curQ], locked: true, lockedBy: 'Board Admin', lockedAt: nowStr }
       }));
 
-      setLockModal(false);
+      setConfirmLockModal(false);
       setDirty(false);
 
-      alert(`Success! ${curQ} has been locked and securely synchronized to the High-Level KPA matrix.`);
+      showAlert('Scorecard Locked', `${curQ} ${selectedYear} has been locked and securely synchronized to the High-Level KPA matrix.`, 'success');
 
     } catch (error) {
       console.error(error);
-      alert("Failed to lock and synchronize the scorecard.");
+      showAlert("Lock Failed", "Failed to lock and synchronize the scorecard.", "error");
     } finally {
       setSaving(false);
     }
@@ -478,8 +572,11 @@ export default function QuarterlyScorecard() {
       const notesData = qtrNotes[q] || {};
       const impData = qtrImportant[q] || {};
       const val = (cCode) => actData[cCode] || 0;
+      
+      const reportTotalMax = getQtrTotalMax(q, qtrMax) || TOTAL_MAX_DEFAULT;
+      const reportMaxCp = reportTotalMax / 100;
       const cp = getQtrCp(q, qtrAct);
-      const tier = getTierOf(cp);
+      const tier = getTierOf(cp, reportMaxCp);
       
       const KPA_COLORS = ["#2E75B6", "#548235", "#C55A11", "#38A872", "#7030A0"];
       const KPA_TINT = ["#D9E1F2", "#E2EFDA", "#FCE4D6", "#E2F0D9", "#EBE0F4"];
@@ -496,7 +593,7 @@ export default function QuarterlyScorecard() {
       doc.text(`${locked ? "Locked | " : ""}${nowStr}`, W - 14, 20, { align: "right" });
 
       doc.setFontSize(7.6); doc.setTextColor(102, 112, 133);
-      doc.text("CP = total actual points / 100 (max 8.87) | bonus tier: >= 8.87 -> 15% | >= 7.10 -> 10% | >= 4.26 -> 5% | else 0%", 14, 35);
+      doc.text(`CP = total actual points / 100 (max ${reportMaxCp.toFixed(2)}) | bonus tier: >= ${reportMaxCp.toFixed(2)} -> 15% | >= ${(reportMaxCp * 0.8).toFixed(2)} -> 10% | >= ${(reportMaxCp * 0.48).toFixed(2)} -> 5% | else 0%`, 14, 35);
 
       const body = [];
       const bandRows = [];
@@ -509,7 +606,9 @@ export default function QuarterlyScorecard() {
         k.inds.forEach((ind) => {
           const vQ1 = (qtrAct['Q1'] && qtrAct['Q1'][ind.c] != null) ? qtrAct['Q1'][ind.c] : 0;
           const v = val(ind.c);
-          const pctNum = ind.max && v ? (v / ind.max) * 100 : 0;
+          
+          const currentIndMax = (qtrMax[q] && qtrMax[q][ind.c] !== undefined) ? qtrMax[q][ind.c] : ind.max;
+          const pctNum = currentIndMax && v ? (v / currentIndMax) * 100 : 0;
           const pct = pctNum.toFixed(0) + '%';
           
           let pctColor = [0,0,0];
@@ -521,16 +620,16 @@ export default function QuarterlyScorecard() {
           body.push([
             { content: ind.c, styles: { halign: 'center', fontStyle: 'bold', textColor: [13,43,85] } },
             ind.n,
-            { content: ind.max, styles: { halign: 'center' } },
+            { content: currentIndMax, styles: { halign: 'center' } },
             { content: vQ1, styles: { halign: 'center' } },
             { content: v, styles: { halign: 'center' } },
-            { content: ind.max ? pct : "", styles: { halign: 'center', fontStyle: 'bold', textColor: pctColor } },
+            { content: currentIndMax ? pct : "", styles: { halign: 'center', fontStyle: 'bold', textColor: pctColor } },
             { content: notesData[ind.c] || "", styles: { fontSize: 6.4, textColor: [100,100,100] } },
             { content: impData[ind.c] || "", styles: { fontSize: 6.4, textColor: [100,100,100] } }
           ]);
         });
 
-        const m = kpaMax(k);
+        const m = kpaMax(q, k, qtrMax);
         const a = kpaAct(q, k, qtrAct);
         const aQ1 = kpaAct("Q1", k, qtrAct);
         subRows.push(body.length);
@@ -541,7 +640,7 @@ export default function QuarterlyScorecard() {
           { content: aQ1.toFixed(1), styles: { halign: 'center', fontStyle: 'bold' } }, 
           { content: a.toFixed(1), styles: { halign: 'center', fontStyle: 'bold' } },
           { content: m ? `${((a / m) * 100).toFixed(0)}%` : "", styles: { halign: 'center', fontStyle: 'bold' } }, 
-          { content: `Weight ${((m / TOTAL_MAX) * 100).toFixed(1)}%`, colSpan: 2, styles: { fontStyle: 'italic', textColor: [150,150,150] } }
+          { content: `Weight ${((m / reportTotalMax) * 100).toFixed(1)}%`, colSpan: 2, styles: { fontStyle: 'italic', textColor: [150,150,150] } }
         ]);
         body.push([{ content: "", colSpan: 8, styles: { cellPadding: 0.5, border: 0 } }]);
       });
@@ -592,8 +691,8 @@ export default function QuarterlyScorecard() {
 
       const cpBody = [
         [{ content: "COMPANY PERFORMANCE", colSpan: 8, styles: { fillColor: [13, 43, 85], textColor: [255,255,255], fontStyle: "bold" } }],
-        ["", "Total points", TOTAL_MAX, totQ1Val.toFixed(1), totActVal.toFixed(1), "", "", ""],
-        ["", "Company Performance (points / 100)", (TOTAL_MAX/100).toFixed(2), (totQ1Val/100).toFixed(2), (totActVal/100).toFixed(2), "", "", ""],
+        ["", "Total points", reportTotalMax, totQ1Val.toFixed(1), totActVal.toFixed(1), "", "", ""],
+        ["", "Company Performance (points / 100)", reportMaxCp.toFixed(2), (totQ1Val/100).toFixed(2), (totActVal/100).toFixed(2), "", "", ""],
         [{ content: "", colSpan: 8, styles: { cellPadding: 0.5, border: 0 } }]
       ];
 
@@ -624,9 +723,9 @@ export default function QuarterlyScorecard() {
 
       const tiersBody = [
         [{ content: "BONUS TIERS (CP threshold -> award %)", colSpan: 8, styles: { fillColor: [229, 231, 235], fontStyle: "bold", halign: "left" } }],
-        ["", "Exceeds target - 100%", "8.87", "15%", "", "", "", ""],
-        ["", "Meets the majority - 80%", "7.10", "10%", "", "", "", ""],
-        ["", "Improvement areas - 48%", "4.26", "5%", "", "", "", ""],
+        ["", "Exceeds target - 100%", reportMaxCp.toFixed(2), "15%", "", "", "", ""],
+        ["", "Meets the majority - 80%", (reportMaxCp * 0.8).toFixed(2), "10%", "", "", "", ""],
+        ["", "Improvement areas - 48%", (reportMaxCp * 0.48).toFixed(2), "5%", "", "", "", ""],
         ["", "Fails the majority", "below", "0%", "", "", "", ""],
         ["", `${q} bonus tier (from CP)`, "", `${(tier * 100).toFixed(0)}%`, "x individual factor ->", "", "", ""],
         [{ content: "", colSpan: 8, styles: { cellPadding: 0.5, border: 0 } }],
@@ -724,7 +823,7 @@ export default function QuarterlyScorecard() {
       const kpaLabels = ['Financial\nResilience', 'Operational\nEffectiveness', 'Human\nCapital', 'Safety And\nEnvironment', 'Reputational'];
 
       QKPAS.forEach((k, idx) => {
-          const m = kpaMax(k);
+          const m = kpaMax(q, k, qtrMax);
           const a = kpaAct(q, k, qtrAct);
           const pct = m ? (a / m) * 100 : 0;
           const visualPct = Math.min(120, pct);
@@ -761,10 +860,10 @@ export default function QuarterlyScorecard() {
       doc.line(plot2X, plot2Y, plot2X, plot2Y + plot2H); 
       doc.line(plot2X, plot2Y + plot2H, plot2X + plot2W, plot2Y + plot2H);
 
-      const yMax = 10;
+      const dynamicYMax = Math.max(10, Math.ceil(reportMaxCp));
       doc.setFontSize(7);
-      for (let i = 0; i <= 10; i+=2) {
-          const yt = plot2Y + plot2H - (i / yMax) * plot2H;
+      for (let i = 0; i <= dynamicYMax; i+=2) {
+          const yt = plot2Y + plot2H - (i / dynamicYMax) * plot2H;
           doc.text(`${i}.00`, plot2X - 2, yt + 2, { align: 'right' });
           doc.setDrawColor(240, 240, 240);
           doc.line(plot2X, yt, plot2X + plot2W, yt);
@@ -772,7 +871,7 @@ export default function QuarterlyScorecard() {
       doc.text("CP", plot2X - 9, plot2Y + plot2H/2, { angle: 90, align: 'center' });
 
       const drawTarget = (val, color, lbl) => {
-          const yt = plot2Y + plot2H - (val / yMax) * plot2H;
+          const yt = plot2Y + plot2H - (val / dynamicYMax) * plot2H;
           doc.setDrawColor(...color);
           doc.setLineDashPattern([2, 2], 0);
           doc.line(plot2X, yt, plot2X + plot2W, yt);
@@ -780,9 +879,9 @@ export default function QuarterlyScorecard() {
           doc.setTextColor(...color);
           doc.text(`-- ${lbl}`, plot2X + plot2W + 2, yt + 2);
       };
-      drawTarget(8.87, [13, 43, 85], '15% / max');
-      drawTarget(7.10, [197, 90, 17], '10% gate');
-      drawTarget(4.26, [84, 130, 53], '5% gate');
+      drawTarget(reportMaxCp, [13, 43, 85], `15% (${reportMaxCp.toFixed(2)})`);
+      drawTarget(reportMaxCp * 0.8, [197, 90, 17], `10% gate`);
+      drawTarget(reportMaxCp * 0.48, [84, 130, 53], `5% gate`);
 
       doc.setTextColor(0,0,0);
       const bar2Spacing = plot2W / 4;
@@ -791,7 +890,7 @@ export default function QuarterlyScorecard() {
       QS.forEach((qq, idx) => {
           const has = hasQtrData(qq, qtrAct);
           const cval = getQtrCp(qq, qtrAct);
-          const bH = (cval / yMax) * plot2H;
+          const bH = (cval / dynamicYMax) * plot2H;
           const bX = plot2X + (idx * bar2Spacing) + (bar2Spacing - bar2W) / 2;
           const bY = plot2Y + plot2H - bH;
 
@@ -843,7 +942,7 @@ export default function QuarterlyScorecard() {
       }
     } catch (e) {
       console.error("PDF generation error:", e);
-      alert("To enable direct PDF download, please install required libraries in your terminal:\n\nnpm install jspdf jspdf-autotable");
+      showAlert("PDF Export Failed", "Please install required libraries in your terminal:\nnpm install jspdf jspdf-autotable", "error");
     } finally {
       setPdfBusy(false);
     }
@@ -881,7 +980,6 @@ export default function QuarterlyScorecard() {
       sheet.column("G").width(45).style("wrapText", true);
       sheet.column("H").width(45).style("wrapText", true);
 
-      // Hide the chart data rendering tables visually so they don't overlap the output design
       sheet.range("J3:O20").style("fontColor", "ffffff");
 
       const q = curQ;
@@ -918,7 +1016,9 @@ export default function QuarterlyScorecard() {
           if (r) {
             const vQ1 = (qtrAct['Q1'] && qtrAct['Q1'][ind.c] != null) ? qtrAct['Q1'][ind.c] : 0;
             const vCur = (actData[ind.c] != null) ? actData[ind.c] : 0;
+            const currentIndMax = (qtrMax[q] && qtrMax[q][ind.c] !== undefined) ? qtrMax[q][ind.c] : ind.max;
             
+            sheet.cell(`C${r}`).value(currentIndMax); 
             sheet.cell(`D${r}`).value(vQ1);
             sheet.cell(`E${r}`).value(vCur);
             sheet.cell(`F${r}`).style({ fontColor: KPA_COLORS[gi], bold: true });
@@ -927,18 +1027,15 @@ export default function QuarterlyScorecard() {
           }
         });
 
-        // Chart 1 Data Hook
-        const rKpa = 5 + gi;
-        const m = kpaMax(k);
+        const m = kpaMax(curQ, k, qtrMax);
         const a = kpaAct(curQ, k, qtrAct);
         const pct = m ? (a / m) * 100 : 0;
-        sheet.cell(`K${rKpa}`).value(pct);
+        sheet.cell(`K${5 + gi}`).value(pct);
       });
       
       sheet.cell("K4").value(`Ach % ${curQ}`);
       sheet.cell("B55").value(`${curQ} bonus tier (from CP)`);
 
-      // Chart 2 Data Hook
       QS.forEach((qItem, i) => {
         const rQs = 13 + i;
         const has = hasQtrData(qItem, qtrAct);
@@ -948,7 +1045,6 @@ export default function QuarterlyScorecard() {
 
       const blob = await workbook.outputAsync();
 
-      // JSZip modification to physically shift the native drawing anchors (charts) to row 64+
       if (!window.JSZip) {
           await new Promise((resolve, reject) => {
               const script = document.createElement('script');
@@ -1001,7 +1097,7 @@ export default function QuarterlyScorecard() {
       }
     } catch (e) {
       console.error("Excel generation error:", e);
-      alert("To enable direct Excel download with charts, please ensure you have internet access for the required library.");
+      showAlert("Excel Export Failed", "Please ensure you have internet access for the required library.", "error");
     } finally {
       setPdfBusy(false);
     }
@@ -1012,19 +1108,20 @@ export default function QuarterlyScorecard() {
     statusMsg = 'At the top tier — every payable indicator is being met.';
   } else {
     let gate, name;
-    if (c < MAXCP * 0.8 * 0.6) { gate = MAXCP * 0.8 * 0.6; name = '5% tier'; }
-    else if (c < MAXCP * 0.8) { gate = MAXCP * 0.8; name = '10% tier'; }
-    else { gate = MAXCP; name = '15% tier'; }
+    if (c < currentMaxCp * 0.8 * 0.6) { gate = currentMaxCp * 0.8 * 0.6; name = '5% tier'; }
+    else if (c < currentMaxCp * 0.8) { gate = currentMaxCp * 0.8; name = '10% tier'; }
+    else { gate = currentMaxCp; name = '15% tier'; }
     const need = Math.max(0, (gate - c) * 100);
-    statusMsg = `Currently <b class="font-bold text-[#0D2B55]">${getTierLabel(c).toLowerCase()}</b>. Needs <b class="font-bold text-[#0D2B55]">${formatNum(need, 0)} more points</b> (CP ${formatNum(gate, 2)}) to reach the <b class="font-bold text-[#0D2B55]">${name}</b>.`;
+    statusMsg = `Currently <b class="font-bold text-[#0D2B55]">${getTierLabel(c, currentMaxCp).toLowerCase()}</b>. Needs <b class="font-bold text-[#0D2B55]">${formatNum(need, 0)} more points</b> (CP ${formatNum(gate, 2)}) to reach the <b class="font-bold text-[#0D2B55]">${name}</b>.`;
   }
 
-  const W = 940, H = 230, padL = 44, padR = 16, padT = 14, padB = 34, plotW = W - padL - padR, plotH = H - padT - padB, yMax = MAXCP;
-  const getY = (v) => padT + plotH - (v / yMax) * plotH;
+  const W = 940, H = 230, padL = 44, padR = 16, padT = 14, padB = 34, plotW = W - padL - padR, plotH = H - padT - padB;
+  const dynamicYMaxForChart = Math.max(10, Math.ceil(currentMaxCp));
+  const getY = (v) => padT + plotH - (v / dynamicYMaxForChart) * plotH;
   const gates = [
-    { v: MAXCP * 0.8 * 0.6, l: '5% gate (4.26)' },
-    { v: MAXCP * 0.8, l: '10% gate (7.10)' },
-    { v: MAXCP, l: '15% / max (8.87)' }
+    { v: currentMaxCp * 0.8 * 0.6, l: `5% gate (${(currentMaxCp * 0.8 * 0.6).toFixed(2)})` },
+    { v: currentMaxCp * 0.8, l: `10% gate (${(currentMaxCp * 0.8).toFixed(2)})` },
+    { v: currentMaxCp, l: `15% / max (${currentMaxCp.toFixed(2)})` }
   ];
   const bw = plotW / QS.length;
 
@@ -1038,6 +1135,15 @@ export default function QuarterlyScorecard() {
           </p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
+          
+          <button 
+            onClick={() => !locked && setEditMaxMode(!editMaxMode)} 
+            disabled={locked || availableQuarters.length === 0}
+            className={`px-3.5 py-2 rounded-[9px] text-[13px] font-bold transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${editMaxMode ? 'bg-purple-100 text-purple-800 border-[1.5px] border-purple-300' : 'bg-white text-gray-600 border-[1.5px] border-gray-200 hover:bg-gray-50'}`}
+          >
+            {editMaxMode ? '🔓 Max Editable' : '🔒 Max Locked'}
+          </button>
+
           <div className="flex items-center gap-2 bg-white border-[1.5px] border-gray-200 rounded-[9px] px-3 py-1.5">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.05em]">Period</span>
             <select 
@@ -1125,7 +1231,7 @@ export default function QuarterlyScorecard() {
         <div className="bg-white border border-gray-200 rounded-[14px] p-4 shadow-sm">
           <div className="text-[11px] font-bold text-gray-500 uppercase tracking-[0.05em] mb-1.5">Company Performance</div>
           <div className="text-[28px] font-extrabold text-[#0D2B55] leading-none">
-            <span>{formatNum(c, 2)}</span> <small className="text-[12px] font-semibold text-gray-400">/ 8.87 max</small>
+            <span>{formatNum(c, 2)}</span> <small className="text-[12px] font-semibold text-gray-400">/ {currentMaxCp.toFixed(2)} max</small>
           </div>
           <div className="mt-2 text-[12px] text-gray-600">Achievement: <b className="text-gray-900">{(ach * 100).toFixed(1)}%</b></div>
         </div>
@@ -1134,7 +1240,7 @@ export default function QuarterlyScorecard() {
           <div className="text-[11px] font-bold text-gray-500 uppercase tracking-[0.05em] mb-1.5">Bonus tier (from CP)</div>
           <div className="text-[28px] font-extrabold text-[#0D2B55] leading-none">{(t * 100).toFixed(0)}%</div>
           <div className="mt-2">
-            <span className={`inline-block text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tc.bg} ${tc.fg}`}>{getTierLabel(c)}</span>
+            <span className={`inline-block text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tc.bg} ${tc.fg}`}>{getTierLabel(c, currentMaxCp)}</span>
           </div>
         </div>
 
@@ -1161,9 +1267,9 @@ export default function QuarterlyScorecard() {
         <div className="text-[12px] text-gray-500 mb-2">Each bar is that quarter's Company Performance; the dashed lines are the bonus-tier gates, so you can see if it is on track to clear the next tier by year-end.</div>
         <div>
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" style={{ fontFamily: 'inherit' }}>
-            {Array.from({ length: Math.ceil(yMax / 2) + 1 }).map((_, i) => {
+            {Array.from({ length: Math.ceil(dynamicYMaxForChart / 2) + 1 }).map((_, i) => {
               const gg = i * 2;
-              if (gg > yMax) return null;
+              if (gg > dynamicYMaxForChart) return null;
               return (
                 <g key={`grid-${gg}`}>
                   <line x1={padL} y1={getY(gg)} x2={W - padR} y2={getY(gg)} stroke="#F0EEE8" />
@@ -1189,7 +1295,7 @@ export default function QuarterlyScorecard() {
                 <g key={`bar-${q}`}>
                   {has ? (
                     <>
-                      <rect x={cx - 22} y={getY(qcp)} width="44" height={(qcp / yMax) * plotH} rx="5" fill={isCur ? '#C9A84C' : '#2E5894'} />
+                      <rect x={cx - 22} y={getY(qcp)} width="44" height={(qcp / dynamicYMaxForChart) * plotH} rx="5" fill={isCur ? '#C9A84C' : '#2E5894'} />
                       <text x={cx} y={getY(qcp) - 6} textAnchor="middle" fontSize="12" fontWeight="800" fill="#0D2B55">{formatNum(qcp, 2)}</text>
                     </>
                   ) : (
@@ -1208,9 +1314,9 @@ export default function QuarterlyScorecard() {
 
       <div className="flex flex-col gap-3.5 print:hidden">
         {QKPAS.map(k => {
-          const km = kpaMax(k);
+          const km = kpaMax(curQ, k, qtrMax);
           const ka = kpaAct(curQ, k, qtrAct);
-          const w = km / TOTAL_MAX;
+          const w = km / currentTotalMax;
           const achP = km ? ka / km : 0;
 
           return (
@@ -1241,12 +1347,27 @@ export default function QuarterlyScorecard() {
                   <tbody>
                     {k.inds.map((i) => {
                       const v = qtrAct[curQ] && qtrAct[curQ][i.c] != null ? qtrAct[curQ][i.c] : null;
-                      const p = i.max ? ((v || 0) / i.max) : 0;
+                      
+                      const currentIndMax = (qtrMax[curQ] && qtrMax[curQ][i.c] !== undefined) ? qtrMax[curQ][i.c] : i.max;
+                      const p = currentIndMax ? ((v || 0) / currentIndMax) : 0;
+                      
                       return (
                         <tr key={i.c} className="hover:bg-slate-50 transition-colors">
                           <td className="p-2.5 text-[13px] border-b border-gray-100 font-bold text-[#0D2B55] w-[38px] align-middle">{i.c}</td>
                           <td className="p-2.5 text-[13px] border-b border-gray-100 text-gray-700 align-middle">{i.n}</td>
-                          <td className="p-2.5 text-[13px] border-b border-gray-100 text-center text-gray-600 align-middle">{i.max}</td>
+                          <td className="p-2.5 text-[13px] border-b border-gray-100 text-center text-gray-600 align-middle">
+                            {editMaxMode ? (
+                              <input 
+                                disabled={locked || availableQuarters.length === 0}
+                                className="w-[50px] font-inherit text-[12px] font-bold text-center text-purple-700 border-[1.5px] border-purple-300 rounded-md px-1 py-1 bg-purple-50 focus:outline-none focus:border-purple-500 disabled:opacity-50 transition-colors"
+                                type="number" min="0" step="1" 
+                                value={currentIndMax} 
+                                onChange={(e) => handleMaxChange(i.c, e.target.value)}
+                              />
+                            ) : (
+                              <span className="font-medium">{currentIndMax}</span>
+                            )}
+                          </td>
                           <td className="p-2.5 text-[13px] border-b border-gray-100 text-center align-middle">
                             <input 
                               disabled={locked || availableQuarters.length === 0}
@@ -1254,16 +1375,22 @@ export default function QuarterlyScorecard() {
                               type="number" min="0" step="0.1" 
                               value={v !== null ? v : ''} 
                               onChange={(e) => handleActChange(i.c, e.target.value)}
+                              onBlur={() => handleBlur(i.c)}
                             />
                           </td>
                           <td className="p-2.5 text-[13px] border-b border-gray-100 text-center font-bold text-gray-800 align-middle">
-                             <span className={p > 1 ? "text-amber-600 font-extrabold bg-amber-50 px-1 py-0.5 rounded" : ""}>
-                               {(p * 100).toFixed(0)}%
-                             </span>
+                             <div className="flex items-center justify-center gap-[4px]">
+                               <span className={p > 1 ? "text-amber-600 font-extrabold" : ""}>
+                                 {(p * 100).toFixed(0)}%
+                               </span>
+                               {p > 1 && (
+                                 <span className="bg-[#e8c96a] text-[#0D2B55] px-[4px] py-[2px] rounded-[3px] text-[9px] font-[900] leading-none shadow-sm">EP</span>
+                               )}
+                             </div>
                           </td>
                           <td className="p-2.5 text-[13px] border-b border-gray-100 align-middle">
                             <div 
-                              className={`text-[11.5px] text-gray-600 min-h-[20px] px-2 py-1 rounded-md border border-transparent transition-colors ${locked || availableQuarters.length === 0 ? 'cursor-not-allowed opacity-70' : 'cursor-text hover:bg-white hover:border-gray-300 focus:outline-none focus:border-[#C9A84C] focus:bg-white focus:text-gray-900 empty:before:content-[\'Add_a_note...\'] empty:before:text-gray-400 print:p-0'}`}
+                              className={`text-[11.5px] text-gray-700 min-h-[32px] max-h-[72px] overflow-y-auto custom-scrollbar px-2.5 py-1.5 rounded-md border-[1.5px] transition-colors shadow-sm ${locked || availableQuarters.length === 0 ? 'cursor-not-allowed opacity-70 bg-gray-50 border-gray-200' : 'cursor-text bg-white border-gray-300 hover:border-gray-400 focus:outline-none focus:border-[#C9A84C] focus:bg-white empty:before:content-[\'📝_Add_a_note...\'] empty:before:text-gray-400 print:p-0 print:border-none print:bg-transparent print:shadow-none print:max-h-none print:overflow-visible'}`}
                               contentEditable={!locked && availableQuarters.length !== 0}
                               suppressContentEditableWarning
                               onBlur={(e) => handleNoteChange(i.c, e.currentTarget.textContent || '')}
@@ -1271,7 +1398,7 @@ export default function QuarterlyScorecard() {
                           </td>
                           <td className="p-2.5 text-[13px] border-b border-gray-100 align-middle">
                             <div 
-                              className={`text-[11.5px] min-h-[22px] px-2 py-1.5 rounded-md border-[1.5px] transition-colors shadow-sm ${locked || availableQuarters.length === 0 ? 'cursor-not-allowed opacity-70 bg-amber-50/50 border-amber-100/50 text-amber-900/70' : 'cursor-text bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100 focus:outline-none focus:border-amber-500 focus:bg-white focus:text-gray-900 empty:before:content-[\'⚠️_Important_Note...\'] empty:before:text-amber-600/70 print:p-0 print:border-none print:bg-transparent print:shadow-none'}`}
+                              className={`text-[11.5px] text-amber-900 min-h-[32px] max-h-[72px] overflow-y-auto custom-scrollbar px-2.5 py-1.5 rounded-md border-[1.5px] transition-colors shadow-sm ${locked || availableQuarters.length === 0 ? 'cursor-not-allowed opacity-70 bg-amber-50/50 border-amber-100/50 text-amber-900/70' : 'cursor-text bg-amber-50 border-amber-300 hover:bg-amber-100 focus:outline-none focus:border-amber-500 focus:bg-white empty:before:content-[\'⚠️_Important_Note...\'] empty:before:text-amber-600/70 print:p-0 print:border-none print:bg-transparent print:shadow-none print:max-h-none print:overflow-visible'}`}
                               contentEditable={!locked && availableQuarters.length !== 0}
                               suppressContentEditableWarning
                               onBlur={(e) => handleImportantChange(i.c, e.currentTarget.textContent || '')}
@@ -1289,7 +1416,7 @@ export default function QuarterlyScorecard() {
       </div>
 
       <div className="text-[12px] text-gray-600 bg-white border border-gray-200 rounded-xl p-4 mt-2 shadow-sm print:hidden">
-        <b className="text-[#0D2B55]">How the number works:</b> each supporting indicator earns points up to its <b>Max</b>; the five KPA totals give the official weights (45.1 / 25.9 / 13.5 / 12.4 / 3%). <b>Company Performance = all actual points &divide; 100</b> (max 8.87), which sets the bonus tier (&ge;8.87 &rarr; 15%, &ge;7.10 &rarr; 10%, &ge;4.26 &rarr; 5%, otherwise 0%), multiplied by each person&rsquo;s individual factor (0.7 / 1.0 / 1.2 / 1.3).
+        <b className="text-[#0D2B55]">How the number works:</b> each supporting indicator earns points up to its <b>Max</b>; the five KPA totals give the official weights (45.1 / 25.9 / 13.5 / 12.4 / 3%). <b>Company Performance = all actual points &divide; 100</b> (max {currentMaxCp.toFixed(2)}), which sets the bonus tier (&ge;{currentMaxCp.toFixed(2)} &rarr; 15%, &ge;{(currentMaxCp * 0.8).toFixed(2)} &rarr; 10%, &ge;{(currentMaxCp * 0.48).toFixed(2)} &rarr; 5%, otherwise 0%), multiplied by each person&rsquo;s individual factor (0.7 / 1.0 / 1.2 / 1.3).
       </div>
 
       {downloadMenu && (
@@ -1326,26 +1453,48 @@ export default function QuarterlyScorecard() {
         </div>
       )}
 
-      {lockModal && (
+      {/* Universal Alert Modal replaces native window.alert */}
+      {alertModal.show && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[200] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200 print:hidden">
+          <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl p-[32px] text-center slide-in-from-bottom-4">
+            <div className="text-[54px] mb-[16px] leading-none">{alertModal.icon}</div>
+            <h2 className={`text-[20px] font-[800] mb-[8px] ${alertModal.type === 'error' ? 'text-[#DC2626]' : alertModal.type === 'warning' ? 'text-[#D97706]' : 'text-[#0D2B55]'}`}>
+              {alertModal.title}
+            </h2>
+            <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed">
+              {alertModal.detail}
+            </div>
+            <button 
+              className={`w-full text-white font-[800] text-[14px] py-[12px] rounded-[10px] shadow-sm transition-colors ${alertModal.type === 'error' ? 'bg-[#DC2626] hover:bg-[#B91C1C]' : alertModal.type === 'warning' ? 'bg-[#D97706] hover:bg-[#B45309]' : 'bg-[#0D2B55] hover:bg-[#1a3d6e]'}`}
+              onClick={() => setAlertModal({ show: false, icon: '', title: '', detail: '', type: '' })}
+            >
+              Acknowledge
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lock Confirmation Modal */}
+      {confirmLockModal && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200 print:hidden">
           <div className="bg-white rounded-[16px] w-full max-w-[460px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
             <div className="bg-[#DC2626] p-[16px_22px] flex justify-between items-center">
               <div className="text-[15px] font-[800] text-white flex items-center gap-[8px]">
                 <span className="text-[18px]">⚠</span> Confirm Permanent Lock & Sync
               </div>
-              <button onClick={() => setLockModal(false)} className="bg-white/10 text-white w-[30px] h-[30px] rounded-[8px] flex items-center justify-center hover:bg-white/20 transition-colors">&times;</button>
+              <button onClick={() => setConfirmLockModal(false)} className="bg-white/10 text-white w-[30px] h-[30px] rounded-[8px] flex items-center justify-center hover:bg-white/20 transition-colors">&times;</button>
             </div>
             <div className="p-[30px_22px] text-center">
               <div className="text-[48px] mb-[16px] leading-none">🔒</div>
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock and Sync {curQ} Scorecard?</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 This action is <strong>irreversible</strong> from the CEO panel. 
-                This will lock the Quarterly Scorecard AND calculate and sync the 5 high-level KPA percentage scores to the official {getMonthFromQtr(curQ)}/2026 reporting matrix.<br/><br/>
+                This will lock the Quarterly Scorecard AND calculate and sync the 5 high-level KPA percentage scores to the official {selectedYear} reporting matrix.<br/><br/>
                 Final calculated CP: <strong className="text-[#0D2B55]">{c.toFixed(2)}%</strong>
               </div>
               <div className="flex gap-[12px] justify-center">
                 <button 
-                  onClick={() => setLockModal(false)} 
+                  onClick={() => setConfirmLockModal(false)} 
                   className="p-[12px_20px] rounded-[10px] text-[13px] font-[800] text-[#0f1923] bg-white border-[2px] border-[#E2DDD4] hover:border-[#0D2B55] transition-colors"
                 >
                   Cancel

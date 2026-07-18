@@ -28,8 +28,9 @@ export default function KPAScorecard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedQuarter, setSelectedQuarter] = useState(Math.ceil((new Date().getMonth() + 1) / 3));
+  const [selectedQuarter, setSelectedQuarter] = useState('');
 
+  // Dynamic state to store ONLY the quarters actively created by HR in the DB
   const [availableQuarters, setAvailableQuarters] = useState([]);
 
   // Live clock tick
@@ -38,26 +39,21 @@ export default function KPAScorecard() {
     return () => clearInterval(timer);
   }, []);
 
-  // 🚨 UPGRADED: Bulletproof Real-time Database Fetch to pull available Quarters
+  // 🚨 FIXED: Fetch master quarters directly from the official HR '/quarters' endpoint
   useEffect(() => {
     const fetchDynamicQuarters = async () => {
+      setLoading(true);
       try {
-        let data = [];
+        const res = await api.get('/quarters').catch(() => ({ data: { data: [] } }));
+        const allQuarters = res.data?.data || [];
         
-        // Attempt 1: Fetch from Appraisal Quarters via query param
-        try {
-          const res1 = await api.get('/appraisal-quarters', { params: { year: selectedYear } });
-          data = res1.data?.data || res1.data || [];
-        } catch (err1) {
-          // Attempt 2: Fallback to Quarterly Scorecards to extract the periods HR created
-          const res2 = await api.get(`/quarterly-scorecards/${selectedYear}`);
-          data = res2.data?.data || [];
-        }
+        // Filter by currently selected year
+        const yearData = allQuarters.filter(q => q.year === selectedYear);
         
-        if (data && data.length > 0) {
-          const mapped = data.map(q => {
-            const label = typeof q === 'string' ? q : (q.quarter || q.name || q.period || String(q));
-            const val = parseInt(String(label).replace(/[^0-9]/g, '')) || 1;
+        if (yearData.length > 0) {
+          const mapped = yearData.map(q => {
+            const valMatch = q.name.match(/Q([1-4])/i);
+            const val = valMatch ? parseInt(valMatch[1]) : 1;
             return { val, label: `Q${val}` };
           });
 
@@ -75,38 +71,69 @@ export default function KPAScorecard() {
           setAvailableQuarters(uniqueQuarters);
           
           // Auto-select the latest valid quarter if the current one isn't in the list
-          if (!uniqueQuarters.some(m => m.val === selectedQuarter)) {
-            setSelectedQuarter(uniqueQuarters[uniqueQuarters.length - 1].val);
-          }
+          setSelectedQuarter((prevQ) => {
+             if (!uniqueQuarters.some(m => m.val === prevQ)) {
+               return uniqueQuarters[uniqueQuarters.length - 1].val;
+             }
+             return prevQ;
+          });
         } else {
           setAvailableQuarters([]);
         }
       } catch (err) {
         console.error("Failed to fetch available quarters from DB", err);
         setAvailableQuarters([]);
+      } finally {
+        setLoading(false);
       }
     };
     fetchDynamicQuarters();
   }, [selectedYear]);
 
-  // 🚨 UPGRADED: Fetch KPA Matrix Data mapped exactly to the Quarterly Scorecard schema
+  // Fetch KPA Matrix Data and Cross-Check Locks
   useEffect(() => {
     const fetchData = async () => {
       if (!selectedQuarter || availableQuarters.length === 0) {
          setLoading(false);
+         setKpaActuals([null, null, null, null, null]);
+         setLocked(false);
          return; 
       }
       try {
         setLoading(true);
-        // Map selectedQuarter (1-4) to actual reviewMonth (3, 6, 9, 12) so data links perfectly
         const targetMonth = selectedQuarter * 3;
-        const res = await api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }));
-        const metrics = res.data?.data;
         
+        // Fetch from both databases to ensure sync
+        const [metricsRes, qtrRes] = await Promise.all([
+           api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } })),
+           api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } }))
+        ]);
+
+        const metrics = metricsRes.data?.data;
+        const qtrMatch = (qtrRes.data?.data || []).find(d => d.quarter === `Q${selectedQuarter}`);
+        
+        // Cross-page lock check. Locks if EITHER database marks it locked.
+        const isMLocked = metrics?.locked || false;
+        const isQLocked = qtrMatch?.locked || false;
+
+        if (isMLocked || isQLocked) {
+          setLocked(true);
+          const lockSource = isMLocked ? metrics : qtrMatch;
+          if (lockSource.lockedAt) {
+            setLockedAt(new Date(lockSource.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
+          }
+          if (lockSource.lockedBy) {
+            setLockedBy(lockSource.lockedBy.personalDetails ? `${lockSource.lockedBy.personalDetails.firstName} ${lockSource.lockedBy.personalDetails.lastName}` : 'System Admin');
+          }
+        } else {
+          setLocked(false);
+          setLockedAt('');
+          setLockedBy('');
+        }
+
         if (metrics) {
-          // 🚨 UPGRADED: Enforce strict 2-decimal formatting on fetched data
+          // 🚨 FIXED: Strict 2 Decimal limitation on fetch
           const format2Dec = (v) => v !== null && v !== undefined && v !== '' ? Number(parseFloat(v).toFixed(2)) : null;
-          
           setKpaActuals([
             format2Dec(metrics.financialResilience),
             format2Dec(metrics.operationalEffectiveness),
@@ -114,18 +141,8 @@ export default function KPAScorecard() {
             format2Dec(metrics.safetyEnvironment),
             format2Dec(metrics.reputationalCapital)
           ]);
-          setLocked(metrics.locked || false);
-          if (metrics.lockedAt) {
-            setLockedAt(new Date(metrics.lockedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
-          }
-          if (metrics.lockedBy) {
-            setLockedBy(metrics.lockedBy.personalDetails ? `${metrics.lockedBy.personalDetails.firstName} ${metrics.lockedBy.personalDetails.lastName}` : 'System Admin');
-          }
         } else {
           setKpaActuals([null, null, null, null, null]);
-          setLocked(false);
-          setLockedAt('');
-          setLockedBy('');
         }
       } catch (error) {
         console.error('Failed to load KPA data', error);
@@ -134,21 +151,21 @@ export default function KPAScorecard() {
       }
     };
     fetchData();
-  }, [selectedYear, selectedQuarter, availableQuarters.length]);
+  }, [selectedYear, selectedQuarter, availableQuarters.length, saving]);
 
   const isCurrentYear = selectedYear === currentTime.getFullYear();
   const isEntryDisabled = locked || !isCurrentYear || availableQuarters.length === 0;
 
-  // Real-time calculations
+  // 🚨 FIXED: Enforce strict 2-decimal formatting directly on input
   const handleInput = (idx, val) => {
     if (isEntryDisabled) return;
-    const v = val === '' ? null : parseFloat(val);
+    const v = val === '' ? null : Math.min(100, Math.max(0, parseFloat(val) || 0));
     const newArr = [...kpaActuals];
-    newArr[idx] = v !== null ? Math.min(100, Math.max(0, v)) : null;
+    // Rounds mathematically to exactly 2 decimal places to prevent infinite decimals
+    newArr[idx] = v !== null ? Math.round(v * 100) / 100 : null;
     setKpaActuals(newArr);
   };
 
-  // 🚨 UPGRADED: Rounding handler to enforce 2 decimals on user input blur
   const handleBlur = (idx) => {
     if (kpaActuals[idx] !== null && kpaActuals[idx] !== '') {
       const newArr = [...kpaActuals];
@@ -179,7 +196,7 @@ export default function KPAScorecard() {
       const targetMonth = selectedQuarter * 3;
       const payload = {
         reviewYear: selectedYear,
-        reviewMonth: targetMonth, // 🚨 UPGRADED: Safely mapped to Quarterly Scorecard schema
+        reviewMonth: targetMonth, 
         financialResilience: kpaActuals[0],
         operationalEffectiveness: kpaActuals[1],
         humanCapital: kpaActuals[2],
@@ -237,16 +254,12 @@ export default function KPAScorecard() {
       
       await api.post('/company-metrics', payload);
       
-      // 🚨 UPGRADED: Cross-Page Lock Synchronization. Also locks the exact same quarter in Quarterly Scorecard DB
+      // Sync lock to Quarterly Scorecard DB too
       await api.post(`/quarterly-scorecards/${selectedYear}/Q${selectedQuarter}`, {
          locked: true
       }).catch(err => console.log('Silent fallback if Quarterly Scorecard not yet initialized', err));
       
-      setLocked(true);
-      setLockedBy('Board Admin'); 
-      setLockedAt(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
       setLockModal(false);
-      
       setSuccessModal({
         show: true,
         icon: '🔒',
@@ -263,7 +276,7 @@ export default function KPAScorecard() {
   const currentY = currentTime.getFullYear();
   const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
 
-  if (loading) return <div className="p-10 text-center text-slate-500 animate-pulse font-medium">Loading Scorecard Data...</div>;
+  if (loading && availableQuarters.length === 0) return <div className="p-10 text-center text-slate-500 animate-pulse font-medium">Loading Scorecard Data...</div>;
 
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
@@ -294,7 +307,7 @@ export default function KPAScorecard() {
                className="bg-white border border-[#E2DDD4] p-[6px_10px] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer"
                disabled={availableQuarters.length === 0}
              >
-                {availableQuarters.length === 0 && <option value={selectedQuarter}>No Quarters Created</option>}
+                {availableQuarters.length === 0 && <option value="">No Quarters Created</option>}
                 {availableQuarters.map(q => (
                    <option key={q.val} value={q.val}>{q.label}</option>
                 ))}
@@ -326,6 +339,13 @@ export default function KPAScorecard() {
           </button>
         </div>
       </div>
+
+      {availableQuarters.length === 0 && !loading && (
+        <div className="bg-amber-50 border-[1.5px] border-amber-200 rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
+          <div className="text-[18px] text-amber-700">&#9888;</div>
+          <div className="text-[13px] text-amber-800">There are <strong>no active quarters</strong> created by HR for <strong>{selectedYear}</strong>.</div>
+        </div>
+      )}
 
       {!isCurrentYear && !locked && availableQuarters.length > 0 && (
         <div className="bg-amber-50 border-[1.5px] border-amber-200 rounded-[10px] p-[14px_16px] mb-[20px] flex items-center gap-[12px] shadow-sm">
@@ -426,12 +446,12 @@ export default function KPAScorecard() {
                   <div className="w-[120px] pl-[10px]">
                     <input 
                       className="w-full bg-[#FAF8F4] border-[1.5px] border-[#E2DDD4] rounded-[8px] p-[8px] text-center text-[15px] font-[800] text-[#0D2B55] outline-none focus:border-[#0D2B55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
-                      type="number" min="0" max="100" step="0.01" // 🚨 UPGRADED: Allows 2 decimal step entry
+                      type="number" min="0" max="100" step="0.01" 
                       value={kpaActuals[i] !== null ? kpaActuals[i] : ''}
                       placeholder="0.00" 
                       disabled={isEntryDisabled}
                       onChange={(e) => handleInput(i, e.target.value)}
-                      onBlur={() => handleBlur(i)} // 🚨 UPGRADED: Triggers strict 2-decimal formatting safely on blur
+                      onBlur={() => handleBlur(i)} 
                     />
                   </div>
                   <div className="w-[120px] text-center text-[15px] font-[800] text-[#059669]">
