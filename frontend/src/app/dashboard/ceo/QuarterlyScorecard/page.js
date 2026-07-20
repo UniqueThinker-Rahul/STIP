@@ -115,7 +115,6 @@ const fromDB = (obj) => {
   return res;
 };
 
-// 🚨 FIXED: Helper function restored to resolve ReferenceError
 const getMonthFromQtr = (qtr) => {
   if (!qtr) return 3;
   const map = { 'Q1': 3, 'Q2': 6, 'Q3': 9, 'Q4': 12 };
@@ -240,10 +239,12 @@ export default function QuarterlyScorecard() {
           qKey = String(qKey).toUpperCase();
 
           const formattedActuals = {};
-          if(doc.actuals) {
-              Object.keys(doc.actuals).forEach(k => {
-                  const num = parseFloat(doc.actuals[k]);
-                  formattedActuals[k] = isNaN(num) ? null : Number(num.toFixed(2));
+          if (doc.actuals && typeof doc.actuals === 'object') {
+              Object.entries(doc.actuals).forEach(([k, val]) => {
+                  if (val !== null && val !== '') {
+                      const num = parseFloat(val);
+                      formattedActuals[k] = isNaN(num) ? null : Number(num.toFixed(2));
+                  }
               });
           }
 
@@ -601,10 +602,9 @@ export default function QuarterlyScorecard() {
 
       QKPAS.forEach((k, gi) => {
         bandRows.push(body.length);
-        body.push([{ content: `${k.code} - ${k.name}`, colSpan: 8, styles: { fillColor: hexToRgb(KPA_COLORS[gi]), textColor: [255, 255, 255], fontStyle: "bold", halign: "left" } }]);
+        body.push([{ content: `${k.code} - ${k.name}`, colSpan: 7, styles: { fillColor: hexToRgb(KPA_COLORS[gi]), textColor: [255, 255, 255], fontStyle: "bold", halign: "left" } }]);
         
         k.inds.forEach((ind) => {
-          const vQ1 = (qtrAct['Q1'] && qtrAct['Q1'][ind.c] != null) ? qtrAct['Q1'][ind.c] : 0;
           const v = val(ind.c);
           
           const currentIndMax = (qtrMax[q] && qtrMax[q][ind.c] !== undefined) ? qtrMax[q][ind.c] : ind.max;
@@ -621,7 +621,6 @@ export default function QuarterlyScorecard() {
             { content: ind.c, styles: { halign: 'center', fontStyle: 'bold', textColor: [13,43,85] } },
             ind.n,
             { content: currentIndMax, styles: { halign: 'center' } },
-            { content: vQ1, styles: { halign: 'center' } },
             { content: v, styles: { halign: 'center' } },
             { content: currentIndMax ? pct : "", styles: { halign: 'center', fontStyle: 'bold', textColor: pctColor } },
             { content: notesData[ind.c] || "", styles: { fontSize: 6.4, textColor: [100,100,100] } },
@@ -631,22 +630,20 @@ export default function QuarterlyScorecard() {
 
         const m = kpaMax(q, k, qtrMax);
         const a = kpaAct(q, k, qtrAct);
-        const aQ1 = kpaAct("Q1", k, qtrAct);
         subRows.push(body.length);
         body.push([
           "", 
           { content: `Subtotal - ${k.name}`, styles: { fontStyle: 'bold' } }, 
           { content: m, styles: { halign: 'center', fontStyle: 'bold' } }, 
-          { content: aQ1.toFixed(1), styles: { halign: 'center', fontStyle: 'bold' } }, 
           { content: a.toFixed(1), styles: { halign: 'center', fontStyle: 'bold' } },
-          { content: m ? `${((a / m) * 100).toFixed(0)}%` : "", styles: { halign: 'center', fontStyle: 'bold' } }, 
+          { content: m ? `${((a / m) * 100).toFixed(2)}%` : "", styles: { halign: 'center', fontStyle: 'bold' } }, 
           { content: `Weight ${((m / reportTotalMax) * 100).toFixed(1)}%`, colSpan: 2, styles: { fontStyle: 'italic', textColor: [150,150,150] } }
         ]);
-        body.push([{ content: "", colSpan: 8, styles: { cellPadding: 0.5, border: 0 } }]);
+        body.push([{ content: "", colSpan: 7, styles: { cellPadding: 0.5, border: 0 } }]);
       });
 
       autoTable(doc, {
-        head: [["#", "Supporting indicator", "Max", "Q1", q, "% of Max", "Notes", "Important"]],
+        head: [["#", "Supporting indicator", "Max", "Actual", "% of Max", "Notes", "Important"]],
         body, 
         startY: 39, 
         theme: "grid",
@@ -658,10 +655,9 @@ export default function QuarterlyScorecard() {
           1: { cellWidth: 80 }, 
           2: { cellWidth: 12 },
           3: { cellWidth: 12 }, 
-          4: { cellWidth: 12 }, 
-          5: { cellWidth: 15 }, 
-          6: { cellWidth: 68 },
-          7: { cellWidth: 68 }
+          4: { cellWidth: 15 }, 
+          5: { cellWidth: 74 }, 
+          6: { cellWidth: 74 }
         },
         didParseCell: (h) => {
           if (h.section !== "body") return;
@@ -673,7 +669,7 @@ export default function QuarterlyScorecard() {
             }
             h.cell.styles.fillColor = hexToRgb(KPA_TINT[kpaIndex]);
             h.cell.styles.textColor = [13, 43, 85];
-          } else if (bandRows.indexOf(i) < 0 && h.column.index === 5) {
+          } else if (bandRows.indexOf(i) < 0 && h.column.index === 4) {
             let kpaIndex = 0;
             for (let bi = 0; bi < bandRows.length; bi++) {
                 if (i > bandRows[bi]) kpaIndex = bi;
@@ -687,13 +683,12 @@ export default function QuarterlyScorecard() {
 
       let y = doc.lastAutoTable.finalY + 2;
       const totActVal = QKPAS.reduce((sum, kpa) => sum + kpa.inds.reduce((s, i) => s + val(i.c), 0), 0);
-      const totQ1Val = QKPAS.reduce((sum, kpa) => sum + kpa.inds.reduce((s, i) => s + ((qtrAct['Q1'] && qtrAct['Q1'][i.c]) || 0), 0), 0);
 
       const cpBody = [
-        [{ content: "COMPANY PERFORMANCE", colSpan: 8, styles: { fillColor: [13, 43, 85], textColor: [255,255,255], fontStyle: "bold" } }],
-        ["", "Total points", reportTotalMax, totQ1Val.toFixed(1), totActVal.toFixed(1), "", "", ""],
-        ["", "Company Performance (points / 100)", reportMaxCp.toFixed(2), (totQ1Val/100).toFixed(2), (totActVal/100).toFixed(2), "", "", ""],
-        [{ content: "", colSpan: 8, styles: { cellPadding: 0.5, border: 0 } }]
+        [{ content: "COMPANY PERFORMANCE", colSpan: 7, styles: { fillColor: [13, 43, 85], textColor: [255,255,255], fontStyle: "bold" } }],
+        ["", "Total points", reportTotalMax, totActVal.toFixed(1), "", "", ""],
+        ["", "Company Performance (points / 100)", reportMaxCp.toFixed(2), (totActVal/100).toFixed(2), "", "", ""],
+        [{ content: "", colSpan: 7, styles: { cellPadding: 0.5, border: 0 } }]
       ];
 
       autoTable(doc, {
@@ -707,10 +702,9 @@ export default function QuarterlyScorecard() {
           1: { halign: "left", cellWidth: 80, fontStyle: "bold", fillColor: [245,245,245] }, 
           2: { cellWidth: 12, fontStyle: "bold", fillColor: [245,245,245] },
           3: { cellWidth: 12, fontStyle: "bold", fillColor: [245,245,245] }, 
-          4: { cellWidth: 12, fontStyle: "bold", fillColor: [245,245,245] }, 
-          5: { cellWidth: 15, fontStyle: "bold", fillColor: [245,245,245] }, 
-          6: { cellWidth: 68, fillColor: [245,245,245] },
-          7: { cellWidth: 68, fillColor: [245,245,245] }
+          4: { cellWidth: 15, fontStyle: "bold", fillColor: [245,245,245] }, 
+          5: { cellWidth: 74, fillColor: [245,245,245] },
+          6: { cellWidth: 74, fillColor: [245,245,245] }
         },
         didParseCell: (h) => {
             if (h.row.raw[0] === "" && h.row.raw[1] === "") {
@@ -722,17 +716,17 @@ export default function QuarterlyScorecard() {
       y = doc.lastAutoTable.finalY;
 
       const tiersBody = [
-        [{ content: "BONUS TIERS (CP threshold -> award %)", colSpan: 8, styles: { fillColor: [229, 231, 235], fontStyle: "bold", halign: "left" } }],
-        ["", "Exceeds target - 100%", reportMaxCp.toFixed(2), "15%", "", "", "", ""],
-        ["", "Meets the majority - 80%", (reportMaxCp * 0.8).toFixed(2), "10%", "", "", "", ""],
-        ["", "Improvement areas - 48%", (reportMaxCp * 0.48).toFixed(2), "5%", "", "", "", ""],
-        ["", "Fails the majority", "below", "0%", "", "", "", ""],
-        ["", `${q} bonus tier (from CP)`, "", `${(tier * 100).toFixed(0)}%`, "x individual factor ->", "", "", ""],
-        [{ content: "", colSpan: 8, styles: { cellPadding: 0.5, border: 0 } }],
-        [{ content: "INDIVIDUAL AWARD = tier x factor (% of annual salary)", colSpan: 8, styles: { fillColor: [229, 231, 235], fontStyle: "bold", halign: "left" } }]
+        [{ content: "BONUS TIERS (CP threshold -> award %)", colSpan: 7, styles: { fillColor: [229, 231, 235], fontStyle: "bold", halign: "left" } }],
+        ["", "Exceeds target - 100%", reportMaxCp.toFixed(2), "15%", "", "", ""],
+        ["", "Meets the majority - 80%", (reportMaxCp * 0.8).toFixed(2), "10%", "", "", ""],
+        ["", "Improvement areas - 48%", (reportMaxCp * 0.48).toFixed(2), "5%", "", "", ""],
+        ["", "Fails the majority", "below", "0%", "", "", ""],
+        ["", `${q} bonus tier (from CP)`, "", `${(tier * 100).toFixed(0)}%`, "x individual factor ->", "", ""],
+        [{ content: "", colSpan: 7, styles: { cellPadding: 0.5, border: 0 } }],
+        [{ content: "INDIVIDUAL AWARD = tier x factor (% of annual salary)", colSpan: 7, styles: { fillColor: [229, 231, 235], fontStyle: "bold", halign: "left" } }]
       ];
       FACTORS.forEach(([lbl, f]) => {
-          tiersBody.push(["", lbl, f.toFixed(1), `${(tier * f * 100).toFixed(1)}%`, "", "", "", ""]);
+          tiersBody.push(["", lbl, f.toFixed(1), `${(tier * f * 100).toFixed(1)}%`, "", "", ""]);
       });
 
       autoTable(doc, {
@@ -746,10 +740,9 @@ export default function QuarterlyScorecard() {
           1: { halign: "left", cellWidth: 80 }, 
           2: { cellWidth: 12 },
           3: { cellWidth: 12, fontStyle: "bold" }, 
-          4: { cellWidth: 12, halign: "left", fontStyle: "italic", textColor: [100,100,100] }, 
-          5: { cellWidth: 15 }, 
-          6: { cellWidth: 68 },
-          7: { cellWidth: 68 }
+          4: { cellWidth: 15, halign: "left", fontStyle: "italic", textColor: [100,100,100] }, 
+          5: { cellWidth: 74 }, 
+          6: { cellWidth: 74 }
         },
         didParseCell: (h) => {
             if (h.row.raw[0] === "" && h.row.raw[1] === "") {
@@ -973,6 +966,11 @@ export default function QuarterlyScorecard() {
       const KPA_TINT = ["D9E1F2", "E2EFDA", "FCE4D6", "E2F0D9", "EBE0F4"];
 
       sheet.cell("A1").value(`FSM PETROLEUM CORPORATION — ${selectedYear} STIP BALANCED SCORECARD`);
+      
+      // 🚨 FIXED: Write "Actual" to D4 and hide the column D to preserve layout/formulas but omit "Q1"
+      sheet.cell("D4").value("");
+      sheet.column("D").hidden(true);
+      
       sheet.cell("E4").value(curQ);
       sheet.cell("F4").value(`% of Max (${curQ})`);
       sheet.cell("G4").value(`Notes (${curQ})`);
@@ -980,6 +978,7 @@ export default function QuarterlyScorecard() {
       sheet.column("G").width(45).style("wrapText", true);
       sheet.column("H").width(45).style("wrapText", true);
 
+      // Hide the chart data rendering tables visually so they don't overlap the output design
       sheet.range("J3:O20").style("fontColor", "ffffff");
 
       const q = curQ;
@@ -1014,12 +1013,11 @@ export default function QuarterlyScorecard() {
         k.inds.forEach((ind) => {
           const r = rowMap[ind.c];
           if (r) {
-            const vQ1 = (qtrAct['Q1'] && qtrAct['Q1'][ind.c] != null) ? qtrAct['Q1'][ind.c] : 0;
             const vCur = (actData[ind.c] != null) ? actData[ind.c] : 0;
             const currentIndMax = (qtrMax[q] && qtrMax[q][ind.c] !== undefined) ? qtrMax[q][ind.c] : ind.max;
             
             sheet.cell(`C${r}`).value(currentIndMax); 
-            sheet.cell(`D${r}`).value(vQ1);
+            sheet.cell(`D${r}`).value(""); // Clear out any Q1 data
             sheet.cell(`E${r}`).value(vCur);
             sheet.cell(`F${r}`).style({ fontColor: KPA_COLORS[gi], bold: true });
             sheet.cell(`G${r}`).value(notesData[ind.c] || "");
@@ -1027,24 +1025,35 @@ export default function QuarterlyScorecard() {
           }
         });
 
+        // Chart 1 Data Hook
+        const rKpa = 5 + gi;
         const m = kpaMax(curQ, k, qtrMax);
         const a = kpaAct(curQ, k, qtrAct);
         const pct = m ? (a / m) * 100 : 0;
-        sheet.cell(`K${5 + gi}`).value(pct);
+        sheet.cell(`K${rKpa}`).value(pct);
       });
       
       sheet.cell("K4").value(`Ach % ${curQ}`);
       sheet.cell("B55").value(`${curQ} bonus tier (from CP)`);
 
+      // 🚨 FIXED: Explicitly populating Chart 2 backend data mapping J, K, L, M
+      const reportTotalMax = getQtrTotalMax(curQ, qtrMax) || TOTAL_MAX_DEFAULT;
+      const maxCp = reportTotalMax / 100;
+        
       QS.forEach((qItem, i) => {
-        const rQs = 13 + i;
+        const rQs = 12 + i; // FIXED: Row offset for correct chart positioning
         const has = hasQtrData(qItem, qtrAct);
         const cpVal = getQtrCp(qItem, qtrAct);
-        sheet.cell(`K${rQs}`).value(has ? cpVal : 0);
+          
+        sheet.cell(`J${rQs}`).value(has ? cpVal : 0);      // CP Actual Data
+        sheet.cell(`K${rQs}`).value(maxCp * 0.48);         // 5% gate line
+        sheet.cell(`L${rQs}`).value(maxCp * 0.8);          // 10% gate line
+        sheet.cell(`M${rQs}`).value(maxCp);                // 15% / max line
       });
 
       const blob = await workbook.outputAsync();
 
+      // JSZip modification to physically shift the native drawing anchors (charts) to row 64+
       if (!window.JSZip) {
           await new Promise((resolve, reject) => {
               const script = document.createElement('script');
@@ -1327,7 +1336,7 @@ export default function QuarterlyScorecard() {
                 </div>
                 <div className="font-bold text-[14px] flex-1 print:text-white">{k.name}</div>
                 <div className="text-[11.5px] opacity-90 text-right whitespace-nowrap print:text-white">
-                  Weight <b>{(w * 100).toFixed(1)}%</b> &nbsp;&middot;&nbsp; KPA score <b>{(achP * 100).toFixed(0)}%</b><br/>
+                  Weight <b>{(w * 100).toFixed(1)}%</b> &nbsp;&middot;&nbsp; KPA score <b>{(achP * 100).toFixed(2)}%</b><br/>
                   <span className="opacity-80">points <span>{formatNum(ka, 1)}</span> / {km}</span>
                 </div>
               </div>

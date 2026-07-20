@@ -6,18 +6,10 @@ const { logAudit } = require('../utils/logger');
 
 router.use(authGuard);
 
-// 1. GET ALL QUARTERS (🚨 UPGRADED: Hides unpublished quarters universally)
+// 1. GET ALL QUARTERS
 router.get('/', async (req, res) => {
   try {
-    const { all } = req.query;
-    let query = {};
-    
-    // Unless specifically requested via "?all=true", hide unpublished quarters everywhere
-    if (all !== 'true') {
-      query.isPublished = true;
-    }
-
-    const quarters = await AppraisalQuarter.find(query).sort({ startDate: -1 });
+    const quarters = await AppraisalQuarter.find().sort({ startDate: -1 });
     res.json({ data: quarters });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching quarters' });
@@ -27,7 +19,7 @@ router.get('/', async (req, res) => {
 // 2. CREATE A QUARTER
 router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
-    const { name, year, startDate, endDate, isPublished } = req.body;
+    const { name, year, startDate, endDate } = req.body;
 
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -52,7 +44,7 @@ router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => 
     }
     
     const newQuarter = new AppraisalQuarter({
-      name, year, startDate, endDate, isPublished: isPublished || false, createdBy: req.user.id
+      name, year, startDate, endDate, createdBy: req.user.id
     });
     
     await newQuarter.save();
@@ -68,45 +60,28 @@ router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => 
   }
 });
 
-// 3. EDIT AN UPCOMING QUARTER & SMART BYPASS
+// 3. EDIT AN UPCOMING QUARTER
 router.put('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
-    const { name, year, startDate, endDate, isPublished } = req.body;
+    const { name, year, startDate, endDate } = req.body;
     const quarter = await AppraisalQuarter.findById(req.params.id);
     
     if (!quarter) return res.status(404).json({ message: 'Quarter not found' });
 
-    // 🚨 UPGRADED: Smart bypass for the isPublished toggle.
+    // Enforce "Upcoming Status Only" modification rule
     const start = new Date(quarter.startDate);
     start.setHours(0, 0, 0, 0);
-    const isActiveOrExpired = new Date() >= start;
-
-    if (isActiveOrExpired) {
-      const formatAsInputDate = (d) => new Date(d).toISOString().split('T')[0];
-      
-      // If trying to change core dates/names on an active/expired quarter, block it.
-      if (
-        quarter.name !== name || 
-        quarter.year !== year || 
-        formatAsInputDate(quarter.startDate) !== formatAsInputDate(startDate) || 
-        formatAsInputDate(quarter.endDate) !== formatAsInputDate(endDate)
-      ) {
-        return res.status(403).json({ message: 'Permission Denied: Only Upcoming quarters can have their dates or names modified.' });
-      }
-
-      // If core fields exactly match, it means they are ONLY toggling the publish button. Allow it to bypass the lock.
-      if (isPublished !== undefined) quarter.isPublished = isPublished;
-      await quarter.save();
-      return res.json({ message: 'Quarter publish state updated successfully', data: quarter });
+    if (new Date() >= start) {
+      return res.status(403).json({ message: 'Permission Denied: Only Upcoming quarters can be modified.' });
     }
 
-    // --- Standard Edit Logic for Upcoming Quarters ---
     const newStart = new Date(startDate);
     const newEnd = new Date(endDate);
     if (newStart.getFullYear() !== year || newEnd.getFullYear() !== year) {
       return res.status(400).json({ message: `Dates must fall within the selected fiscal year (${year}).` });
     }
 
+    // 🚨 UPGRADED: Enforce chronological sequence during Edit
     const quarterSequence = ['Q1', 'Q2', 'Q3', 'Q4'];
     const selectedQIndex = quarterSequence.indexOf(name);
     
@@ -132,7 +107,6 @@ router.put('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) =
     quarter.year = year;
     quarter.startDate = startDate;
     quarter.endDate = endDate;
-    if (isPublished !== undefined) quarter.isPublished = isPublished; 
     
     await quarter.save();
 
@@ -160,7 +134,7 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res
       return res.status(403).json({ message: 'Permission Denied: Only Upcoming quarters can be deleted.' });
     }
 
-    // Prevent deleting a quarter if a subsequent one exists
+    // 🚨 UPGRADED: Prevent deleting a quarter if a subsequent one exists (e.g., deleting Q2 when Q3 exists)
     const quarterSequence = ['Q1', 'Q2', 'Q3', 'Q4'];
     const selectedQIndex = quarterSequence.indexOf(quarter.name);
     

@@ -102,9 +102,12 @@ export default function CEOAllAppraisals() {
   const [managerList, setManagerList] = useState([]);
   const [availableOffices, setAvailableOffices] = useState([]);
   
+  const currentYearStr = new Date().getFullYear().toString();
+  
   // Filters
   const [search, setSearch] = useState('');
-  const [filterYear, setFilterYear] = useState(''); 
+  const [filterYear, setFilterYear] = useState(currentYearStr); 
+  const [isManualYear, setIsManualYear] = useState(false);
   const [qtr, setQtr] = useState('');
   const [co, setCo] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -179,12 +182,6 @@ export default function CEOAllAppraisals() {
       const fetchedQuarters = qtrRes.data?.data || [];
       setDbQuarters(fetchedQuarters);
 
-      const activeQ = fetchedQuarters.find(q => new Date(q.endDate) >= new Date() && !q.isLocked);
-      if (activeQ) {
-        setFilterYear(activeQ.year.toString());
-        setQtr(activeQ._id);
-      }
-
       const configData = configRes.data?.data || {};
       setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
 
@@ -198,6 +195,22 @@ export default function CEOAllAppraisals() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // 🚨 FIXED: Quarter strictly defaults to Q1 of the selected year
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+    if (qtrsForSelectedYear.length > 0) {
+      // Find Q1 strictly, or fallback to first available
+      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
+      const defaultQtr = q1 ? q1._id : qtrsForSelectedYear[0]._id;
+      
+      if (!qtr || !qtrsForSelectedYear.some(q => q._id === qtr)) {
+        setQtr(defaultQtr);
+      }
+    } else {
+      setQtr('');
+    }
+  }, [dbQuarters, filterYear]); 
 
   useEffect(() => {
     setCurrentPage(1);
@@ -248,7 +261,7 @@ export default function CEOAllAppraisals() {
     });
   }
 
-  // Filter Logic
+  // 🚨 FIXED: Secure mapping for requested Status Filters
   const filteredData = dataToFilter.filter(a => {
     const emp = a.employeeId?.personalDetails;
     const empName = `${emp?.firstName || ''} ${emp?.lastName || ''}`.toLowerCase();
@@ -269,10 +282,19 @@ export default function CEOAllAppraisals() {
     
     let matchesStatus = true;
     if (statusFilter !== '') {
-      if (statusFilter === 'NOT_SUBMITTED') {
-        matchesStatus = a.workflow?.status === 'DRAFT' || a.workflow?.status === 'NOT_STARTED';
-      } else {
-        matchesStatus = a.workflow?.status === statusFilter;
+      const st = a.workflow?.status;
+      if (statusFilter === 'NOT_STARTED') {
+        matchesStatus = a.isMissing || ['NOT_STARTED'].includes(st);
+      } else if (statusFilter === 'DRAFT') {
+        matchesStatus = ['DRAFT', 'REOPENED'].includes(st);
+      } else if (statusFilter === 'SUBMITTED_TO_HR') {
+        matchesStatus = ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(st);
+      } else if (statusFilter === 'WITH_CEO') {
+        matchesStatus = ['WITH_CEO'].includes(st);
+      } else if (statusFilter === 'APPROVED') {
+        matchesStatus = ['APPROVED'].includes(st);
+      } else if (statusFilter === 'NOT_APPROVED') {
+        matchesStatus = ['NOT_APPROVED'].includes(st);
       }
     }
     
@@ -302,8 +324,18 @@ export default function CEOAllAppraisals() {
     return match ? `${match.name} (${match.year})` : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
   };
 
-  const availableYears = [...new Set(dbQuarters.map(q => q.year))].sort((a, b) => b - a);
   const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+  quartersForSelectedYear.sort((a, b) => a.name.localeCompare(b.name));
+
+  // 🚨 FIXED: Dynamic -3 to +1 Year logic
+  const selectedYearNum = parseInt(filterYear) || new Date().getFullYear();
+  const yearOptions = [
+    selectedYearNum - 3,
+    selectedYearNum - 2,
+    selectedYearNum - 1,
+    selectedYearNum,
+    selectedYearNum + 1
+  ];
 
   const iprfStyle = (f) => {
     if (f >= 1.3) return 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]';
@@ -319,22 +351,27 @@ export default function CEOAllAppraisals() {
     return 'LS'; 
   };
 
+  // 🚨 FIXED: Component strictly aligned to the exact requested status filters
   const StatusTag = ({ st }) => {
     if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
     switch(st) {
-      case 'NOT_STARTED': return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">NOT STARTED</span>;
-      case 'APPROVED': 
-        return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
-      case 'WITH_CEO': 
-        return <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FDE68A] whitespace-nowrap">Pending CEO</span>;
-      case 'NOT_APPROVED': 
-        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Not Approved</span>;
+      case 'NOT_STARTED': 
+        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Not started</span>;
+      case 'DRAFT':
+      case 'REOPENED':
+        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">Saved in Draft</span>;
+      case 'SUBMITTED':
       case 'APPROVED_BY_HR': 
       case 'UNDER_HR_REVIEW':
-      case 'SUBMITTED':
-        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">At HR</span>;
+        return <span className="bg-[#DBEAFE] text-[#1E40AF] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#BFDBFE] whitespace-nowrap">Submitted to HR</span>;
+      case 'WITH_CEO': 
+        return <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FDE68A] whitespace-nowrap">With CEO</span>;
+      case 'APPROVED': 
+        return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
+      case 'NOT_APPROVED': 
+        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Rejected by CEO</span>;
       default: 
-        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">Draft</span>;
+        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
     }
   };
 
@@ -366,8 +403,14 @@ export default function CEOAllAppraisals() {
         awardDisplay = `"${a.stipAward}%"`;
       }
       
-      let statusText = a.workflow?.status || 'UNKNOWN';
-      if (a.isMissing) statusText = 'NOT_STARTED';
+      let statusRaw = a.workflow?.status;
+      let statusText = 'UNKNOWN';
+      if (a.isMissing || ['NOT_STARTED'].includes(statusRaw)) statusText = 'Not started';
+      else if (['DRAFT', 'REOPENED'].includes(statusRaw)) statusText = 'Saved in Draft';
+      else if (['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(statusRaw)) statusText = 'Submitted to HR';
+      else if (statusRaw === 'WITH_CEO') statusText = 'With CEO/ Pending to CEO';
+      else if (statusRaw === 'APPROVED') statusText = 'CEO Approved';
+      else if (statusRaw === 'NOT_APPROVED') statusText = 'Rejected by CEO/ Not Approve by CEO';
       const status = `"${statusText}"`;
       
       const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
@@ -442,6 +485,78 @@ export default function CEOAllAppraisals() {
           <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
         </div>
         
+        <div className="flex gap-[6px]">
+          {/* 1. Year Filter with Manual Custom Entry Mode */}
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                  setQtr(''); 
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                    setQtr(''); 
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else handleYearChange(e);
+              }} 
+              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px]"
+            >
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
+
+          {/* 2. Quarter Filter */}
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear || quartersForSelectedYear.length === 0}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[130px] ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* 3. Appraisal Status */}
+        <SearchableDropdown 
+          value={statusFilter}
+          onChange={setStatusFilter}
+          placeholder="Appraisal Status"
+          widthClass="w-[200px]"
+          options={[
+            { value: 'SUBMITTED_TO_HR', label: 'Submitted to HR' },
+            { value: 'WITH_CEO', label: 'With CEO/ Pending to CEO' },
+            { value: 'APPROVED', label: 'CEO Approved' },
+            { value: 'NOT_STARTED', label: 'Not started' },
+            { value: 'NOT_APPROVED', label: 'Rejected by CEO/ Not Approve by CEO' },
+            { value: 'DRAFT', label: 'Saved in Draft' },
+          ]}
+        />
+
+        {/* 4. All Office Locations */}
         <SearchableDropdown 
           value={officeFilter}
           onChange={setOfficeFilter}
@@ -450,48 +565,16 @@ export default function CEOAllAppraisals() {
           options={availableOffices.map(o => ({ value: o, label: o }))}
         />
 
+        {/* 5. All Line Managers */}
         <SearchableDropdown 
           value={mgrFilter}
           onChange={setMgrFilter}
-          placeholder="All Managers"
-          widthClass="w-[200px]"
+          placeholder="All Line Managers"
+          widthClass="w-[190px]"
           options={managerList.map(m => ({ value: m.id, label: m.name }))}
         />
         
-        <div className="flex gap-[6px]">
-          <select value={filterYear} onChange={handleYearChange} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[100px]">
-            <option value="">All Years</option>
-            {availableYears.map(y => (
-               <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-
-          <select 
-            value={qtr} 
-            onChange={e => setQtr(e.target.value)} 
-            disabled={!filterYear}
-            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
-          >
-            <option value="">All Quarters</option>
-            {quartersForSelectedYear.map(q => (
-               <option key={q._id} value={q._id}>{q.name}</option>
-            ))}
-          </select>
-        </div>
-
-        <SearchableDropdown 
-          value={statusFilter}
-          onChange={setStatusFilter}
-          placeholder="Appraisal Status"
-          widthClass="w-[180px]"
-          options={[
-            { value: 'WITH_CEO', label: 'Pending CEO' },
-            { value: 'APPROVED', label: 'CEO Approved' },
-            { value: 'NOT_APPROVED', label: 'Not Approved' },
-            { value: 'NOT_SUBMITTED', label: 'Not Submitted (Missing)' },
-          ]}
-        />
-        
+        {/* 6. All Company */}
         <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
           <option value="">All Company</option>
           {companyCodes.map(code => (

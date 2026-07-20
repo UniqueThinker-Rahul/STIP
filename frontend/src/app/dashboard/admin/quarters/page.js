@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Plus, Check, AlertTriangle, Loader2, ShieldAlert, History, FileX, Edit, Trash2 } from 'lucide-react';
 import api from '../../../../lib/api';
 
-// 🚨 UPGRADED: Strict Date Formatter to permanently enforce dd/mm/yy
 const formatDate = (dateInput) => {
   if (!dateInput) return 'N/A';
   const d = new Date(dateInput);
@@ -22,20 +21,21 @@ export default function QuarterManagement() {
   const [currentUser, setCurrentUser] = useState(null);
   const [toast, setToast] = useState({ show: false, message: '', isError: false });
 
-  // 🚨 UPGRADED: Added editing state
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     year: new Date().getFullYear(),
     startDate: '',
-    endDate: ''
+    endDate: '',
+    isPublished: false 
   });
 
   const loadSystemData = async () => {
     try {
       setLoading(true);
       const [quarterRes, userRes] = await Promise.all([
-        api.get('/quarters'),
+        // 🚨 FIXED: Using Axios params object to ensure the backend receives the flag
+        api.get('/quarters', { params: { all: true } }), 
         api.get('/auth/me') 
       ]);
       
@@ -66,7 +66,6 @@ export default function QuarterManagement() {
     currentUser.security?.role === 'HR_ADMIN' || currentUser.security?.secondaryRoles?.includes('HR_ADMIN')
   );
 
-  // 🚨 UPGRADED: Unified Submit Handler for both Create and Update
   const handleSubmitQuarter = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.startDate || !formData.endDate) {
@@ -82,7 +81,6 @@ export default function QuarterManagement() {
       return showToast(`Date Error: Start and End dates must fall exactly within the selected fiscal year (${formData.year}).`, true);
     }
 
-    // Check duplicates ignoring the currently editing record
     const isDuplicateName = quarters.some(q => q._id !== editingId && q.name === formData.name && q.year === formData.year);
     if (isDuplicateName) return showToast(`Error: ${formData.name} has already been configured for the year ${formData.year}.`, true);
 
@@ -131,21 +129,21 @@ export default function QuarterManagement() {
     }
   };
 
-  // 🚨 UPGRADED: Delete and Edit Action Handlers
   const initiateEdit = (q) => {
     const formatAsInputDate = (dateString) => new Date(dateString).toISOString().split('T')[0];
     setFormData({
       name: q.name,
       year: q.year,
       startDate: formatAsInputDate(q.startDate),
-      endDate: formatAsInputDate(q.endDate)
+      endDate: formatAsInputDate(q.endDate),
+      isPublished: q.isPublished || false 
     });
     setEditingId(q._id);
   };
 
   const handleCancelEdit = () => {
     setEditingId(null);
-    setFormData({ name: '', year: new Date().getFullYear(), startDate: '', endDate: '' });
+    setFormData({ name: '', year: new Date().getFullYear(), startDate: '', endDate: '', isPublished: false });
   };
 
   const handleDeleteQuarter = async (id, name) => {
@@ -171,6 +169,29 @@ export default function QuarterManagement() {
       loadSystemData();
     } catch (error) {
       showToast('Unauthorized execution attempt or interface error.', true);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTogglePublish = async (q) => {
+    try {
+      setActionLoading(true);
+      
+      const formatAsInputDate = (dateString) => new Date(dateString).toISOString().split('T')[0];
+      
+      await api.put(`/quarters/${q._id}`, { 
+        name: q.name, 
+        year: q.year, 
+        startDate: formatAsInputDate(q.startDate), 
+        endDate: formatAsInputDate(q.endDate), 
+        isPublished: !q.isPublished 
+      });
+      showToast(`${q.name} is now ${!q.isPublished ? 'published & visible to staff' : 'hidden from staff'}.`);
+      loadSystemData();
+    } catch (error) {
+      console.error(error);
+      showToast(error.response?.data?.message || 'Failed to toggle publish status.', true);
     } finally {
       setActionLoading(false);
     }
@@ -313,7 +334,21 @@ export default function QuarterManagement() {
                 value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} />
             </div>
             
-            <div className="flex gap-2">
+            <div className="flex items-center justify-between pt-2">
+              <div>
+                <label className="block text-[10px] font-bold text-[#0D2B55] uppercase">Publish Quarter</label>
+                <div className="text-[10px] text-gray-500 font-medium">Make visible to staff</div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setFormData({...formData, isPublished: !formData.isPublished})} 
+                className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus:outline-none ${formData.isPublished ? 'bg-emerald-500' : 'bg-gray-300'}`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm ${formData.isPublished ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            
+            <div className="flex gap-2 pt-2">
               {editingId && (
                 <button type="button" onClick={handleCancelEdit} disabled={actionLoading} className="w-1/3 py-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
                   Cancel
@@ -334,19 +369,20 @@ export default function QuarterManagement() {
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[650px]">
+            <table className="w-full text-left border-collapse min-w-[700px]">
               <thead>
                 <tr className="border-b border-gray-200 text-[10px] font-bold text-gray-400 bg-white uppercase tracking-wider">
                   <th className="p-4">Tracking Window</th>
                   <th className="p-4">Schedule</th>
                   <th className="p-4 text-center">Status</th>
                   <th className="p-4 text-center" title="Override system lock to allow late submissions">Late Exceptions</th>
+                  <th className="p-4 text-center" title="Toggle visibility for staff">Published</th>
                   <th className="p-4 text-center">Actions & Exports</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
                 {quarters.length === 0 ? (
-                  <tr><td colSpan="5" className="p-8 text-center text-gray-400 font-medium">No appraisal quarter windows initialized.</td></tr>
+                  <tr><td colSpan="6" className="p-8 text-center text-gray-400 font-medium">No appraisal quarter windows initialized.</td></tr>
                 ) : (
                   quarters.map(q => {
                     const now = new Date();
@@ -384,6 +420,13 @@ export default function QuarterManagement() {
                               <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${q.forceUnlock ? 'translate-x-5' : 'translate-x-0.5'}`} />
                             </button>
                             {!canOverrideDate && <span className="text-[8px] text-gray-400 uppercase font-bold tracking-wider">ICT/HR Only</span>}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-col items-center justify-center gap-1">
+                            <button disabled={actionLoading || !canCreateQuarter} onClick={() => handleTogglePublish(q)} className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus:outline-none ${q.isPublished ? 'bg-emerald-500' : 'bg-gray-200'} ${!canCreateQuarter ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm ${q.isPublished ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                            </button>
                           </div>
                         </td>
                         <td className="p-4">

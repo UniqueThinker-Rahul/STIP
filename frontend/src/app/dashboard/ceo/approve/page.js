@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calculator, ChevronDown, ChevronUp, Info, AlertTriangle, Clock, Check, Eye } from 'lucide-react';
+import { Calculator, ChevronDown, ChevronUp, Info, AlertTriangle, Clock, Check, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
 import api from '../../../../lib/api';
 
@@ -20,6 +20,7 @@ export default function CEOApproveAppraisals() {
   const router = useRouter();
   
   const [appraisals, setAppraisals] = useState([]);
+  const [dbQuarters, setDbQuarters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cpPct, setCpPct] = useState(null);
   
@@ -28,22 +29,39 @@ export default function CEOApproveAppraisals() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   
-  // 🚨 NEW: Dedicated State for the Appraisal Details Popup Modal
   const [detailsModal, setDetailsModal] = useState({ show: false, data: null });
   const [showAllComments, setShowAllComments] = useState(false);
+
+  // 🚨 NEW: Filter & Pagination States
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [filterYear, setFilterYear] = useState(currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false); // 🚨 NEW: State for manual year entry
+  const [qtr, setQtr] = useState('');
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const fetchData = async () => {
     try {
       setLoading(true);
       
-      const metricsRes = await api.get('/company-metrics/2026').catch(() => ({ data: { data: null } }));
+      const [metricsRes, appRes, qtrRes] = await Promise.all([
+        api.get(`/company-metrics/${currentYearStr}`).catch(() => ({ data: { data: null } })),
+        api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+        api.get('/quarters').catch(() => ({ data: { data: [] } }))
+      ]);
+
       if (metricsRes.data?.data?.cpPct) {
         setCpPct(metricsRes.data.data.cpPct);
       }
 
-      const appRes = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
+      const fetchedQuarters = qtrRes.data?.data || [];
+      setDbQuarters(fetchedQuarters);
+
       const allApps = appRes.data?.data || [];
-      
       const pendingCeo = allApps.filter(a => a.workflow?.status === 'WITH_CEO');
       
       pendingCeo.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
@@ -60,6 +78,22 @@ export default function CEOApproveAppraisals() {
     fetchData();
   }, []);
 
+  // 🚨 NEW: Automatically sync and default to Q1 of the selected year
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+    if (qtrsForSelectedYear.length > 0) {
+      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
+      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+    } else {
+      setQtr('');
+    }
+  }, [dbQuarters, filterYear]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterYear, qtr]);
+
   const openActionModal = (e, type, id, name) => {
     e.stopPropagation(); 
     setActionModal({ show: true, type, id, name });
@@ -67,11 +101,10 @@ export default function CEOApproveAppraisals() {
     setSuccessMsg('');
   };
 
-  // 🚨 NEW: Trigger the details popup modal
   const openDetailsModal = (e, appraisal) => {
     e.stopPropagation();
     setDetailsModal({ show: true, data: appraisal });
-    setShowAllComments(false); // Reset comments view
+    setShowAllComments(false); 
   };
 
   const closeDetailsModal = () => {
@@ -160,19 +193,111 @@ export default function CEOApproveAppraisals() {
     return blocks;
   };
 
+  // 🚨 NEW: Filter Data Logic
+  const filteredData = appraisals.filter(a => {
+    const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+    const appYear = a.reviewYear || a.appraisalQuarter?.year;
+    
+    const matchesQtr = qtr === '' || appQuarterId === qtr;
+    const matchesYear = filterYear === '' || (appYear && appYear.toString() === filterYear) || matchesQtr;
+    
+    return matchesYear && matchesQtr;
+  });
+
+  // 🚨 NEW: Pagination Logic
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
+
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
+
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+
   return (
     <div className="w-full max-w-full pb-[60px] font-sans">
       
-      <div className="mb-[20px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">
-          &#10003; Approve Appraisals
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">
+            &#10003; Approve Appraisals
+          </div>
+          <div className="text-[13px] text-[#6b7280]">
+            Appraisals submitted by HR Manager &mdash; awaiting CEO decision. Click the eye icon or profile to view full details.
+          </div>
         </div>
-        <div className="text-[13px] text-[#6b7280]">
-          Appraisals submitted by HR Manager &mdash; awaiting CEO decision. Click the eye icon or profile to view full details.
+
+        {/* 🚨 NEW: Filter Controls (Year and Quarter) */}
+        <div className="flex gap-[8px]">
+          {/* 1. Year Filter with Manual Custom Entry Mode */}
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else setFilterYear(e.target.value);
+              }} 
+              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px] shadow-sm"
+            >
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
+
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear || quartersForSelectedYear.length === 0}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] shadow-sm ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm">
+      <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[800px]">
             <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.06em]">
@@ -194,7 +319,7 @@ export default function CEOApproveAppraisals() {
                     Loading CEO Queue...
                   </td>
                 </tr>
-              ) : appraisals.length === 0 ? (
+              ) : filteredData.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="p-[48px] text-center text-[#6b7280]">
                     <div className="text-[36px] mb-[12px] opacity-70">&#128203;</div>
@@ -203,7 +328,7 @@ export default function CEOApproveAppraisals() {
                   </td>
                 </tr>
               ) : (
-                appraisals.map((a, i) => {
+                currentItems.map((a, i) => {
                   const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`.trim();
                   const init1 = a.employeeId?.personalDetails?.firstName?.[0] || '';
                   const init2 = a.employeeId?.personalDetails?.lastName?.[0] || '';
@@ -294,6 +419,52 @@ export default function CEOApproveAppraisals() {
             </tbody>
           </table>
         </div>
+        
+        {/* 🚨 NEW: Table Pagination Footer */}
+        {filteredData.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filteredData.length)}</span> of <span className="text-[#0f1923]">{filteredData.length}</span> entries
+            </div>
+            
+            <div className="flex items-center gap-[4px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-[16px] p-[14px_16px] bg-[#DBEAFE] border border-[#BFDBFE] rounded-[14px] text-[12px] text-[#1E40AF] leading-[1.6]">

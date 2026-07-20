@@ -17,10 +17,6 @@ const appraisalQuarterSchema = new mongoose.Schema({
     type: Date, 
     required: true 
   },
-  isPublished: { 
-    type: Boolean, 
-    default: false 
-  }, // 🚨 NEW: Added publish state to the database schema
   isLocked: { 
     type: Boolean, 
     default: false 
