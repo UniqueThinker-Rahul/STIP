@@ -196,11 +196,9 @@ export default function CEOAllAppraisals() {
     fetchData();
   }, []);
 
-  // 🚨 FIXED: Quarter strictly defaults to Q1 of the selected year
   useEffect(() => {
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
     if (qtrsForSelectedYear.length > 0) {
-      // Find Q1 strictly, or fallback to first available
       const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
       const defaultQtr = q1 ? q1._id : qtrsForSelectedYear[0]._id;
       
@@ -261,7 +259,6 @@ export default function CEOAllAppraisals() {
     });
   }
 
-  // 🚨 FIXED: Secure mapping for requested Status Filters
   const filteredData = dataToFilter.filter(a => {
     const emp = a.employeeId?.personalDetails;
     const empName = `${emp?.firstName || ''} ${emp?.lastName || ''}`.toLowerCase();
@@ -295,12 +292,15 @@ export default function CEOAllAppraisals() {
         matchesStatus = ['APPROVED'].includes(st);
       } else if (statusFilter === 'NOT_APPROVED') {
         matchesStatus = ['NOT_APPROVED'].includes(st);
+      } else if (statusFilter === 'ACKNOWLEDGED') {
+        // 🚨 UPGRADE: Added logical condition to filter for ACKNOWLEDGED status
+        matchesStatus = ['ACKNOWLEDGED'].includes(st);
       }
     }
     
     return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
   }).sort((a, b) => {
-    const ceoStatuses = ['WITH_CEO', 'APPROVED'];
+    const ceoStatuses = ['WITH_CEO', 'APPROVED', 'ACKNOWLEDGED'];
     const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
     const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
 
@@ -327,7 +327,6 @@ export default function CEOAllAppraisals() {
   const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
   quartersForSelectedYear.sort((a, b) => a.name.localeCompare(b.name));
 
-  // 🚨 FIXED: Dynamic -3 to +1 Year logic
   const selectedYearNum = parseInt(filterYear) || new Date().getFullYear();
   const yearOptions = [
     selectedYearNum - 3,
@@ -351,7 +350,6 @@ export default function CEOAllAppraisals() {
     return 'LS'; 
   };
 
-  // 🚨 FIXED: Component strictly aligned to the exact requested status filters
   const StatusTag = ({ st }) => {
     if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
     switch(st) {
@@ -370,6 +368,9 @@ export default function CEOAllAppraisals() {
         return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
       case 'NOT_APPROVED': 
         return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Rejected by CEO</span>;
+      // 🚨 UPGRADE: Explicit handling of the ACKNOWLEDGED status badge
+      case 'ACKNOWLEDGED':
+        return <span className="bg-[#F0FDF4] text-[#15803D] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[800] border border-[#BBF7D0] whitespace-nowrap flex items-center gap-[4px]"><span className="text-[10px]">✓</span> Acknowledged</span>;
       default: 
         return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
     }
@@ -411,6 +412,8 @@ export default function CEOAllAppraisals() {
       else if (statusRaw === 'WITH_CEO') statusText = 'With CEO/ Pending to CEO';
       else if (statusRaw === 'APPROVED') statusText = 'CEO Approved';
       else if (statusRaw === 'NOT_APPROVED') statusText = 'Rejected by CEO/ Not Approve by CEO';
+      // 🚨 UPGRADE: Added CSV Export mapping for Acknowledged status
+      else if (statusRaw === 'ACKNOWLEDGED') statusText = 'Emp. Acknowledged';
       const status = `"${statusText}"`;
       
       const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
@@ -486,7 +489,6 @@ export default function CEOAllAppraisals() {
         </div>
         
         <div className="flex gap-[6px]">
-          {/* 1. Year Filter with Manual Custom Entry Mode */}
           {isManualYear ? (
             <input 
               type="number" 
@@ -526,7 +528,6 @@ export default function CEOAllAppraisals() {
             </select>
           )}
 
-          {/* 2. Quarter Filter */}
           <select 
             value={qtr} 
             onChange={e => setQtr(e.target.value)} 
@@ -550,6 +551,8 @@ export default function CEOAllAppraisals() {
             { value: 'SUBMITTED_TO_HR', label: 'Submitted to HR' },
             { value: 'WITH_CEO', label: 'With CEO/ Pending to CEO' },
             { value: 'APPROVED', label: 'CEO Approved' },
+            // 🚨 UPGRADE: Added Acknowledged option to the filter list
+            { value: 'ACKNOWLEDGED', label: 'Emp. Acknowledged' },
             { value: 'NOT_STARTED', label: 'Not started' },
             { value: 'NOT_APPROVED', label: 'Rejected by CEO/ Not Approve by CEO' },
             { value: 'DRAFT', label: 'Saved in Draft' },
@@ -674,7 +677,7 @@ export default function CEOAllAppraisals() {
                             {iprf.toFixed(1)} ({iprfLabel(iprf)})
                           </span>
                         ) : (
-                          <span className="text-[11px] font-[800] text-[#6b7280]">—</span>
+                          <span className="text-[11px] font-[800] text-[#6b7280">—</span>
                         )}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center font-[600] text-[#0D2B55]">

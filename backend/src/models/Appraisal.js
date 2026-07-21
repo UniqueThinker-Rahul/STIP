@@ -16,7 +16,8 @@ const appraisalSchema = new mongoose.Schema({
   workflow: {
     status: { 
       type: String, 
-      enum: ['DRAFT', 'SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED', 'REOPENED', 'NOT_APPROVED'],
+      // 🚨 UPGRADE: Added 'ACKNOWLEDGED' to the enum array to prevent MongoDB validation crashes
+      enum: ['DRAFT', 'SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED', 'REOPENED', 'NOT_APPROVED', 'ACKNOWLEDGED'],
       default: 'DRAFT'
     },
     lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
@@ -43,7 +44,10 @@ const appraisalSchema = new mongoose.Schema({
     ceoComments: { type: String, default: '' }
   },
 
-  stipAward: { type: Number, default: 0 }
+  stipAward: { type: Number, default: 0 },
+
+  // 🚨 UPGRADE: Added acknowledgedAt field to store the timestamp
+  acknowledgedAt: { type: Date }
   
 }, { timestamps: true });
 

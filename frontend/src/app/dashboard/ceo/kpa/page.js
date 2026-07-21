@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 import StipCategoryChart from '../../../../components/charts/StipCategoryChart';
 
+// 🚨 FIXED: Synchronized the exact Weights and Max Points from the official Excel logic
 const KPAS = [
-  { name: 'Financial Resilience', wt: 14, color: '#3B82F6' },
-  { name: 'Operational Effectiveness', wt: 45, color: '#059669' },
-  { name: 'Human Capital', wt: 26, color: '#F59E0B' },
-  { name: 'Safety & Environment', wt: 12, color: '#10B981' },
-  { name: 'Reputational Capital', wt: 3, color: '#8B5CF6' }
+  { name: 'Financial Resilience', wt: 13.5, maxPoints: 120, color: '#3B82F6' },
+  { name: 'Operational Effectiveness', wt: 45.1, maxPoints: 400, color: '#059669' },
+  { name: 'Human Capital', wt: 25.9, maxPoints: 230, color: '#F59E0B' },
+  { name: 'Safety & Environment', wt: 12.4, maxPoints: 110, color: '#10B981' },
+  { name: 'Reputational Capital', wt: 3.0, maxPoints: 27, color: '#8B5CF6' }
 ];
 
 export default function KPAScorecard() {
@@ -30,39 +31,35 @@ export default function KPAScorecard() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedQuarter, setSelectedQuarter] = useState('');
 
-  // Dynamic state to store ONLY the quarters actively created by HR in the DB
   const [availableQuarters, setAvailableQuarters] = useState([]);
 
-  // Live clock tick
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // 🚨 FIXED: Fetch master quarters directly from the official HR '/quarters' endpoint
   useEffect(() => {
     const fetchDynamicQuarters = async () => {
       setLoading(true);
       try {
-        const res = await api.get('/quarters').catch(() => ({ data: { data: [] } }));
+        // 🚨 ADDED: Pass the ?all=true flag so Admin can see ALL quarters (published and unpublished)
+        const res = await api.get('/quarters?all=true').catch(() => ({ data: { data: [] } }));
         const allQuarters = res.data?.data || [];
         
-        // Filter by currently selected year
         const yearData = allQuarters.filter(q => q.year === selectedYear);
         
         if (yearData.length > 0) {
           const mapped = yearData.map(q => {
             const valMatch = q.name.match(/Q([1-4])/i);
             const val = valMatch ? parseInt(valMatch[1]) : 1;
-            return { val, label: `Q${val}` };
+            return { val, label: `Q${val}`, isPublished: q.isPublished || false }; 
           });
 
-          // Deduplicate the quarters safely
           const uniqueQuarters = [];
           const map = new Map();
           for (const item of mapped) {
               if(!map.has(item.val)){
-                  map.set(item.val, true);
+                  map.set(item.val, item);
                   uniqueQuarters.push(item);
               }
           }
@@ -70,7 +67,6 @@ export default function KPAScorecard() {
           
           setAvailableQuarters(uniqueQuarters);
           
-          // Auto-select the latest valid quarter if the current one isn't in the list
           setSelectedQuarter((prevQ) => {
              if (!uniqueQuarters.some(m => m.val === prevQ)) {
                return uniqueQuarters[uniqueQuarters.length - 1].val;
@@ -90,7 +86,6 @@ export default function KPAScorecard() {
     fetchDynamicQuarters();
   }, [selectedYear]);
 
-  // Fetch KPA Matrix Data and Cross-Check Locks
   useEffect(() => {
     const fetchData = async () => {
       if (!selectedQuarter || availableQuarters.length === 0) {
@@ -103,7 +98,6 @@ export default function KPAScorecard() {
         setLoading(true);
         const targetMonth = selectedQuarter * 3;
         
-        // Fetch from both databases to ensure sync
         const [metricsRes, qtrRes] = await Promise.all([
            api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } })),
            api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } }))
@@ -112,7 +106,6 @@ export default function KPAScorecard() {
         const metrics = metricsRes.data?.data;
         const qtrMatch = (qtrRes.data?.data || []).find(d => d.quarter === `Q${selectedQuarter}`);
         
-        // Cross-page lock check. Locks if EITHER database marks it locked.
         const isMLocked = metrics?.locked || false;
         const isQLocked = qtrMatch?.locked || false;
 
@@ -132,7 +125,6 @@ export default function KPAScorecard() {
         }
 
         if (metrics) {
-          // 🚨 FIXED: Strict 2 Decimal limitation on fetch
           const format2Dec = (v) => v !== null && v !== undefined && v !== '' ? Number(parseFloat(v).toFixed(2)) : null;
           setKpaActuals([
             format2Dec(metrics.financialResilience),
@@ -156,12 +148,10 @@ export default function KPAScorecard() {
   const isCurrentYear = selectedYear === currentTime.getFullYear();
   const isEntryDisabled = locked || !isCurrentYear || availableQuarters.length === 0;
 
-  // 🚨 FIXED: Enforce strict 2-decimal formatting directly on input
   const handleInput = (idx, val) => {
     if (isEntryDisabled) return;
     const v = val === '' ? null : Math.min(100, Math.max(0, parseFloat(val) || 0));
     const newArr = [...kpaActuals];
-    // Rounds mathematically to exactly 2 decimal places to prevent infinite decimals
     newArr[idx] = v !== null ? Math.round(v * 100) / 100 : null;
     setKpaActuals(newArr);
   };
@@ -176,16 +166,19 @@ export default function KPAScorecard() {
 
   let bscRaw = null;
   let cpPct = null;
+  let tierPct = null;
   const anyKpaEntered = kpaActuals.some(v => v !== null);
   
   if (anyKpaEntered) {
-    bscRaw = kpaActuals.reduce((sum, val, idx) => sum + ((val || 0) * (KPAS[idx].wt / 100)), 0);
-    cpPct = bscRaw * 0.15;
-  }
+    bscRaw = kpaActuals.reduce((sum, val, idx) => sum + (((val || 0) / 100) * KPAS[idx].maxPoints), 0);
+    cpPct = bscRaw / 100;
 
-  const awNIf = cpPct ? `CP% × 0.7 × Pro-Rata` : 'CP% × 0.7 × Pro-Rata';
-  const awEf = cpPct ? `CP% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
-  const awEPf = cpPct ? `CP% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
+    const currentMaxCp = 8.87;
+    if (cpPct >= currentMaxCp) tierPct = 15;
+    else if (cpPct >= currentMaxCp * 0.8) tierPct = 10;
+    else if (cpPct >= currentMaxCp * 0.48) tierPct = 5;
+    else tierPct = 0;
+  }
 
   const handleSave = async () => {
     if (!isCurrentYear) {
@@ -203,7 +196,7 @@ export default function KPAScorecard() {
         safetyEnvironment: kpaActuals[3],
         reputationalCapital: kpaActuals[4],
         bscRawScore: bscRaw,
-        cpPct: cpPct,
+        cpPct: cpPct, // Saved securely out of 8.87 to map with the Quarterly Scorecard logic
         locked: false
       };
       
@@ -254,7 +247,6 @@ export default function KPAScorecard() {
       
       await api.post('/company-metrics', payload);
       
-      // Sync lock to Quarterly Scorecard DB too
       await api.post(`/quarterly-scorecards/${selectedYear}/Q${selectedQuarter}`, {
          locked: true
       }).catch(err => console.log('Silent fallback if Quarterly Scorecard not yet initialized', err));
@@ -264,7 +256,7 @@ export default function KPAScorecard() {
         show: true,
         icon: '🔒',
         title: 'Scorecard Locked',
-        detail: `CP for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear} has been permanently set to ${cpPct.toFixed(2)}%. The scorecard is now read-only.`
+        detail: `CP for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear} has been permanently set to ${cpPct.toFixed(2)}. The scorecard is now read-only.`
       });
     } catch (error) {
       alert("Failed to lock the scorecard.");
@@ -275,6 +267,7 @@ export default function KPAScorecard() {
 
   const currentY = currentTime.getFullYear();
   const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
+  const activeQObj = availableQuarters.find(q => q.val === selectedQuarter);
 
   if (loading && availableQuarters.length === 0) return <div className="p-10 text-center text-slate-500 animate-pulse font-medium">Loading Scorecard Data...</div>;
 
@@ -308,8 +301,11 @@ export default function KPAScorecard() {
                disabled={availableQuarters.length === 0}
              >
                 {availableQuarters.length === 0 && <option value="">No Quarters Created</option>}
+                {/* 🚨 ADDED: Displays (Unpublished) tag dynamically inside the dropdown options */}
                 {availableQuarters.map(q => (
-                   <option key={q.val} value={q.val}>{q.label}</option>
+                   <option key={q.val} value={q.val}>
+                     {q.label} {!q.isPublished ? '(Unpublished)' : ''}
+                   </option>
                 ))}
              </select>
              <select 
@@ -321,6 +317,13 @@ export default function KPAScorecard() {
                    <option key={y} value={y}>{y}</option>
                 ))}
              </select>
+
+             {/* Dynamic Publish Status Badge */}
+             {activeQObj && (
+                <span className={`ml-[2px] px-[8px] py-[4px] rounded-[4px] text-[10px] font-[800] uppercase tracking-wider border ${activeQObj.isPublished ? 'bg-[#D1FAE5] text-[#065F46] border-[#A7F3D0]' : 'bg-[#F1F5F9] text-[#64748B] border-[#E2E8F0]'}`}>
+                  {activeQObj.isPublished ? 'Published' : 'Unpublished'}
+                </span>
+             )}
           </div>
 
           <button 
@@ -429,7 +432,7 @@ export default function KPAScorecard() {
               <span className="flex-1 text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.07em]">KPA Area</span>
               <span className="w-[80px] text-[10px] font-[800] text-[#1E40AF] uppercase tracking-[.07em] text-center">Weight</span>
               <span className="w-[120px] text-[10px] font-[800] text-[#0D2B55] uppercase tracking-[.07em] text-center pl-[10px]">Actual %</span>
-              <span className="w-[120px] text-[10px] font-[800] text-[#059669] uppercase tracking-[.07em] text-center">Contribution</span>
+              <span className="w-[120px] text-[10px] font-[800] text-[#059669] uppercase tracking-[.07em] text-center">Pts Earned</span>
             </div>
             
             {/* Rows */}
@@ -455,7 +458,7 @@ export default function KPAScorecard() {
                     />
                   </div>
                   <div className="w-[120px] text-center text-[15px] font-[800] text-[#059669]">
-                    {kpaActuals[i] !== null ? ((kpaActuals[i] / 100) * k.wt).toFixed(2) : ' — '}
+                    {kpaActuals[i] !== null ? (((kpaActuals[i] / 100) * k.maxPoints).toFixed(1)) : ' — '}
                   </div>
                 </div>
               ))}
@@ -464,23 +467,23 @@ export default function KPAScorecard() {
             {/* Total Strip */}
             <div className="mt-[24px] bg-[#FAF8F4] border-[1.5px] border-[#E2DDD4] rounded-[12px] p-[16px] flex flex-col md:flex-row justify-between items-center gap-[16px]">
               <div>
-                <div className="text-[12px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">BSC Raw Score &rarr; Final CP%</div>
+                <div className="text-[12px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">BSC Raw Score &rarr; Final CP</div>
                 <div className="text-[24px] font-[800] text-[#0D2B55] leading-none mb-[6px]">
-                  {cpPct !== null ? `${bscRaw.toFixed(2)} / 100 → ${cpPct.toFixed(2)}%` : '—'}
+                  {cpPct !== null ? `${bscRaw.toFixed(1)} / 887 → ${cpPct.toFixed(2)}` : '—'}
                 </div>
-                <div className="text-[11px] text-[#6b7280]">Enter all 5 KPA scores to calculate &middot; Max cap: 15%</div>
+                <div className="text-[11px] text-[#6b7280]">Enter all 5 KPA scores to calculate &middot; Max CP cap: 8.87</div>
               </div>
               <div className="flex gap-[6px]">
                 <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">
-                  <div className="text-[14px] font-[800] text-[#92400E] leading-none mb-[4px]">{cpPct !== null ? (cpPct * 0.7).toFixed(2) + '%' : '—'}</div>
+                  <div className="text-[14px] font-[800] text-[#92400E] leading-none mb-[4px]">{tierPct !== null ? (tierPct * 0.7).toFixed(2) + '%' : '—'}</div>
                   <div className="text-[9px] font-[800] text-[#6b7280] uppercase tracking-wider">NI Award</div>
                 </div>
                 <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">
-                  <div className="text-[14px] font-[800] text-[#065F46] leading-none mb-[4px]">{cpPct !== null ? cpPct.toFixed(2) + '%' : '—'}</div>
+                  <div className="text-[14px] font-[800] text-[#065F46] leading-none mb-[4px]">{tierPct !== null ? tierPct.toFixed(2) + '%' : '—'}</div>
                   <div className="text-[9px] font-[800] text-[#6b7280] uppercase tracking-wider">E Award</div>
                 </div>
                 <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">
-                  <div className="text-[14px] font-[800] text-[#1E40AF] leading-none mb-[4px]">{cpPct !== null ? (cpPct * 1.3).toFixed(2) + '%' : '—'}</div>
+                  <div className="text-[14px] font-[800] text-[#1E40AF] leading-none mb-[4px]">{tierPct !== null ? (tierPct * 1.3).toFixed(2) + '%' : '—'}</div>
                   <div className="text-[9px] font-[800] text-[#6b7280] uppercase tracking-wider">EP Award</div>
                 </div>
               </div>
@@ -495,12 +498,12 @@ export default function KPAScorecard() {
           <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
             <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
               <div className="w-[30px] h-[30px] rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[14px]">&#129518;</div>
-              <div className="text-[14px] font-[800] text-[#0D2B55]">CP% Formula</div>
+              <div className="text-[14px] font-[800] text-[#0D2B55]">CP Formula</div>
             </div>
             <div className="p-[16px]">
               <div className="bg-[#0D2B55] rounded-[9px] p-[12px_14px] font-mono text-[12px] text-[#e8c96a] leading-[1.8] mb-[16px]">
-                BSC = &Sigma;(Actual &divide; 100 &times; Weight)<br/>
-                <span className="text-white/40">CP% = BSC &times; 15%</span>
+                BSC = &Sigma;(Actual % &times; Max Pts)<br/>
+                <span className="text-white/40">CP = BSC &divide; 100</span>
               </div>
               <div className="flex flex-col gap-[12px]">
                 <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
@@ -509,11 +512,11 @@ export default function KPAScorecard() {
                 </div>
                 <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
                   <span className="text-[12px] font-[600] text-[#6b7280]">Max CP Cap</span>
-                  <span className="text-[14px] font-[800] text-[#92400E]">15%</span>
+                  <span className="text-[14px] font-[800] text-[#92400E]">8.87</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-[12px] font-[600] text-[#6b7280]">Final CP%</span>
-                  <span className="text-[16px] font-[800] text-[#065F46]">{cpPct !== null ? cpPct.toFixed(2) + '%' : '—'}</span>
+                  <span className="text-[12px] font-[600] text-[#6b7280]">Final CP</span>
+                  <span className="text-[16px] font-[800] text-[#065F46]">{cpPct !== null ? cpPct.toFixed(2) : '—'}</span>
                 </div>
               </div>
             </div>
@@ -537,15 +540,15 @@ export default function KPAScorecard() {
               </div>
               <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
                 <span className="text-[12px] font-[700] text-[#92400E]">NI (0.7)</span>
-                <span className="text-[14px] font-[800] text-[#92400E]">{cpPct !== null ? (cpPct * 0.7).toFixed(2) + '%' : '—'}</span>
+                <span className="text-[14px] font-[800] text-[#92400E]">{tierPct !== null ? (tierPct * 0.7).toFixed(2) + '%' : '—'}</span>
               </div>
               <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
                 <span className="text-[12px] font-[700] text-[#065F46]">E (1.0)</span>
-                <span className="text-[14px] font-[800] text-[#065F46]">{cpPct !== null ? cpPct.toFixed(2) + '%' : '—'}</span>
+                <span className="text-[14px] font-[800] text-[#065F46]">{tierPct !== null ? tierPct.toFixed(2) + '%' : '—'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-[12px] font-[700] text-[#1E40AF]">EP (1.3)</span>
-                <span className="text-[14px] font-[800] text-[#1E40AF]">{cpPct !== null ? (cpPct * 1.3).toFixed(2) + '%' : '—'}</span>
+                <span className="text-[14px] font-[800] text-[#1E40AF]">{tierPct !== null ? (tierPct * 1.3).toFixed(2) + '%' : '—'}</span>
               </div>
             </div>
           </div>
@@ -585,7 +588,7 @@ export default function KPAScorecard() {
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock {availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} {selectedYear} Scorecard?</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 This action is <strong>irreversible</strong> from the CEO panel. 
-                Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{cpPct.toFixed(2)}%</strong>?
+                Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{cpPct.toFixed(2)}</strong>?
               </div>
               <div className="flex gap-[12px] justify-center">
                 <button 

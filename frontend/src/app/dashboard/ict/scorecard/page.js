@@ -4,13 +4,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
 
-const MONTHS = [
-  { val: 1, label: 'January' }, { val: 2, label: 'February' }, { val: 3, label: 'March' },
-  { val: 4, label: 'April' }, { val: 5, label: 'May' }, { val: 6, label: 'June' },
-  { val: 7, label: 'July' }, { val: 8, label: 'August' }, { val: 9, label: 'September' },
-  { val: 10, label: 'October' }, { val: 11, label: 'November' }, { val: 12, label: 'December' }
-];
-
 const QUARTERS = [
   { val: 'Q1', month: 3, label: 'Quarter 1 (Q1)' },
   { val: 'Q2', month: 6, label: 'Quarter 2 (Q2)' },
@@ -28,25 +21,40 @@ export default function ICTScorecardControl() {
   
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: '' });
 
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [controlMode, setControlMode] = useState('monthly'); // 'monthly' or 'quarterly'
+  const [selectedYear, setSelectedYear] = useState(currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q2');
+  
+  // 🚨 UPGRADED: State for Bulk/Employee ID Revert Input
+  const [revertInput, setRevertInput] = useState('');
 
   const fetchMetrics = async () => {
     try {
       setLoading(true);
-      if (controlMode === 'monthly') {
-        const res = await api.get(`/company-metrics/${selectedYear}/${selectedMonth}`).catch(() => ({ data: { data: null } }));
-        setMetrics(res.data?.data || null);
-      } else {
-        // Quarterly mode: Query the quarterly scorecards collection
-        const res = await api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } }));
-        const list = res.data?.data || [];
-        const match = list.find(item => item.quarter === selectedQuarter);
-        setMetrics(match || null);
-      }
+      const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
+      
+      // 🚨 FIXED: Fetch from BOTH endpoints to guarantee we catch the saved toggle state
+      const [qscRes, metricsRes] = await Promise.all([
+        api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } })),
+        api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }))
+      ]);
+      
+      const list = qscRes.data?.data || [];
+      const match = list.find(item => item.quarter === selectedQuarter) || {};
+      const cMetrics = metricsRes.data?.data || {};
+
+      // Merge safely, trusting company-metrics for the toggle state
+      setMetrics({
+        ...match,
+        ...cMetrics,
+        locked: match.locked || cMetrics.locked || false,
+        requireAcknowledgment: cMetrics.requireAcknowledgment !== undefined ? cMetrics.requireAcknowledgment : (match.requireAcknowledgment !== undefined ? match.requireAcknowledgment : true)
+      });
+      
     } catch (error) {
       console.error('Failed to load metrics status', error);
     } finally {
@@ -56,47 +64,33 @@ export default function ICTScorecardControl() {
 
   useEffect(() => {
     fetchMetrics();
-  }, [selectedYear, selectedMonth, selectedQuarter, controlMode]);
+  }, [selectedYear, selectedQuarter]);
 
   const handleLockAction = async () => {
     try {
       setIsProcessing(true);
       const newLockState = confirmModal.type === 'lock';
       
-      if (controlMode === 'monthly') {
-        // Standard Monthly Action
-        await api.post('/company-metrics', {
-          reviewYear: selectedYear,
-          reviewMonth: selectedMonth,
+      const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
+      
+      await Promise.all([
+        api.post(`/quarterly-scorecards/${selectedYear}/${selectedQuarter}`, {
           locked: newLockState
-        });
-      } else {
-        // Quarterly Action: Simultaneously locks/unlocks BOTH database endpoints to maintain sync
-        const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
-        
-        await Promise.all([
-          api.post(`/quarterly-scorecards/${selectedYear}/${selectedQuarter}`, {
-            locked: newLockState
-          }),
-          api.post('/company-metrics', {
-            reviewYear: selectedYear,
-            reviewMonth: targetMonth,
-            locked: newLockState
-          })
-        ]);
-      }
+        }),
+        api.post('/company-metrics', {
+          reviewYear: selectedYear,
+          reviewMonth: targetMonth,
+          locked: newLockState
+        })
+      ]);
 
       setConfirmModal({ open: false, type: '' });
       await fetchMetrics();
       
-      const periodLabel = controlMode === 'monthly' 
-        ? `${MONTHS.find(m=>m.val===selectedMonth).label} ${selectedYear}`
-        : `${selectedQuarter} ${selectedYear}`;
-
       setAlertModal({ 
         show: true, 
         title: 'Action Successful', 
-        message: `Scorecard for ${periodLabel} successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
+        message: `Scorecard for ${selectedQuarter} ${selectedYear} successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
         type: 'success' 
       });
 
@@ -115,18 +109,140 @@ export default function ICTScorecardControl() {
     }
   };
 
+  const requireAck = metrics?.requireAcknowledgment !== false; // Safely defaults to true
+
+  // 🚨 FIXED: Uses explicit requireAck state to prevent getting "stuck"
+  const handleAckToggle = async () => {
+    try {
+      setIsProcessing(true);
+      const newState = !requireAck; 
+      
+      setMetrics(prev => prev ? { ...prev, requireAcknowledgment: newState } : { requireAcknowledgment: newState });
+      
+      const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
+      await Promise.all([
+        api.post(`/quarterly-scorecards/${selectedYear}/${selectedQuarter}`, {
+          requireAcknowledgment: newState
+        }),
+        api.post('/company-metrics', {
+          reviewYear: selectedYear,
+          reviewMonth: targetMonth,
+          requireAcknowledgment: newState
+        })
+      ]);
+
+      await fetchMetrics();
+
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Successful', 
+        message: `Employee Acknowledgment is now ${newState ? 'REQUIRED' : 'DISABLED'} for ${selectedQuarter} ${selectedYear}.`, 
+        type: 'success' 
+      });
+
+    } catch (error) {
+      setMetrics(prev => prev ? { ...prev, requireAcknowledgment: !newState } : prev);
+      
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Failed', 
+        message: 'Failed to update acknowledgment status.', 
+        type: 'error' 
+      });
+      console.error(error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 🚨 UPGRADED: Advanced Bulk & Employee ID Revert Logic
+  const handleRevertAck = async () => {
+    if (!revertInput) return;
+    try {
+      setIsProcessing(true);
+      
+      // 1. Fetch all appraisals
+      const res = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
+      const allApps = res.data?.data || [];
+      
+      // 2. Filter exactly for this Quarter and Year that are currently ACKNOWLEDGED
+      const quarterApps = allApps.filter(a => {
+        const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+        const appQtr = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name;
+        const isAck = a.workflow?.status === 'ACKNOWLEDGED' || a.status === 'ACKNOWLEDGED';
+        return appYear?.toString() === selectedYear.toString() && appQtr === selectedQuarter && isAck;
+      });
+
+      // 3. Filter for 'ALL' or specific Employee ID
+      let targets = [];
+      const inputClean = revertInput.trim().toUpperCase();
+      
+      if (inputClean === 'ALL') {
+        targets = quarterApps;
+      } else {
+        targets = quarterApps.filter(a => {
+          const empId = a.employeeId?.employeeId ? String(a.employeeId.employeeId).toUpperCase() : '';
+          return empId === inputClean;
+        });
+      }
+
+      if (targets.length === 0) {
+        setAlertModal({ 
+          show: true, 
+          title: 'No Records Found', 
+          message: `Could not find any ACKNOWLEDGED appraisals for '${inputClean}' in ${selectedQuarter} ${selectedYear}.`, 
+          type: 'warning' 
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // 4. Automatically process all matched targets back to APPROVED
+      let successCount = 0;
+      for (const app of targets) {
+        try {
+          await api.put(`/appraisals/${app._id}`, {
+            ...app,
+            status: 'APPROVED',
+            workflow: { ...(app.workflow || {}), status: 'APPROVED' },
+            acknowledgedAt: null
+          });
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to revert appraisal ${app._id}`, e);
+        }
+      }
+      
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Successful', 
+        message: `Successfully reverted ${successCount} appraisal(s) back to APPROVED status for ${inputClean}. The employee(s) can now acknowledge them again.`, 
+        type: 'success' 
+      });
+      
+      setRevertInput(''); 
+    } catch (error) {
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Failed', 
+        message: 'Failed to process revert request. Please check network connection.', 
+        type: 'error' 
+      });
+      console.error(error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const scorecardLocked = metrics?.locked || false;
   const lockedBy = metrics?.lockedBy ? (typeof metrics.lockedBy === 'object' ? `${metrics.lockedBy.personalDetails?.firstName || ''} ${metrics.lockedBy.personalDetails?.lastName || ''}`.trim() : 'CEO') : 'CEO';
   const lockedAt = metrics?.lockedAt ? new Date(metrics.lockedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
   
-  // Calculate CP% safely based on monthly or quarterly schema fields
   const cpPct = metrics ? (metrics.cpPct !== undefined && metrics.cpPct !== null 
     ? `${metrics.cpPct.toFixed(2)}%` 
     : (metrics.actuals ? 'Data entered' : 'Not entered')) : 'Not entered';
 
   const ts = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const currentY = new Date().getFullYear();
-  const yearOptions = [currentY - 2, currentY - 1, currentY, currentY + 1];
 
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
@@ -144,47 +260,53 @@ export default function ICTScorecardControl() {
 
         <div className="flex flex-wrap items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
            <select 
-             value={controlMode} 
-             onChange={(e) => setControlMode(e.target.value)}
-             className="bg-transparent text-[12px] font-[800] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+             value={selectedQuarter} 
+             onChange={(e) => setSelectedQuarter(e.target.value)}
+             className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
            >
-              <option value="monthly">Monthly Pulse Matrix</option>
-              <option value="quarterly">Quarterly Scorecard</option>
+              {QUARTERS.map(q => (
+                 <option key={q.val} value={q.val}>{q.label}</option>
+              ))}
            </select>
+           
            <span className="text-[#E2DDD4]">|</span>
            
-           {controlMode === 'monthly' ? (
-             <select 
-               value={selectedMonth} 
-               onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-               className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
-             >
-                {MONTHS.map(m => (
-                   <option key={m.val} value={m.val}>{m.label}</option>
-                ))}
-             </select>
+           {isManualYear ? (
+              <input 
+                type="number" 
+                autoFocus
+                defaultValue={selectedYear}
+                onBlur={(e) => {
+                  if (e.target.value) {
+                    setSelectedYear(e.target.value);
+                  }
+                  setIsManualYear(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value) {
+                      setSelectedYear(e.target.value);
+                    }
+                    setIsManualYear(false);
+                  }
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+              />
            ) : (
              <select 
-               value={selectedQuarter} 
-               onChange={(e) => setSelectedQuarter(e.target.value)}
-               className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+               value={selectedYear} 
+               onChange={(e) => {
+                 if (e.target.value === 'manual') setIsManualYear(true);
+                 else setSelectedYear(e.target.value);
+               }}
+               className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
              >
-                {QUARTERS.map(q => (
-                   <option key={q.val} value={q.val}>{q.label}</option>
+                {yearOptions.map(y => (
+                   <option key={y} value={y}>{y}</option>
                 ))}
+                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
              </select>
            )}
-           
-           <span className="text-[#E2DDD4]">|</span>
-           <select 
-             value={selectedYear} 
-             onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-             className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
-           >
-              {yearOptions.map(y => (
-                 <option key={y} value={y}>{y}</option>
-                ))}
-             </select>
         </div>
       </div>
 
@@ -202,7 +324,7 @@ export default function ICTScorecardControl() {
             <div>
               <div className="text-[15px] font-[800] text-[#0D2B55]">Current Scorecard Status</div>
               <div className="text-[12px] font-[500] text-[#6b7280]">
-                Viewing status for {controlMode === 'monthly' ? `${MONTHS.find(m=>m.val===selectedMonth).label}` : selectedQuarter} {selectedYear}
+                Viewing status for {selectedQuarter} {selectedYear}
               </div>
             </div>
           </div>
@@ -226,6 +348,10 @@ export default function ICTScorecardControl() {
                   <span className={`font-[800] ${scorecardLocked ? 'text-[#059669]' : 'text-[#92400E]'}`}>{scorecardLocked ? 'Locked' : 'Unlocked'}</span>
                 </div>
                 <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Employee Acknowledgment</span>
+                  <span className={`font-[800] ${requireAck ? 'text-[#059669]' : 'text-[#6b7280]'}`}>{requireAck ? 'Required' : 'Disabled'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
                   <span className="text-[#6b7280] font-[600]">Locked By</span>
                   <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedBy : '—'}</span>
                 </div>
@@ -234,7 +360,7 @@ export default function ICTScorecardControl() {
                   <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedAt : '—'}</span>
                 </div>
                 <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
-                  <span className="text-[#6b7280] font-[600]">{controlMode === 'monthly' ? 'CP%' : 'Calculated Value Status'}</span>
+                  <span className="text-[#6b7280] font-[600]">Calculated Value Status</span>
                   <span className="font-[800] text-[#0D2B55]">{cpPct}</span>
                 </div>
                 <div className="flex justify-between items-center py-[12px]">
@@ -267,6 +393,55 @@ export default function ICTScorecardControl() {
                     </button>
                   </div>
                 </div>
+
+                <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
+                  <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">Employee Acknowledgment Control</div>
+                  <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
+                    Toggle whether employees are required to formally acknowledge their appraisal scores for this cycle. If disabled, the acknowledgment section will be completely hidden on the staff dashboard.
+                  </div>
+                  
+                  <div className="flex items-center justify-between pt-[10px] border-t border-[#E2DDD4]">
+                    <div>
+                      <div className="text-[13px] font-[800] text-[#0D2B55]">Require Acknowledgment</div>
+                      <div className="text-[11px] text-[#6b7280] font-[600] mt-[2px]">Currently <strong className={requireAck ? "text-[#059669]" : "text-[#991B1B]"}>{requireAck ? 'Enabled' : 'Disabled'}</strong></div>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={handleAckToggle} 
+                      disabled={isProcessing}
+                      className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors focus:outline-none shadow-inner disabled:opacity-50 ${requireAck ? 'bg-[#059669]' : 'bg-[#E2DDD4]'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-md ${requireAck ? 'translate-x-7' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+
+                </div>
+                
+                {/* 🚨 UPGRADED: Revert Acknowledgment Feature Card */}
+                <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
+                  <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">Revert Employee Acknowledgment</div>
+                  <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
+                    Enter an Employee ID (e.g., <strong>3692026</strong>) or type <strong>ALL</strong> to revert acknowledged appraisals back to APPROVED for {selectedQuarter} {selectedYear}. This allows them to acknowledge again.
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-[8px]">
+                    <input 
+                      type="text" 
+                      placeholder="Emp ID or 'ALL'"
+                      value={revertInput}
+                      onChange={(e) => setRevertInput(e.target.value)}
+                      className="flex-1 text-[13px] px-[12px] py-[10px] border border-[#E2DDD4] rounded-[8px] outline-none focus:border-[#0D2B55]"
+                      disabled={isProcessing}
+                    />
+                    <button 
+                      onClick={handleRevertAck}
+                      disabled={isProcessing || !revertInput}
+                      className="bg-[#D97706] hover:bg-[#B45309] text-white px-[16px] py-[10px] rounded-[8px] text-[13px] font-[800] transition-colors disabled:opacity-50 shadow-sm whitespace-nowrap"
+                    >
+                      {isProcessing ? 'Processing...' : 'Revert'}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="bg-[#FEF2F2] border border-[#FECACA] text-[#991B1B] rounded-[8px] p-[10px_12px] text-[11px] leading-[1.5]">
                   &#128683; <strong className="font-[800]">Unlock requires:</strong> Written CEO authorisation + Board Secretary approval + ICT audit entry
                 </div>
@@ -326,8 +501,8 @@ export default function ICTScorecardControl() {
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{confirmModal.type === 'unlock' ? 'Reset Scorecard Lock?' : 'Force Scorecard Lock?'}</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 {confirmModal.type === 'unlock' 
-                  ? `This will open the scorecard for ${controlMode === 'monthly' ? MONTHS.find(m=>m.val===selectedMonth).label : selectedQuarter} ${selectedYear} for the CEO to make edits. You must verify that you have written Board approval before proceeding.`
-                  : `This will permanently lock the scorecard for ${controlMode === 'monthly' ? MONTHS.find(m=>m.val===selectedMonth).label : selectedQuarter} ${selectedYear}. Are you sure you want to force this lock manually?`}
+                  ? `This will open the scorecard for ${selectedQuarter} ${selectedYear} for the CEO to make edits. You must verify that you have written Board approval before proceeding.`
+                  : `This will permanently lock the scorecard for ${selectedQuarter} ${selectedYear}. Are you sure you want to force this lock manually?`}
               </div>
               <div className="flex gap-[12px] justify-center">
                 <button 
@@ -350,13 +525,13 @@ export default function ICTScorecardControl() {
         </div>
       )}
 
-      {/* Universal Success/Error Acknowledge Modal */}
+      {/* Universal Success/Error Modal */}
       {alertModal.show && (
         <div className="fixed inset-0 bg-[#0D2B55]/65 z-[200] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
             <div className="p-[30px_22px] text-center">
               <div className="text-[48px] mb-[16px] leading-none">
-                {alertModal.type === 'error' ? '❌' : '✅'}
+                {alertModal.type === 'error' ? '❌' : alertModal.type === 'warning' ? '⚠️' : '✅'}
               </div>
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{alertModal.title}</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">

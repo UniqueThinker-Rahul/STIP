@@ -12,11 +12,7 @@ const companyMetricSchema = new mongoose.Schema({
   cpPct: { type: Number, default: null },
   locked: { type: Boolean, default: false },
   lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  lockedAt: { type: Date },
-  
-  // 🚨 UPGRADE: Added requireAcknowledgment field for ICT Admin control
-  requireAcknowledgment: { type: Boolean, default: true }
-
+  lockedAt: { type: Date }
 }, { timestamps: true });
 
 // Composite index to track both year and month correctly

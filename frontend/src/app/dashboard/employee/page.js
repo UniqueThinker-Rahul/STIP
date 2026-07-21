@@ -16,7 +16,13 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
   
-  const [selectedYear, setSelectedYear] = useState('');
+  // 🚨 NEW: Dynamic Year & Filter States
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [selectedYear, setSelectedYear] = useState(currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false);
   const [selectedQuarterName, setSelectedQuarterName] = useState('');
   
   const [activeQuarter, setActiveQuarter] = useState(null);
@@ -36,7 +42,7 @@ export default function EmployeeDashboard() {
 
         const [meRes, metricsRes, appraisalsRes, quartersRes] = await Promise.all([
           api.get('/auth/me').catch(() => ({ data: { data: sessionUser } })),
-          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })), 
+          api.get(`/company-metrics/${currentYearStr}`).catch(() => ({ data: { data: null } })), 
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
@@ -81,7 +87,7 @@ export default function EmployeeDashboard() {
     };
 
     fetchDashboardData();
-  }, [router]);
+  }, [router, currentYearStr]);
 
   useEffect(() => {
     if (selectedYear && selectedQuarterName && allQuarters.length > 0) {
@@ -165,7 +171,6 @@ export default function EmployeeDashboard() {
       case 'APPROVED': 
       case 'CEO_APPROVED': return 'CEO Approved';
       case 'NOT_APPROVED': return 'Returned for Revision';
-      // 🚨 FIX: Explicitly handle HR rejections
       case 'REOPENED': return 'Rejected by HR';
       default: return 'Pending Action';
     }
@@ -189,7 +194,6 @@ export default function EmployeeDashboard() {
     return `${day} ${month}`;
   };
 
-  const uniqueYears = Array.from(new Set(allQuarters.map(q => q.year.toString()))).sort((a, b) => b - a);
   const filteredQuarterNames = allQuarters.filter(q => q.year.toString() === selectedYear).map(q => q.name);
 
   if (loading) {
@@ -300,35 +304,73 @@ export default function EmployeeDashboard() {
                 </button>
               )}
               
+              {/* 🚨 NEW: Dynamic Dropdown Filters */}
               <div className="flex items-center gap-2">
                 <div className="relative">
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => {
-                      const newYear = e.target.value;
-                      setSelectedYear(newYear);
-                      const newQuarters = allQuarters.filter(q => q.year.toString() === newYear);
-                      if (newQuarters.length > 0) setSelectedQuarterName(newQuarters[0].name);
-                    }}
-                    className="text-[12px] font-[800] text-[#0D2B55] bg-white border border-[#E2DDD4] outline-none px-[14px] py-[8px] pr-[30px] rounded-[8px] hover:border-[#C9A84C] cursor-pointer appearance-none transition-colors shadow-sm"
-                  >
-                    <option value="" disabled>Year</option>
-                    {uniqueYears.map(y => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[#6b7280]">
-                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                  </div>
+                  {isManualYear ? (
+                    <input 
+                      type="number" 
+                      autoFocus
+                      defaultValue={selectedYear}
+                      onBlur={(e) => {
+                        if (e.target.value) {
+                          setSelectedYear(e.target.value);
+                          const newQuarters = allQuarters.filter(q => q.year.toString() === e.target.value);
+                          if (newQuarters.length > 0) setSelectedQuarterName(newQuarters[0].name);
+                          else setSelectedQuarterName('');
+                        }
+                        setIsManualYear(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (e.target.value) {
+                            setSelectedYear(e.target.value);
+                            const newQuarters = allQuarters.filter(q => q.year.toString() === e.target.value);
+                            if (newQuarters.length > 0) setSelectedQuarterName(newQuarters[0].name);
+                            else setSelectedQuarterName('');
+                          }
+                          setIsManualYear(false);
+                        }
+                      }}
+                      className="text-[12px] font-[800] text-[#0D2B55] bg-white border border-[#0D2B55] outline-none px-[14px] py-[8px] rounded-[8px] transition-colors shadow-sm w-[90px]"
+                    />
+                  ) : (
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => {
+                        const newYear = e.target.value;
+                        if (newYear === 'manual') {
+                          setIsManualYear(true);
+                        } else {
+                          setSelectedYear(newYear);
+                          const newQuarters = allQuarters.filter(q => q.year.toString() === newYear);
+                          if (newQuarters.length > 0) setSelectedQuarterName(newQuarters[0].name);
+                          else setSelectedQuarterName('');
+                        }
+                      }}
+                      className="text-[12px] font-[800] text-[#0D2B55] bg-white border border-[#E2DDD4] outline-none px-[14px] py-[8px] pr-[30px] rounded-[8px] hover:border-[#C9A84C] cursor-pointer appearance-none transition-colors shadow-sm"
+                    >
+                      {yearOptions.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                      <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+                    </select>
+                  )}
+                  {!isManualYear && (
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[#6b7280]">
+                      <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                    </div>
+                  )}
                 </div>
 
                 <div className="relative">
                   <select
                     value={selectedQuarterName}
                     onChange={(e) => setSelectedQuarterName(e.target.value)}
-                    className="text-[12px] font-[800] text-[#0D2B55] bg-white border border-[#E2DDD4] outline-none px-[14px] py-[8px] pr-[30px] rounded-[8px] hover:border-[#C9A84C] cursor-pointer appearance-none transition-colors shadow-sm min-w-[80px]"
+                    disabled={!selectedYear || filteredQuarterNames.length === 0}
+                    className={`text-[12px] font-[800] outline-none px-[14px] py-[8px] pr-[30px] rounded-[8px] appearance-none transition-colors shadow-sm min-w-[80px] ${selectedYear && filteredQuarterNames.length > 0 ? 'text-[#0D2B55] bg-white border border-[#E2DDD4] hover:border-[#C9A84C] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
                   >
-                    <option value="" disabled>Quarter</option>
+                    {filteredQuarterNames.length === 0 && <option value="">No Quarters</option>}
                     {filteredQuarterNames.map(qName => (
                       <option key={qName} value={qName}>{qName}</option>
                     ))}
@@ -361,7 +403,6 @@ export default function EmployeeDashboard() {
 
               {/* Step 2: HR */}
               <div className="flex items-start gap-[16px] relative z-10">
-                {/* 🚨 FIX: Re-structured this circle to turn red for REOPENED (HR Rejection) */}
                 <div className={`w-[32px] h-[32px] rounded-full border-[2.5px] flex items-center justify-center text-[12px] transition-colors ${status === 'REOPENED' ? 'bg-[#FEE2E2] border-[#FEE2E2] text-[#991B1B]' : step2Done ? 'bg-[#1E40AF] border-[#1E40AF] text-white' : 'bg-[#DBEAFE] border-[#DBEAFE] text-[#1E40AF]'}`}>
                   {status === 'REOPENED' ? '❌' : '👤'}
                 </div>

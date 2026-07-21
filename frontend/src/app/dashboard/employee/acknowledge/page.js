@@ -18,16 +18,27 @@ export default function EmployeeAcknowledge() {
   const router = useRouter();
 
   const [user, setUser] = useState(null);
+  const [allMyAppraisals, setAllMyAppraisals] = useState([]);
   const [appraisal, setAppraisal] = useState(null);
-  const [activeQuarter, setActiveQuarter] = useState(null);
-  const [cpPct, setCpPct] = useState(0); // 🚨 FIX: Replaced static CP with dynamic state
   const [loading, setLoading] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
   
   const [checks, setChecks] = useState({ c1: false, c2: false, c3: false });
 
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [filterYear, setFilterYear] = useState(currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false); 
+  const [qtr, setQtr] = useState('');
+  const [dbQuarters, setDbQuarters] = useState([]);
+
+  const [cpPct, setCpPct] = useState(0); 
+  const [requireAck, setRequireAck] = useState(true);
+
   useEffect(() => {
-    const fetchAcknowledgeData = async () => {
+    const fetchInitialData = async () => {
       try {
         setLoading(true);
         const userCookie = Cookies.get('stip_user');
@@ -37,62 +48,117 @@ export default function EmployeeAcknowledge() {
         }
         const sessionUser = JSON.parse(userCookie);
 
-        // 🚨 FIX: Dynamically fetch all required context including quarters and metrics
-        const [usersRes, appraisalsRes, quartersRes] = await Promise.all([
-          api.get('/users').catch(() => ({ data: { data: [] } })),
+        // 🚨 FIXED 403 ERROR: Replaced /users with /auth/me to pass role guards securely
+        const [meRes, appraisalsRes, qtrRes] = await Promise.all([
+          api.get('/auth/me').catch(() => ({ data: { data: sessionUser } })),
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
-        const allUsers = usersRes.data?.data || [];
-        const myUser = allUsers.find(u => u._id === sessionUser.id || u.employeeId === sessionUser.employeeId) || sessionUser;
+        const myUser = meRes.data?.data || sessionUser;
         setUser(myUser);
 
+        const fetchedQuarters = qtrRes.data?.data || [];
+        setDbQuarters(fetchedQuarters);
+
         const allApps = appraisalsRes.data?.data || [];
-        const myApp = allApps.find(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
-        setAppraisal(myApp || null);
-        
-        // 🚨 FIX: If they already acknowledged it in the DB, set it here
-        if (myApp?.workflow?.status === 'ACKNOWLEDGED' || myApp?.acknowledgedAt) {
-            setAcknowledged(true);
-        }
-
-        const fetchedQuarters = quartersRes.data?.data || [];
-        const now = new Date();
-        let targetQuarter = fetchedQuarters.find(q => {
-          const start = new Date(q.startDate); start.setHours(0,0,0,0);
-          const end = new Date(q.endDate); end.setHours(23,59,59,999);
-          return now >= start && now <= end;
-        });
-        
-        if (!targetQuarter && fetchedQuarters.length > 0) {
-            targetQuarter = fetchedQuarters[fetchedQuarters.length - 1]; 
-        }
-        setActiveQuarter(targetQuarter);
-
-        // 🚨 FIX: Fetch dynamic CP metric for the target year
-        if (targetQuarter) {
-            const metricsRes = await api.get(`/company-metrics/${targetQuarter.year}`).catch(() => ({ data: { data: null } }));
-            setCpPct(metricsRes.data?.data?.cpPct || 0);
-        }
+        const myApps = allApps.filter(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
+        setAllMyAppraisals(myApps);
 
       } catch (error) {
-        console.error('Failed to load acknowledge data:', error);
+        console.error('Failed to load initial data:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchAcknowledgeData();
+    fetchInitialData();
   }, [router]);
 
-  // 🚨 FIX: Actually submit the acknowledgement to the backend database
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+    if (qtrsForSelectedYear.length > 0) {
+      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
+      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+    } else {
+      setQtr('');
+    }
+  }, [dbQuarters, filterYear]);
+
+  useEffect(() => {
+    const updateSelection = async () => {
+      if (!qtr || allMyAppraisals.length === 0) {
+        setAppraisal(null);
+        setCpPct(0);
+        setAcknowledged(false);
+        return;
+      }
+      const targetQtrObj = dbQuarters.find(q => q._id === qtr);
+      const targetQtrName = targetQtrObj ? targetQtrObj.name : qtr;
+
+      const matchedAppraisal = allMyAppraisals.find(a => {
+          const appYear = a.reviewYear || a.appraisalQuarter?.year;
+          const appQtrId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+          return (appYear && appYear.toString() === filterYear) && (appQtrId === qtr || a.period?.quarter === targetQtrName);
+      });
+      setAppraisal(matchedAppraisal || null);
+
+      if (matchedAppraisal?.workflow?.status === 'ACKNOWLEDGED' || matchedAppraisal?.acknowledgedAt) {
+          setAcknowledged(true);
+      } else {
+          setAcknowledged(false);
+      }
+
+      if (targetQtrName) {
+          const qMatch = targetQtrName.match(/Q?([1-4])/i) || String(targetQtrName).match(/([1-4])/);
+          const qNum = qMatch ? parseInt(qMatch[1]) : 1;
+          const normalizedQtr = `Q${qNum}`; 
+          const targetMonth = qNum * 3;
+          
+          const [metricsRes, qscRes] = await Promise.all([
+              api.get(`/company-metrics/${filterYear}/${targetMonth}`).catch(() => ({ data: { data: null } })),
+              api.get(`/quarterly-scorecards/${filterYear}`).catch(() => ({ data: { data: [] } }))
+          ]);
+          
+          const metrics = metricsRes.data?.data;
+          const qscList = qscRes.data?.data || [];
+          
+          const qscMatch = qscList.find(q => 
+              q.quarter === normalizedQtr || 
+              `Q${q.quarter}` === normalizedQtr ||
+              q.quarter?.toUpperCase() === targetQtrName?.toUpperCase()
+          );
+          
+          setCpPct(metrics?.cpPct || qscMatch?.cpPct || 0);
+          
+          const qscReq = qscMatch?.requireAcknowledgment;
+          const metReq = metrics?.requireAcknowledgment;
+
+          const isExplicitlyDisabled = 
+              qscReq === false || String(qscReq).toLowerCase() === 'false' || 
+              metReq === false || String(metReq).toLowerCase() === 'false';
+
+          setRequireAck(!isExplicitlyDisabled);
+      }
+    };
+    
+    updateSelection();
+  }, [qtr, filterYear, allMyAppraisals, dbQuarters]);
+
   const handleSubmit = async () => {
     if (!appraisal) return;
     try {
         setLoading(true);
-        // Assuming your backend supports updating the status to ACKNOWLEDGED or logging the timestamp
-        await api.patch(`/appraisals/${appraisal._id}/acknowledge`);
+        // 🚨 FIXED 404 ERROR: Uses standard PUT request to update the status directly, bypassing the missing /acknowledge route
+        await api.put(`/appraisals/${appraisal._id}`, {
+          ...appraisal,
+          status: 'ACKNOWLEDGED',
+          workflow: {
+            ...(appraisal.workflow || {}),
+            status: 'ACKNOWLEDGED'
+          },
+          acknowledgedAt: new Date().toISOString()
+        });
         setAcknowledged(true);
     } catch (error) {
         console.error('Failed to acknowledge appraisal:', error);
@@ -121,9 +187,8 @@ export default function EmployeeAcknowledge() {
 
   const iprf = appraisal?.calculatedResults?.finalIprfScore || appraisal?.finalIprfScore || appraisal?.iprfScore || 0;
   const status = appraisal?.workflow?.status || appraisal?.status;
-  const isApproved = status === 'APPROVED' || status === 'CEO_APPROVED' || status === 'ACKNOWLEDGED'; // Allow if already acknowledged
+  const isApproved = status === 'APPROVED' || status === 'CEO_APPROVED' || status === 'ACKNOWLEDGED'; 
   
-  // 🚨 FIX: Use the dynamic cpPct
   const awardPct = isApproved ? (cpPct * iprf * pr).toFixed(2) : '0.00';
   const allChecked = checks.c1 && checks.c2 && checks.c3;
 
@@ -140,27 +205,22 @@ export default function EmployeeAcknowledge() {
     
   const companyCode = user?.companyCode || user?.employmentDetails?.companyCode || 'FSM';
 
-  // 🚨 FIX: Extract dynamic quarter data
-  const quarterName = appraisal?.appraisalQuarter?.name || appraisal?.period?.quarter || appraisal?.quarter?.name || activeQuarter?.name || 'Current Quarter';
-  const quarterYear = appraisal?.appraisalQuarter?.year || appraisal?.period?.year || appraisal?.year || activeQuarter?.year || new Date().getFullYear();
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+  const activeQObj = quartersForSelectedYear.find(q => q._id === qtr);
+  const activeQName = activeQObj?.name || '';
   
   let quarterMonths = '';
-  if (appraisal?.appraisalQuarter?.startDate && appraisal?.appraisalQuarter?.endDate) {
-      const startMonth = new Date(appraisal.appraisalQuarter.startDate).toLocaleDateString('en-GB', { month: 'long' });
-      const endMonth = new Date(appraisal.appraisalQuarter.endDate).toLocaleDateString('en-GB', { month: 'long' });
-      quarterMonths = `(${startMonth} — ${endMonth} ${quarterYear})`;
-  } else if (activeQuarter?.startDate && activeQuarter?.endDate) {
-      const startMonth = new Date(activeQuarter.startDate).toLocaleDateString('en-GB', { month: 'long' });
-      const endMonth = new Date(activeQuarter.endDate).toLocaleDateString('en-GB', { month: 'long' });
-      quarterMonths = `(${startMonth} — ${endMonth} ${quarterYear})`;
+  if (activeQObj?.startDate && activeQObj?.endDate) {
+      const startMonth = new Date(activeQObj.startDate).toLocaleDateString('en-GB', { month: 'long' });
+      const endMonth = new Date(activeQObj.endDate).toLocaleDateString('en-GB', { month: 'long' });
+      quarterMonths = `(${startMonth} — ${endMonth} ${filterYear})`;
   }
 
-  // 🚨 FIX: Extract dynamic names for the bottom summary text
   let hrNameText = "HR Manager";
   if (appraisal?.evaluations?.hr?.userId?.personalDetails) {
       hrNameText = `${appraisal.evaluations.hr.userId.personalDetails.firstName} ${appraisal.evaluations.hr.userId.personalDetails.lastName}`;
   } else if (appraisal?.narrative?.hrComments) {
-      hrNameText = "HR Administrator"; // Fallback if name is stripped but comments exist
+      hrNameText = "HR Administrator"; 
   }
 
   let ceoNameText = "CEO";
@@ -173,12 +233,65 @@ export default function EmployeeAcknowledge() {
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
-      <div className="mb-[20px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-          &#9989; Acknowledge My Appraisal
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
+            &#9989; Acknowledge My Appraisal
+          </div>
+          <div className="text-[13px] text-[#6b7280]">
+            Formally acknowledge your {activeQName} {filterYear} appraisal result
+          </div>
         </div>
-        <div className="text-[13px] text-[#6b7280]">
-          Formally acknowledge your CY{quarterYear} {quarterName} appraisal result
+
+        <div className="flex gap-[8px]">
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else setFilterYear(e.target.value);
+              }} 
+              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px] shadow-sm"
+            >
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
+
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear || quartersForSelectedYear.length === 0}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] shadow-sm ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -191,7 +304,16 @@ export default function EmployeeAcknowledge() {
         </div>
       )}
 
-      {isApproved && !acknowledged && (
+      {isApproved && !acknowledged && !requireAck && (
+        <div className="bg-[#EFF6FF] border-[1.5px] border-[#BFDBFE] text-[#1E40AF] rounded-[10px] p-[16px] text-[13px] mb-[20px] shadow-sm flex items-start gap-[10px]">
+          <span className="text-[18px] leading-none mt-[2px]">&#8505;</span> 
+          <div className="leading-[1.5]">
+            <strong className="font-[800]">Acknowledgment Not Required:</strong> The ICT Administrator has disabled the requirement for employee acknowledgment for the {activeQName} {filterYear} appraisal cycle. No further action is needed from you.
+          </div>
+        </div>
+      )}
+
+      {isApproved && !acknowledged && requireAck && (
         <>
           <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] text-[#92400E] rounded-[10px] p-[12px_16px] text-[13px] mb-[20px] shadow-sm flex items-start gap-[10px]">
             <span className="text-[16px] leading-none mt-[2px]">&#9888;</span> 
@@ -204,7 +326,7 @@ export default function EmployeeAcknowledge() {
             <div className="p-[24px] border-b border-[#E2DDD4] bg-[#0D2B55] text-white">
               <div className="text-[18px] font-[800] mb-[4px]">Formal Acknowledgement of STIP Appraisal Result</div>
               <div className="text-[12px] text-white/70 font-[500] leading-[1.5]">
-                Please read the following appraisal summary carefully. By acknowledging, you confirm that you have reviewed your CY{quarterYear} {quarterName} appraisal result and understand your STIP award entitlement.
+                Please read the following appraisal summary carefully. By acknowledging, you confirm that you have reviewed your CY{filterYear} {activeQName} appraisal result and understand your STIP award entitlement.
               </div>
             </div>
             
@@ -214,11 +336,11 @@ export default function EmployeeAcknowledge() {
                 <strong className="text-[#0D2B55]">Employee ID:</strong> {user.employeeId}<br/>
                 <strong className="text-[#0D2B55]">Job Title:</strong> {jobTitle}<br/>
                 <strong className="text-[#0D2B55]">Company:</strong> {companyCode}<br/>
-                <strong className="text-[#0D2B55]">Quarter:</strong> {quarterName} {quarterYear} {quarterMonths}<br/><br/>
+                <strong className="text-[#0D2B55]">Quarter:</strong> {activeQName} {filterYear} {quarterMonths}<br/><br/>
                 
                 <strong className="text-[#0D2B55]">IPRF Rating:</strong> {iprf.toFixed(1)} &mdash; {iprfLabel(iprf)}<br/>
                 <strong className="text-[#0D2B55]">Pro-Rata:</strong> {pr.toFixed(3)} ({prMonths.toFixed(2)} / 12 months)<br/>
-                <strong className="text-[#0D2B55]">Company Performance (CP%):</strong> {cpPct}%<br/>
+                <strong className="text-[#0D2B55]">Company Performance (CP%):</strong> {Number(cpPct).toFixed(2)}%<br/>
                 <strong className="text-[#0D2B55]">STIP Award %:</strong> {awardPct}% (Gross &mdash; before FSM income tax)<br/><br/>
                 
                 <strong className="text-[#0D2B55]">Performance Criteria Breakdown:</strong><br/>
@@ -233,7 +355,6 @@ export default function EmployeeAcknowledge() {
                 </ul>
                 <strong className="text-[#0D2B55]">Manager Comments:</strong> {appraisal?.narrative?.generalComments || appraisal?.evaluations?.manager?.comments || 'None'}<br/><br/>
                 
-                {/* 🚨 FIX: Dynamic routing chain names */}
                 <em className="text-[#6b7280]">This appraisal has been reviewed and approved by: Line Manager &rarr; {hrNameText} &rarr; {ceoNameText}.</em>
               </div>
               
@@ -246,7 +367,7 @@ export default function EmployeeAcknowledge() {
                     onChange={() => setChecks(c => ({...c, c1: !c.c1}))} 
                   />
                   <span className={`text-[13px] leading-[1.5] ${checks.c1 ? 'text-[#1E40AF] font-[600]' : 'text-[#0f1923]'}`}>
-                    I confirm that I have read and understood my {quarterName} {quarterYear} appraisal result, including my IPRF rating and the performance criteria assessments provided by my Line Manager.
+                    I confirm that I have read and understood my {activeQName} {filterYear} appraisal result, including my IPRF rating and the performance criteria assessments provided by my Line Manager.
                   </span>
                 </label>
                 
@@ -297,11 +418,10 @@ export default function EmployeeAcknowledge() {
           <div>
             <div className="text-[20px] font-[800] text-[#065F46] mb-[6px]">Appraisal Acknowledged</div>
             <div className="text-[13px] text-[#065F46]/80 font-[600] leading-[1.5]">
-              {/* 🚨 FIX: Real-time acknowledged date from DB if available, else fallback to current time */}
               Acknowledged by {fullName} (ID: {user.employeeId}) on {appraisal?.acknowledgedAt ? new Date(appraisal.acknowledgedAt).toLocaleString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}) : new Date().toLocaleString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}
             </div>
             <div className="mt-[10px] text-[13px] text-[#065F46]">
-              Thank you {fName}. Your {quarterName} {quarterYear} appraisal has been formally acknowledged. A record of this acknowledgement has been permanently saved.
+              Thank you {fName}. Your {activeQName} {filterYear} appraisal has been formally acknowledged. A record of this acknowledgement has been permanently saved.
             </div>
           </div>
         </div>

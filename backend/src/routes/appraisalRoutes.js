@@ -170,7 +170,7 @@ router.get('/', async (req, res) => {
       query.managerId = userId;
     } else if (req.user.role === 'EMPLOYEE') {
       query.employeeId = userId;
-      // 🚨 CRITICAL FIX: Removed `query['workflow.status'] = 'APPROVED';` 
+      // 圷 CRITICAL FIX: Removed `query['workflow.status'] = 'APPROVED';` 
       // This blocked employees from seeing their live, pending appraisal status.
     }
 
@@ -282,7 +282,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
             }
           }
         } catch (emailError) { 
-          console.error("📧 [EMAIL SYSTEM FAILURE]:", emailError.message);
+          console.error("透 [EMAIL SYSTEM FAILURE]:", emailError.message);
         }
       });
     }
@@ -379,7 +379,7 @@ exports.forwardToCEO = async (req, res) => {
             });
           }
         }
-      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+      } catch (e) { console.error("透 [EMAIL SYSTEM CRASH]:", e) }
     });
 
     res.status(200).json({ success: true, data: appraisal }); 
@@ -553,7 +553,7 @@ exports.approveRejectAppraisal = async (req, res) => {
             }
         }
 
-      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
+      } catch (e) { console.error("透 [EMAIL SYSTEM CRASH]:", e) }
     });
 
     res.status(200).json({ success: true, data: appraisal }); 
@@ -796,6 +796,83 @@ router.delete('/:id', roleGuard('MANAGER', 'HR_ADMIN'), async (req, res) => {
 
     res.json({ message: 'Draft deleted successfully.' });
   } catch (error) { res.status(500).json({ message: 'Error deleting appraisal.' }); }
+});
+
+// 🚨 UPGRADE: Handle General PUT updates including Employee Acknowledgement
+router.put('/:id', async (req, res) => {
+  try {
+    const appraisalId = req.params.id;
+    const updateData = req.body;
+
+    const appraisal = await Appraisal.findById(appraisalId).populate('employeeId', 'personalDetails');
+    
+    if (!appraisal) {
+      return res.status(404).json({ message: 'Appraisal not found in database.' });
+    }
+
+    // If updating workflow status
+    if (updateData.workflow && updateData.workflow.status) {
+      appraisal.workflow.status = updateData.workflow.status;
+    } else if (updateData.status) {
+      appraisal.workflow.status = updateData.status;
+    }
+
+    if (updateData.acknowledgedAt) {
+      appraisal.acknowledgedAt = updateData.acknowledgedAt;
+    }
+
+    await appraisal.save();
+
+    // Log if this is an acknowledgment
+    if (appraisal.workflow.status === 'ACKNOWLEDGED') {
+       const empName = appraisal.employeeId ? `${appraisal.employeeId.personalDetails?.firstName} ${appraisal.employeeId.personalDetails?.lastName}` : 'Employee';
+       await logAudit({
+         user: req.user, role: req.user.role, action: 'APPRAISAL_ACKNOWLEDGED', category: 'APPRAISAL_WORKFLOW', severity: 'LOW',
+         details: `${empName} formally acknowledged their appraisal result.`, req
+       });
+    }
+
+    res.status(200).json({ message: 'Appraisal successfully updated', data: appraisal });
+
+  } catch (error) {
+    console.error('Error updating appraisal:', error);
+    res.status(500).json({ message: 'Internal server error while saving update' });
+  }
+});
+
+// 🚨 Reset Acknowledgment (Developer/ICT Admin Utility)
+router.patch('/:id/reset-ack', roleGuard('ICT_ADMIN', 'ADMIN'), async (req, res) => {
+  try {
+    const appraisal = await Appraisal.findById(req.params.id);
+    
+    if (!appraisal) {
+      return res.status(404).json({ message: 'Appraisal not found.' });
+    }
+
+    // 1. Revert the status to APPROVED so it sits with the CEO's final state
+    appraisal.workflow.status = 'APPROVED';
+    
+    // 2. Clear the timestamp using undefined to drop it from the schema
+    appraisal.acknowledgedAt = undefined; 
+
+    await appraisal.save();
+
+    // Optional: Log the developer/admin action
+    await logAudit({
+      user: req.user, 
+      role: req.user.role, 
+      action: 'ACKNOWLEDGED_RESET', 
+      category: 'APPRAISAL_WORKFLOW', 
+      severity: 'HIGH',
+      details: `Admin reset the employee acknowledgment for appraisal ${appraisal._id}.`, 
+      req
+    });
+
+    res.status(200).json({ message: 'Acknowledgment successfully reversed.' });
+  } catch (error) {
+    console.error('Error resetting acknowledgment:', error);
+    res.status(500).json({ message: 'Server error while resetting acknowledgment.' });
+  }
 });
 
 module.exports = router;

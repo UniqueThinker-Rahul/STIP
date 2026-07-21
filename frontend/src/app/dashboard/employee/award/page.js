@@ -9,13 +9,13 @@ export default function EmployeeAward() {
   const router = useRouter();
 
   const [user, setUser] = useState(null);
+  const [allMyAppraisals, setAllMyAppraisals] = useState([]);
   const [appraisal, setAppraisal] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Constants
   const CP = 13.01;
 
-  // 🚨 FIXED: Restored missing Criteria Constants
   const CRIT_NAMES = {
     c1: "Quality/Accuracy of Work",
     c2: "Efficiency/Speed",
@@ -34,7 +34,16 @@ export default function EmployeeAward() {
     c6: "10%"
   };
 
-  // 🚨 FIXED: Restored missing Color Function
+  // 🚨 NEW: Filter States
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [filterYear, setFilterYear] = useState(currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false); 
+  const [qtr, setQtr] = useState('');
+  const [dbQuarters, setDbQuarters] = useState([]);
+
   const iprfColor = (score) => {
     if (score >= 1.3) return '#1E40AF'; // EP (Blue)
     if (score >= 1.0) return '#059669'; // E (Green)
@@ -53,18 +62,23 @@ export default function EmployeeAward() {
         }
         const sessionUser = JSON.parse(userCookie);
 
-        const [usersRes, appraisalsRes] = await Promise.all([
+        // 🚨 UPGRADED: Fetch quarters (ONLY published quarters for employees)
+        const [usersRes, appraisalsRes, qtrRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
-          api.get('/appraisals').catch(() => ({ data: { data: [] } }))
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } })) 
         ]);
 
         const allUsers = usersRes.data?.data || [];
         const myUser = allUsers.find(u => u._id === sessionUser.id || u.employeeId === sessionUser.employeeId) || sessionUser;
         setUser(myUser);
 
+        const fetchedQuarters = qtrRes.data?.data || [];
+        setDbQuarters(fetchedQuarters);
+
         const allApps = appraisalsRes.data?.data || [];
-        const myApp = allApps.find(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
-        setAppraisal(myApp || null);
+        const myApps = allApps.filter(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
+        setAllMyAppraisals(myApps);
 
       } catch (error) {
         console.error('Failed to load award data:', error);
@@ -75,6 +89,35 @@ export default function EmployeeAward() {
 
     fetchAwardData();
   }, [router]);
+
+  // 🚨 NEW: Automatically sync and default to Q1 of the selected year
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+    if (qtrsForSelectedYear.length > 0) {
+      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
+      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+    } else {
+      setQtr('');
+    }
+  }, [dbQuarters, filterYear]);
+
+  // 🚨 NEW: Filter the explicit appraisal based on dynamic dropdowns
+  useEffect(() => {
+    if (!qtr || allMyAppraisals.length === 0) {
+      setAppraisal(null);
+      return;
+    }
+    const targetQtrObj = dbQuarters.find(q => q._id === qtr);
+    const targetQtrName = targetQtrObj ? targetQtrObj.name : qtr;
+
+    const matchedAppraisal = allMyAppraisals.find(a => {
+        const appYear = a.reviewYear || a.appraisalQuarter?.year;
+        const appQtrId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+        
+        return (appYear && appYear.toString() === filterYear) && (appQtrId === qtr || a.period?.quarter === targetQtrName);
+    });
+    setAppraisal(matchedAppraisal || null);
+  }, [qtr, filterYear, allMyAppraisals, dbQuarters]);
 
   const iprfLabel = (score) => {
     if (score >= 1.3) return 'Exceeds Performance';
@@ -100,16 +143,73 @@ export default function EmployeeAward() {
   const awardPct = isApproved ? (CP * iprf * pr).toFixed(2) : null;
   const myT = iprf >= 1.3 ? 'ep' : iprf >= 1.0 ? 'e' : iprf >= 0.7 ? 'ni' : iprf > 0 ? 'ls' : '';
 
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+  const activeQName = quartersForSelectedYear.find(q => q._id === qtr)?.name || '';
+
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
-      {/* Header */}
-      <div className="mb-[20px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-          &#127942; My STIP Award
+      {/* 🚨 UPGRADED: Dynamic Header and Filters */}
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
+            &#127942; My STIP Award
+          </div>
+          <div className="text-[13px] text-[#6b7280]">
+            Your calculated Short-Term Incentive Payment for {activeQName} {filterYear}
+          </div>
         </div>
-        <div className="text-[13px] text-[#6b7280]">
-          Your calculated Short-Term Incentive Payment for CY2026
+
+        {/* Filter Controls (Year and Quarter) with Manual Custom Entry Mode */}
+        <div className="flex gap-[8px]">
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else setFilterYear(e.target.value);
+              }} 
+              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px] shadow-sm"
+            >
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
+
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear || quartersForSelectedYear.length === 0}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] shadow-sm ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
         </div>
       </div>
       

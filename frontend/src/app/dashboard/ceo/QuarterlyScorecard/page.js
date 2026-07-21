@@ -168,7 +168,8 @@ export default function QuarterlyScorecard() {
       try {
         let data = [];
         try {
-          const res1 = await api.get('/quarters');
+          // Pass the ?all=true flag so CEO can see unpublished quarters
+          const res1 = await api.get('/quarters?all=true');
           data = res1.data?.data || res1.data || [];
         } catch (err1) {
           const res2 = await api.get(`/quarterly-scorecards/${selectedYear}`);
@@ -1036,7 +1037,7 @@ export default function QuarterlyScorecard() {
       sheet.cell("K4").value(`Ach % ${curQ}`);
       sheet.cell("B55").value(`${curQ} bonus tier (from CP)`);
 
-      // 🚨 FIXED: Explicitly populating Chart 2 backend data mapping J, K, L, M
+      // 🚨 FIXED: Explicitly populating Chart 2 backend data mapping J, K, L, M on correct rows (12-15)
       const reportTotalMax = getQtrTotalMax(curQ, qtrMax) || TOTAL_MAX_DEFAULT;
       const maxCp = reportTotalMax / 100;
         
@@ -1045,7 +1046,7 @@ export default function QuarterlyScorecard() {
         const has = hasQtrData(qItem, qtrAct);
         const cpVal = getQtrCp(qItem, qtrAct);
           
-        sheet.cell(`J${rQs}`).value(has ? cpVal : 0);      // CP Actual Data
+        sheet.cell(`J${rQs}`).value(has && cpVal > 0 ? cpVal : undefined);      // CP Actual Data
         sheet.cell(`K${rQs}`).value(maxCp * 0.48);         // 5% gate line
         sheet.cell(`L${rQs}`).value(maxCp * 0.8);          // 10% gate line
         sheet.cell(`M${rQs}`).value(maxCp);                // 15% / max line
@@ -1053,7 +1054,6 @@ export default function QuarterlyScorecard() {
 
       const blob = await workbook.outputAsync();
 
-      // JSZip modification to physically shift the native drawing anchors (charts) to row 64+
       if (!window.JSZip) {
           await new Promise((resolve, reject) => {
               const script = document.createElement('script');

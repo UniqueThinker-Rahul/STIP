@@ -27,8 +27,18 @@ export default function EmployeeAppraisal() {
   const router = useRouter();
 
   const [user, setUser] = useState(null);
+  const [allAppraisals, setAllAppraisals] = useState([]);
   const [appraisal, setAppraisal] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [filterYear, setFilterYear] = useState(currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false); // 🚨 ADDED: Manual Year State
+  const [qtr, setQtr] = useState('');
+  const [dbQuarters, setDbQuarters] = useState([]);
 
   useEffect(() => {
     const fetchAppraisalData = async () => {
@@ -41,18 +51,23 @@ export default function EmployeeAppraisal() {
         }
         const sessionUser = JSON.parse(userCookie);
 
-        const [usersRes, appraisalsRes] = await Promise.all([
+        const [usersRes, appraisalsRes, qtrRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
-          api.get('/appraisals').catch(() => ({ data: { data: [] } }))
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          // 🚨 FIXED: Removed "?all=true". Now it strictly fetches ONLY published quarters for normal staff!
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
         const allUsers = usersRes.data?.data || [];
         const myUser = allUsers.find(u => u._id === sessionUser.id || u.employeeId === sessionUser.employeeId) || sessionUser;
         setUser(myUser);
 
+        const fetchedQuarters = qtrRes.data?.data || [];
+        setDbQuarters(fetchedQuarters);
+
         const allApps = appraisalsRes.data?.data || [];
-        const myApp = allApps.find(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
-        setAppraisal(myApp || null);
+        const myApps = allApps.filter(a => (a.employeeId?._id || a.employeeId) === myUser._id || a.employeeId?.employeeId === myUser.employeeId);
+        setAllAppraisals(myApps);
 
       } catch (error) {
         console.error('Failed to load appraisal data:', error);
@@ -64,12 +79,39 @@ export default function EmployeeAppraisal() {
     fetchAppraisalData();
   }, [router]);
 
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+    if (qtrsForSelectedYear.length > 0) {
+      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
+      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+    } else {
+      setQtr('');
+    }
+  }, [dbQuarters, filterYear]);
+
+  useEffect(() => {
+    if (!qtr || allAppraisals.length === 0) {
+      setAppraisal(null);
+      return;
+    }
+    const targetQtrObj = dbQuarters.find(q => q._id === qtr);
+    const targetQtrName = targetQtrObj ? targetQtrObj.name : qtr;
+
+    const matchedAppraisal = allAppraisals.find(a => {
+        const appYear = a.reviewYear || a.appraisalQuarter?.year;
+        const appQtrId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+        
+        return (appYear && appYear.toString() === filterYear) && (appQtrId === qtr || a.period?.quarter === targetQtrName);
+    });
+    setAppraisal(matchedAppraisal || null);
+  }, [qtr, filterYear, allAppraisals, dbQuarters]);
+
   const iprfColor = (score) => {
-    if (score >= 1.3) return '#1E40AF'; // Blue
-    if (score >= 1.0) return '#059669'; // Green
-    if (score >= 0.7) return '#D97706'; // Amber
-    if (score > 0) return '#DC2626'; // Red
-    return '#0D2B55'; // Navy Default
+    if (score >= 1.3) return '#1E40AF'; 
+    if (score >= 1.0) return '#059669'; 
+    if (score >= 0.7) return '#D97706'; 
+    if (score > 0) return '#DC2626'; 
+    return '#0D2B55'; 
   };
 
   const iprfLabel = (score) => {
@@ -92,9 +134,7 @@ export default function EmployeeAppraisal() {
   const iprf = appraisal?.calculatedResults?.finalIprfScore || 0;
   const status = appraisal?.workflow?.status;
   
-  // Logic for the award display
   const isCEOApproved = status === 'APPROVED';
-  // Use a hardcoded CP% for display purposes if backend is missing it during this check, just like the source code
   const CP = 13.01; 
   const award = isCEOApproved ? (CP * iprf * pr).toFixed(2) + '%' : '—';
   
@@ -106,16 +146,72 @@ export default function EmployeeAppraisal() {
                         ['UNDER_HR_REVIEW', 'APPROVED_BY_HR', 'WITH_CEO'].includes(status) ? 'At HR' : 
                         status === 'SUBMITTED' ? 'Submitted' : 'Draft';
 
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+  const activeQName = quartersForSelectedYear.find(q => q._id === qtr)?.name || '';
+
   return (
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
-      {/* Header */}
-      <div className="mb-[20px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-          &#128203; My Q3 Appraisal
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
+            &#128203; My {activeQName} Appraisal
+          </div>
+          <div className="text-[13px] text-[#6b7280]">
+            Submitted by your Line Manager &mdash; read-only view
+          </div>
         </div>
-        <div className="text-[13px] text-[#6b7280]">
-          Submitted by your Line Manager &mdash; read-only view
+
+        {/* 🚨 FIXED: Filter Controls (Year and Quarter) with Manual Custom Entry Mode */}
+        <div className="flex gap-[8px]">
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else setFilterYear(e.target.value);
+              }} 
+              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px] shadow-sm"
+            >
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
+
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear || quartersForSelectedYear.length === 0}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[140px] shadow-sm ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -123,12 +219,12 @@ export default function EmployeeAppraisal() {
         <>
           <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] text-[#92400E] rounded-[10px] p-[12px_16px] text-[13px] mb-[20px] shadow-sm flex items-center gap-[8px]">
             <span className="text-[16px] leading-none">&#9200;</span> 
-            <span>Your Q3 2026 appraisal has not yet been submitted by your Line Manager. The deadline is <strong className="font-[800]">30 September 2026</strong>. Contact your manager if you have questions.</span>
+            <span>Your {activeQName} {filterYear} appraisal has not yet been submitted by your Line Manager. Contact your manager if you have questions.</span>
           </div>
           <div className="text-center p-[48px_20px] text-[#6b7280] bg-white border border-[#E2DDD4] rounded-[14px]">
             <div className="text-[48px] mb-[14px] opacity-80">&#128203;</div>
             <div className="text-[16px] font-[700] text-[#0D2B55] mb-[6px]">No appraisal submitted yet</div>
-            <div className="text-[13px]">Your Line Manager will submit your appraisal before the Q3 deadline.</div>
+            <div className="text-[13px]">Your Line Manager will submit your appraisal before the {activeQName} deadline.</div>
           </div>
         </>
       ) : (
@@ -157,7 +253,7 @@ export default function EmployeeAppraisal() {
                   <div className="flex items-center gap-[10px]">
                     <div className="w-[30px] h-[30px] rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[14px]">&#128203;</div>
                     <div>
-                      <div className="text-[14px] font-[800] text-[#0D2B55]">Q3 2026 Appraisal Summary</div>
+                      <div className="text-[14px] font-[800] text-[#0D2B55]">{activeQName} {filterYear} Appraisal Summary</div>
                       <div className="text-[11px] text-[#6b7280]">Submitted by your Line Manager</div>
                     </div>
                   </div>

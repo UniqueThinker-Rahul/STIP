@@ -87,11 +87,6 @@ exports.updateMetrics = async (req, res) => {
       metrics.lockedAt = null;
     }
 
-    // 🚨 UPGRADE: Explicitly save the requireAcknowledgment toggle state
-    if (req.body.requireAcknowledgment !== undefined) {
-      metrics.requireAcknowledgment = req.body.requireAcknowledgment;
-    }
-
     await metrics.save(); 
 
     res.status(200).json({ success: true, data: metrics });
