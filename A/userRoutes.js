@@ -2,7 +2,6 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const Appraisal = require('../models/Appraisal'); // 🚨 UPGRADE: Imported Appraisal model for deletion hook
 const userController = require('../controllers/userController');
 const Notification = require('../models/Notification');
 
@@ -387,19 +386,6 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', '
     user.employmentDetails.isActive = false; 
     await user.save();
 
-    // 🚨 UPGRADE: Automatically move active appraisals to Inactive Directory when employee is recycled
-    await Appraisal.updateMany(
-      { employeeId: req.params.id, isArchived: { $ne: true } },
-      { 
-        $set: { 
-          isArchived: true, 
-          archiveReason: 'EMPLOYEE_DELETED',
-          archivedAt: new Date(),
-          'workflow.status': 'ARCHIVED' 
-        } 
-      }
-    );
-
     const { logAudit } = require('../utils/logger');
     await logAudit({
       user: req.user, role: req.user.role, action: 'USER_DELETED', category: 'ADMIN_ACTION', severity: 'HIGH',
@@ -412,6 +398,24 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', '
   }
 });
 
-// 🚨 UPGRADE: Permanent Delete route completely removed to secure the API.
+// DELETE /api/v1/users/:id/permanent (Wipe completely)
+router.delete('/:id/permanent', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    await User.findByIdAndDelete(req.params.id);
+
+    const { logAudit } = require('../utils/logger');
+    await logAudit({
+      user: req.user, role: req.user.role, action: 'USER_PERMANENTLY_DELETED', category: 'ADMIN_ACTION', severity: 'CRITICAL',
+      details: `Permanently deleted ${user.personalDetails.firstName} ${user.personalDetails.lastName} from the database.`, req
+    });
+
+    res.json({ message: 'User permanently deleted.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error permanently deleting user.' });
+  }
+});
 
 module.exports = router;

@@ -4,9 +4,18 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import api from '../../../lib/api';
+import usePersistentFilter from '../../../hooks/usePersistentFilter';
 
 export default function EmployeeDashboard() {
   const router = useRouter();
+
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [selectedYear, setSelectedYear] = usePersistentFilter('emp_dash_year', currentYearStr);
+  const [selectedQuarterName, setSelectedQuarterName] = usePersistentFilter('emp_dash_quarter', '');
+  const [isManualYear, setIsManualYear] = useState(false);
 
   const [user, setUser] = useState(null);
   const [allMyAppraisals, setAllMyAppraisals] = useState([]);
@@ -16,20 +25,12 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
   
-  // 🚨 NEW: Dynamic Year & Filter States
-  const currentYearNum = new Date().getFullYear();
-  const currentYearStr = currentYearNum.toString();
-  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
-
-  const [selectedYear, setSelectedYear] = useState(currentYearStr);
-  const [isManualYear, setIsManualYear] = useState(false);
-  const [selectedQuarterName, setSelectedQuarterName] = useState('');
-  
   const [activeQuarter, setActiveQuarter] = useState(null);
   const [viewDetailsModalOpen, setViewDetailsModalOpen] = useState(false);
 
+  // 1. Fetch Base Data (User, Appraisals, Quarters)
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    const fetchBaseData = async () => {
       try {
         setLoading(true);
         
@@ -40,17 +41,14 @@ export default function EmployeeDashboard() {
         }
         const sessionUser = JSON.parse(userCookie);
 
-        const [meRes, metricsRes, appraisalsRes, quartersRes] = await Promise.all([
+        const [meRes, appraisalsRes, quartersRes] = await Promise.all([
           api.get('/auth/me').catch(() => ({ data: { data: sessionUser } })),
-          api.get(`/company-metrics/${currentYearStr}`).catch(() => ({ data: { data: null } })), 
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
         const myUser = meRes.data?.data || sessionUser;
         setUser(myUser);
-
-        setMetrics(metricsRes.data?.data || null);
 
         const allApps = appraisalsRes.data?.data || [];
         
@@ -63,36 +61,62 @@ export default function EmployeeDashboard() {
         const fetchedQuarters = quartersRes.data?.data || [];
         setAllQuarters(fetchedQuarters);
 
-        const now = new Date();
-        let defaultActive = fetchedQuarters.find(q => {
-          const start = new Date(q.startDate); start.setHours(0,0,0,0);
-          const end = new Date(q.endDate); end.setHours(23,59,59,999);
-          return now >= start && now <= end;
-        });
-        
-        if (!defaultActive && fetchedQuarters.length > 0) {
-            defaultActive = fetchedQuarters[fetchedQuarters.length - 1]; 
-        }
-        
-        if (defaultActive) {
-            setSelectedYear(defaultActive.year.toString());
-            setSelectedQuarterName(defaultActive.name);
-        }
-
       } catch (error) {
-        console.error('Failed to load employee dashboard data:', error);
+        console.error('Failed to load employee base data:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchDashboardData();
-  }, [router, currentYearStr]);
+    fetchBaseData();
+  }, [router]);
 
+  // 2. The Loading Guard: Safely bind dropdown options to db availability
+  useEffect(() => {
+    if (allQuarters.length === 0) return;
+    const qtrsForSelectedYear = allQuarters.filter(q => q.year.toString() === selectedYear.toString());
+    
+    if (qtrsForSelectedYear.length > 0) {
+      const availableQs = [...new Set(qtrsForSelectedYear.map(q => q.name))].sort();
+      
+      if (!selectedQuarterName || !availableQs.includes(selectedQuarterName)) {
+        const now = new Date();
+        let active = qtrsForSelectedYear.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return now >= start && now <= end;
+        });
+        setSelectedQuarterName(active ? active.name : availableQs[availableQs.length - 1]);
+      }
+    } else {
+      setSelectedQuarterName('');
+    }
+  }, [allQuarters, selectedYear, selectedQuarterName, setSelectedQuarterName]);
+
+  // 3. Dynamic Metrics Fetch based on persistent filters
+  useEffect(() => {
+    const fetchDynamicMetrics = async () => {
+      if (!selectedYear || !selectedQuarterName) {
+         setMetrics(null);
+         return;
+      }
+      try {
+        const qMatch = String(selectedQuarterName).match(/Q?([1-4])/i);
+        const targetMonth = qMatch ? parseInt(qMatch[1]) * 3 : 3;
+        const metricsRes = await api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }));
+        setMetrics(metricsRes.data?.data || null);
+      } catch (error) {
+        console.error('Failed to fetch dynamic company metrics', error);
+      }
+    };
+    fetchDynamicMetrics();
+  }, [selectedYear, selectedQuarterName]);
+
+  // 4. Appraisal Target Matching
   useEffect(() => {
     if (selectedYear && selectedQuarterName && allQuarters.length > 0) {
       const foundQuarter = allQuarters.find(q => 
-        q.year.toString() === selectedYear && q.name === selectedQuarterName
+        q.year.toString() === selectedYear.toString() && q.name === selectedQuarterName
       );
       
       setActiveQuarter(foundQuarter || null);
@@ -121,8 +145,30 @@ export default function EmployeeDashboard() {
     alert(`You have successfully acknowledged your STIP Award for ${activeQuarter ? activeQuarter.year : 'this cycle'}!`);
   };
 
-  const cpPct = metrics?.cpPct || null;
-  const bscRaw = metrics?.bscRawScore || null;
+  // 🚨 UPGRADED: 887-point accurate dynamic calculation injected here
+  const { financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital } = metrics || {};
+  
+  let calcBscRaw = null;
+  let safeCpPct = null;
+
+  if (metrics) {
+    const kpaActuals = [financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital];
+    const anyKpaEntered = kpaActuals.some(v => v !== null && v !== undefined);
+
+    if (anyKpaEntered) {
+      calcBscRaw = kpaActuals.reduce((sum, val, idx) => {
+        const maxPts = [120, 400, 230, 110, 27][idx];
+        const pts = ((val || 0) / 100) * maxPts;
+        return sum + Number(pts.toFixed(1)); 
+      }, 0);
+      
+      const rawCp = calcBscRaw / 100;
+      safeCpPct = Math.round((rawCp + Number.EPSILON) * 100) / 100;
+    }
+  }
+
+  const cpPct = safeCpPct;
+  const bscRaw = calcBscRaw;
 
   const prMonths = user?.employmentDetails?.prorateValue || 12;
   const pr = prMonths / 12;
@@ -155,9 +201,9 @@ export default function EmployeeDashboard() {
 
   const status = appraisal?.workflow?.status || appraisal?.status || 'DRAFT';
   const step1Done = !!appraisal && status !== 'DRAFT';
-  const step2Done = step1Done && ['APPROVED_BY_HR', 'WITH_CEO', 'APPROVED', 'HR_APPROVED'].includes(status);
-  const step3Done = step1Done && ['APPROVED', 'CEO_APPROVED'].includes(status);
-  const step4Done = acknowledged;
+  const step2Done = step1Done && ['APPROVED_BY_HR', 'WITH_CEO', 'APPROVED', 'HR_APPROVED', 'ACKNOWLEDGED'].includes(status);
+  const step3Done = step1Done && ['APPROVED', 'CEO_APPROVED', 'ACKNOWLEDGED'].includes(status);
+  const step4Done = acknowledged || status === 'ACKNOWLEDGED';
 
   const getStatusDisplay = (currentStatus) => {
     if (!step1Done) return 'Not Started'; 
@@ -170,6 +216,7 @@ export default function EmployeeDashboard() {
       case 'WITH_CEO': return 'Pending CEO';
       case 'APPROVED': 
       case 'CEO_APPROVED': return 'CEO Approved';
+      case 'ACKNOWLEDGED': return 'Acknowledged';
       case 'NOT_APPROVED': return 'Returned for Revision';
       case 'REOPENED': return 'Rejected by HR';
       default: return 'Pending Action';
@@ -209,7 +256,7 @@ export default function EmployeeDashboard() {
           <h1 className="text-[24px] font-[800] text-[#0D2B55] mb-[4px]">My STIP Dashboard</h1>
           <p className="text-[13px] text-[#6b7280]">CY{activeQuarter ? activeQuarter.year : new Date().getFullYear()} &mdash; Short-Term Incentive Program overview</p>
         </div>
-        {step3Done && !acknowledged && (
+        {step3Done && !step4Done && (
           <button 
             onClick={handleAcknowledge}
             className="bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-[16px] py-[10px] rounded-[8px] text-[13px] font-[800] transition-colors shadow-sm flex items-center gap-[6px]"
@@ -230,6 +277,7 @@ export default function EmployeeDashboard() {
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[16px] mb-[24px]">
         
+        {/* 🚨 UPGRADED: Navy Card strictly connected to the 887-point system */}
         <div className="bg-[#0D2B55] rounded-[14px] p-[20px] shadow-sm relative overflow-hidden flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-white/50 mb-[4px]">My CP%</div>
@@ -238,9 +286,9 @@ export default function EmployeeDashboard() {
           </div>
           <div>
             <div className="mt-[12px] h-[5px] bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[600ms]" style={{ width: cpPct !== null ? bscRaw + '%' : '0%' }}></div>
+              <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[600ms]" style={{ width: bscRaw !== null ? Math.min(100, (bscRaw / 887) * 100) + '%' : '0%' }}></div>
             </div>
-            <div className="text-[10px] font-[600] text-white/35 mt-[6px]">BSC: {bscRaw !== null ? bscRaw.toFixed(2) : '—'} / 100</div>
+            <div className="text-[10px] font-[600] text-white/35 mt-[6px]">BSC: {bscRaw !== null ? bscRaw.toFixed(1) : '—'} / 887</div>
           </div>
         </div>
 
@@ -304,7 +352,6 @@ export default function EmployeeDashboard() {
                 </button>
               )}
               
-              {/* 🚨 NEW: Dynamic Dropdown Filters */}
               <div className="flex items-center gap-2">
                 <div className="relative">
                   {isManualYear ? (
@@ -447,7 +494,7 @@ export default function EmployeeDashboard() {
                 <div className="pt-[6px]">
                   <div className={`text-[14px] font-[800] mb-[2px] ${step4Done ? 'text-[#0f1923]' : 'text-[#6b7280]'}`}>You acknowledge</div>
                   <div className="text-[13px] text-[#6b7280]">
-                    {step4Done ? `Acknowledged on ${new Date().toLocaleDateString('en-GB')}` : (step3Done ? 'Action required — please acknowledge your result.' : 'Available after CEO approval.')}
+                    {step4Done ? `Acknowledged` : (step3Done ? 'Action required — please acknowledge your result.' : 'Available after CEO approval.')}
                   </div>
                 </div>
               </div>

@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 import StipCategoryChart from '../../../../components/charts/StipCategoryChart';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const KPAS = [
   { name: 'Financial Resilience', wt: 13.5, maxPoints: 120, color: '#3B82F6' },
@@ -28,8 +28,9 @@ export default function KPAScorecard() {
   
   const [currentTime, setCurrentTime] = useState(new Date());
   
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedQuarter, setSelectedQuarter] = useState('');
+  // 🚨 UPGRADED: Both filters are now properly persistent with unique keys
+  const [selectedYear, setSelectedYear] = usePersistentFilter('kpa_selected_year', new Date().getFullYear());
+  const [selectedQuarter, setSelectedQuarter] = usePersistentFilter('kpa_selected_quarter', '');
 
   const [availableQuarters, setAvailableQuarters] = useState([]);
 
@@ -67,10 +68,12 @@ export default function KPAScorecard() {
           setAvailableQuarters(uniqueQuarters);
           
           setSelectedQuarter((prevQ) => {
-             if (!uniqueQuarters.some(m => m.val === prevQ)) {
+             // 🚨 UPGRADED: Type-safe check ensures localStorage strings are evaluated as integers correctly
+             const safePrevQ = prevQ ? parseInt(prevQ) : null;
+             if (!uniqueQuarters.some(m => m.val === safePrevQ)) {
                return uniqueQuarters[uniqueQuarters.length - 1].val;
              }
-             return prevQ;
+             return safePrevQ;
           });
         } else {
           setAvailableQuarters([]);
@@ -170,7 +173,6 @@ export default function KPAScorecard() {
   const anyKpaEntered = kpaActuals.some(v => v !== null);
   
   if (anyKpaEntered) {
-    // 🚨 FIXED: Match UI point rounding before summing to prevent precision loss recalculation
     bscRaw = kpaActuals.reduce((sum, val, idx) => {
       const pts = ((val || 0) / 100) * KPAS[idx].maxPoints;
       return sum + Number(pts.toFixed(1)); 
@@ -178,7 +180,6 @@ export default function KPAScorecard() {
     
     cpPct = bscRaw / 100;
 
-    // 🚨 FIXED: Safe IEEE 754 rounding to guarantee accurate human rounding (7.415 -> 7.42)
     safeCpPct = Math.round((cpPct + Number.EPSILON) * 100) / 100;
 
     const currentMaxCp = 8.87;
@@ -264,7 +265,6 @@ export default function KPAScorecard() {
         show: true,
         icon: '🔒',
         title: 'Scorecard Locked',
-        // 🚨 Applied safe rounding for final text
         detail: `CP for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear} has been permanently set to ${safeCpPct.toFixed(2)}. The scorecard is now read-only.`
       });
     } catch (error) {
@@ -477,7 +477,6 @@ export default function KPAScorecard() {
               <div>
                 <div className="text-[12px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">BSC Raw Score &rarr; Final CP</div>
                 <div className="text-[24px] font-[800] text-[#0D2B55] leading-none mb-[6px]">
-                  {/* 🚨 FIXED: Used safeCpPct for perfect alignment with Quarterly Scorecard panel */}
                   {cpPct !== null ? `${bscRaw.toFixed(1)} / 887 → ${safeCpPct.toFixed(2)}` : '—'}
                 </div>
                 <div className="text-[11px] text-[#6b7280]">Enter all 5 KPA scores to calculate &middot; Max CP cap: 8.87</div>
@@ -525,7 +524,6 @@ export default function KPAScorecard() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[12px] font-[600] text-[#6b7280]">Final CP</span>
-                  {/* 🚨 FIXED: Used safeCpPct for perfect visual sync */}
                   <span className="text-[16px] font-[800] text-[#065F46]">{cpPct !== null ? safeCpPct.toFixed(2) : '—'}</span>
                 </div>
               </div>

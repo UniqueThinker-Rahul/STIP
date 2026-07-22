@@ -6,11 +6,10 @@ exports.getMyTeam = async (req, res) => {
     const managerId = req.user.id || req.user._id;
 
     const team = await User.find({ 
-      'employmentDetails.reportingTo': managerId,
-      'employmentDetails.isDeleted': { $ne: true } // 🚨 UPGRADE: Hide recycled users from manager's team
+      'employmentDetails.reportingTo': managerId 
     })
     .populate('employmentDetails.reportingTo', 'personalDetails') 
-    .select('-password -security.currentSessionId');
+    .select('-password -security.currentSessionId'); 
 
     res.status(200).json({ success: true, data: team });
   } catch (error) {

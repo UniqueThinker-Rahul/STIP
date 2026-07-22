@@ -4,22 +4,48 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
 import StipCategoryChart from '../../../components/charts/StipCategoryChart';
+import usePersistentFilter from '../../../hooks/usePersistentFilter';
+
+const formatDateTime = (dateInput, includeTime = false) => {
+  if (!dateInput) return 'N/A';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return 'N/A';
+  
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  
+  let result = `${mm}/${dd}/${yy}`;
+  
+  if (includeTime) {
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    result += ` at ${hh}:${mins}`;
+  }
+  
+  return result;
+};
 
 export default function ManagerDashboard() {
   const router = useRouter();
   
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+
+  const [selectedYear, setSelectedYear] = usePersistentFilter('mgr_dash_year', currentYearStr);
+  const [selectedQuarter, setSelectedQuarter] = usePersistentFilter('mgr_dash_quarter', 'Q1');
+  const [isManualYear, setIsManualYear] = useState(false);
+
   const [team, setTeam] = useState([]);
-  const [drafts, setDrafts] = useState([]);
-  const [submissions, setSubmissions] = useState([]);
+  const [appraisals, setAppraisals] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Dynamic Quarters State
   const [dbQuarters, setDbQuarters] = useState([]);
   const [activeQuarter, setActiveQuarter] = useState(null);
 
   const [metrics, setMetrics] = useState({
-    financialResilience: 82, operationalEffectiveness: 91, humanCapital: 78,
-    safetyEnvironment: 95, reputationalCapital: 88, cpPct: 13.01, bscRawScore: 86.75
+    financialResilience: null, operationalEffectiveness: null, humanCapital: null,
+    safetyEnvironment: null, reputationalCapital: null
   });
 
   useEffect(() => {
@@ -27,37 +53,28 @@ export default function ManagerDashboard() {
       try {
         setLoading(true);
         
-        // Fetch live metrics, team data, appraisals, AND the dynamic Quarters schedule
-        const [metricsRes, teamRes, appRes, qtrRes] = await Promise.all([
-          api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+        const [teamRes, appRes, qtrRes] = await Promise.all([
           api.get('/users/my-team').catch(() => ({ data: { data: [] } })),
           api.get('/appraisals').catch(() => ({ data: { data: [] } })),
           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
-        if (metricsRes.data?.data) {
-          setMetrics(metricsRes.data.data);
-        }
-
         const myTeam = teamRes.data?.data || [];
         setTeam(myTeam);
 
         const myAppraisals = appRes.data?.data || [];
-        setDrafts(myAppraisals.filter(a => a.workflow?.status === 'DRAFT'));
-        setSubmissions(myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT'));
+        setAppraisals(myAppraisals);
 
-        // Configure Dynamic Quarters
         const fetchedQuarters = qtrRes.data?.data || [];
         fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         setDbQuarters(fetchedQuarters);
 
-        // Find the currently active quarter
         const now = new Date();
         const active = fetchedQuarters.find(q => new Date(q.startDate) <= now && new Date(q.endDate) >= now && !q.isLocked);
         setActiveQuarter(active || null);
 
       } catch (error) {
-        console.error('Failed to load manager data', error);
+        console.error('Failed to load manager base data', error);
       } finally {
         setLoading(false);
       }
@@ -65,16 +82,87 @@ export default function ManagerDashboard() {
     fetchManagerData();
   }, []);
 
-  const pendingHr = submissions.filter(a => a.workflow?.status === 'SUBMITTED').length;
-  const approved = submissions.filter(a => a.workflow?.status === 'APPROVED' || a.workflow?.status === 'APPROVED_BY_HR').length; 
-  
-  // 🚨 APPLIED: Strict threshold for EP counting
+  useEffect(() => {
+    if (dbQuarters.length === 0) return;
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
+    
+    if (qtrsForSelectedYear.length > 0) {
+      const availableQs = [...new Set(qtrsForSelectedYear.map(q => {
+        const m = String(q.name).match(/Q?([1-4])/i);
+        return m ? `Q${m[1]}` : q.name;
+      }))].sort();
+      
+      if (!selectedQuarter || !availableQs.includes(selectedQuarter)) {
+        setSelectedQuarter(availableQs[availableQs.length - 1]);
+      }
+    } else {
+      setSelectedQuarter('');
+    }
+  }, [dbQuarters, selectedYear, selectedQuarter, setSelectedQuarter]);
+
+  useEffect(() => {
+    const fetchDynamicMetrics = async () => {
+      if (!selectedYear || !selectedQuarter) {
+         setMetrics({
+           financialResilience: null, operationalEffectiveness: null, humanCapital: null,
+           safetyEnvironment: null, reputationalCapital: null
+         });
+         return;
+      }
+      try {
+        const targetMonth = parseInt(selectedQuarter.replace('Q', '')) * 3 || 3;
+        const metricsRes = await api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }));
+        const mData = metricsRes.data?.data;
+        if (mData) {
+          setMetrics(mData);
+        } else {
+          setMetrics({
+            financialResilience: null, operationalEffectiveness: null, humanCapital: null,
+            safetyEnvironment: null, reputationalCapital: null
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch dynamic company metrics', error);
+      }
+    };
+    fetchDynamicMetrics();
+  }, [selectedYear, selectedQuarter]);
+
+  const filteredAppraisals = appraisals.filter(a => {
+    const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+    const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
+    const qMatch = String(appQtrRaw).match(/Q?([1-4])/i) || String(appQtrRaw).match(/([1-4])/);
+    const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
+
+    return appYear?.toString() === selectedYear.toString() && appQtr === selectedQuarter;
+  });
+
+  const drafts = filteredAppraisals.filter(a => ['DRAFT', 'REOPENED'].includes(a.workflow?.status));
+  const submissions = filteredAppraisals.filter(a => !['DRAFT', 'REOPENED', 'NOT_STARTED'].includes(a.workflow?.status));
+
+  const pendingHr = submissions.filter(a => ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(a.workflow?.status)).length;
+  const approved = submissions.filter(a => ['APPROVED', 'ACKNOWLEDGED'].includes(a.workflow?.status)).length; 
   const epRated = submissions.filter(a => a.calculatedResults?.finalIprfScore >= 1.300).length;
 
-  const { cpPct, bscRawScore, financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital } = metrics;
-
-  const safeCpPct = cpPct || 0;
+  const { financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital } = metrics;
   
+  // 🚨 UPGRADED: Dynamic 887-point calculation algorithm matching the Quarterly Scorecard
+  const kpaActuals = [financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital];
+  let calcBscRaw = null;
+  let safeCpPct = null;
+  const anyKpaEntered = kpaActuals.some(v => v !== null && v !== undefined);
+
+  if (anyKpaEntered) {
+    calcBscRaw = kpaActuals.reduce((sum, val, idx) => {
+      const maxPts = [120, 400, 230, 110, 27][idx];
+      const pts = ((val || 0) / 100) * maxPts;
+      return sum + Number(pts.toFixed(1)); 
+    }, 0);
+    
+    const rawCp = calcBscRaw / 100;
+    safeCpPct = Math.round((rawCp + Number.EPSILON) * 100) / 100;
+  }
+
   const awNIf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 0.7 × Pro-Rata` : 'CP% × 0.7 × Pro-Rata';
   const awEf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
   const awEPf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
@@ -96,13 +184,71 @@ export default function ManagerDashboard() {
     daysRemainingText = `${diffDays} days remaining`;
   }
 
+  const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
+  const uniqueAvailableQuarters = [...new Set(qtrsForSelectedYear.map(q => {
+    const qMatch = String(q.name).match(/Q?([1-4])/i);
+    return qMatch ? `Q${qMatch[1]}` : q.name;
+  }))].sort();
+
   if (loading) return <div className="text-center p-20 text-[#6b7280]">Loading real-time manager dashboard...</div>;
 
   return (
     <div className="w-full max-w-full pb-10">
-      <div className="mb-[22px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">Dashboard</div>
-        <div className="text-[13px] text-[#6b7280]">Real-time STIP program overview</div>
+      
+      <div className="mb-[22px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">Dashboard</div>
+          <div className="text-[13px] text-[#6b7280]">Real-time STIP program overview</div>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-[10px]">
+          <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+            <select 
+              value={selectedQuarter} 
+              onChange={(e) => setSelectedQuarter(e.target.value)}
+              className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+              disabled={uniqueAvailableQuarters.length === 0}
+            >
+              {uniqueAvailableQuarters.length === 0 && <option value="">No Quarters Active</option>}
+              {uniqueAvailableQuarters.map(q => (
+                 <option key={q} value={q}>{q}</option>
+              ))}
+            </select>
+            <span className="text-[#E2DDD4]">|</span>
+            {isManualYear ? (
+              <input 
+                type="number" 
+                autoFocus
+                defaultValue={selectedYear}
+                onBlur={(e) => {
+                  if (e.target.value) setSelectedYear(e.target.value);
+                  setIsManualYear(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value) setSelectedYear(e.target.value);
+                    setIsManualYear(false);
+                  }
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+              />
+            ) : (
+              <select 
+                value={selectedYear} 
+                onChange={(e) => {
+                  if (e.target.value === 'manual') setIsManualYear(true);
+                  else setSelectedYear(e.target.value);
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
+              >
+                {[currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+              </select>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[12px] mb-[16px]">
@@ -110,13 +256,14 @@ export default function ManagerDashboard() {
         {/* Navy Card: CP Score */}
         <div className="rounded-[14px] p-[16px_18px] bg-[#0D2B55] text-white min-w-0">
           <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-white/50">Company Performance</div>
-          {/* 🚨 FIX: Applied safe fallback to prevent crash */}
-          <div className="text-[30px] font-[800] leading-[1] text-[#e8c96a]">{(cpPct || 0).toFixed(2)}%</div>
-          <div className="text-[11px] mt-[5px] text-white/50">BSC Score: {(bscRawScore || 0).toFixed(2)} / 100</div>
+          {/* 🚨 UPGRADED: Synchronized safe Cp Pct */}
+          <div className="text-[30px] font-[800] leading-[1] text-[#e8c96a]">{safeCpPct !== null ? safeCpPct.toFixed(2) + '%' : '—'}</div>
+          {/* 🚨 UPGRADED: Synchronized 887 point logic */}
+          <div className="text-[11px] mt-[5px] text-white/50">BSC Score: {calcBscRaw !== null ? calcBscRaw.toFixed(1) : '—'} / 887</div>
           <div className="mt-[8px] h-[5px] bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[0.6s]" style={{ width: `${bscRawScore || 0}%` }}></div>
+            <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[0.6s]" style={{ width: calcBscRaw !== null ? Math.min(100, (calcBscRaw / 887) * 100) + '%' : '0%' }}></div>
           </div>
-          <div className="text-[10px] mt-[5px] text-white/35">Max cap 15% &middot; Board approved</div>
+          <div className="text-[10px] mt-[5px] text-white/35">Max cap 15% &middot; {calcBscRaw !== null ? 'Data synced' : 'Pending scores'}</div>
         </div>
 
         {/* White Card: Total Staff */}
@@ -131,13 +278,11 @@ export default function ManagerDashboard() {
           <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-[#6b7280]">My EP Rated Staff</div>
           <div className="flex items-baseline gap-[5px]">
             <div className="text-[30px] font-[800] leading-[1] text-[#1E40AF]">{epRated}</div>
-            <div className="text-[13px] text-[#6b7280] font-[600]">/ 9 max</div>
           </div>
-          <div className="text-[11px] mt-[5px] text-[#6b7280]">Cap = 5% of total company staff</div>
+          <div className="text-[11px] mt-[5px] text-[#6b7280]">Exceeds Performance Ratings</div>
           <div className="mt-[8px] h-[7px] bg-[#DBEAFE] rounded-full overflow-hidden">
-            <div className="h-full bg-[#1E40AF] rounded-full transition-all duration-[0.5s]" style={{ width: Math.min(100, epRated / 9 * 100) + '%' }}></div>
+            <div className="h-full bg-[#1E40AF] rounded-full transition-all duration-[0.5s]" style={{ width: Math.min(100, epRated / Math.max(1, team.length) * 100) + '%' }}></div>
           </div>
-          <div className="text-[10px] mt-[4px] text-[#6b7280]">{epRated} of 9 slots used</div>
         </div>
 
         {/* White Card: Pending Approvals */}
@@ -172,83 +317,84 @@ export default function ManagerDashboard() {
           </div>
           <div className="p-[14px_16px] flex flex-col gap-[11px]">
             
+            {/* 🚨 UPGRADED: Explicit math calculation of actual contribution points out of the exact max values */}
             <div>
               <div className="flex justify-between items-center mb-[4px] gap-[8px]">
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Financial Resilience</span>
                 <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 14%</span>
-                  <span className="text-[12px] font-[800] text-[#3B82F6]">{financialResilience || 0}%</span>
+                  <span className="text-[10px] text-[#6b7280]">Wt: 13.5%</span>
+                  <span className="text-[12px] font-[800] text-[#3B82F6]">{financialResilience !== null ? financialResilience.toFixed(2) + '%' : '—'}</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
                 <div className="h-full bg-[#3B82F6] rounded-full transition-all" style={{ width: `${financialResilience || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((financialResilience || 0) * 0.14).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{financialResilience !== null && financialResilience !== undefined ? ((financialResilience / 100) * 120).toFixed(1) : '0.0'} pts</strong></div>
             </div>
             
             <div>
               <div className="flex justify-between items-center mb-[4px] gap-[8px]">
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Operational Effectiveness</span>
                 <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 45%</span>
-                  <span className="text-[12px] font-[800] text-[#059669]">{operationalEffectiveness || 0}%</span>
+                  <span className="text-[10px] text-[#6b7280]">Wt: 45.1%</span>
+                  <span className="text-[12px] font-[800] text-[#059669]">{operationalEffectiveness !== null ? operationalEffectiveness.toFixed(2) + '%' : '—'}</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
                 <div className="h-full bg-[#059669] rounded-full transition-all" style={{ width: `${operationalEffectiveness || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((operationalEffectiveness || 0) * 0.45).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{operationalEffectiveness !== null && operationalEffectiveness !== undefined ? ((operationalEffectiveness / 100) * 400).toFixed(1) : '0.0'} pts</strong></div>
             </div>
 
             <div>
               <div className="flex justify-between items-center mb-[4px] gap-[8px]">
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Human Capital</span>
                 <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 26%</span>
-                  <span className="text-[12px] font-[800] text-[#F59E0B]">{humanCapital || 0}%</span>
+                  <span className="text-[10px] text-[#6b7280]">Wt: 25.9%</span>
+                  <span className="text-[12px] font-[800] text-[#F59E0B]">{humanCapital !== null ? humanCapital.toFixed(2) + '%' : '—'}</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
                 <div className="h-full bg-[#F59E0B] rounded-full transition-all" style={{ width: `${humanCapital || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((humanCapital || 0) * 0.26).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{humanCapital !== null && humanCapital !== undefined ? ((humanCapital / 100) * 230).toFixed(1) : '0.0'} pts</strong></div>
             </div>
 
             <div>
               <div className="flex justify-between items-center mb-[4px] gap-[8px]">
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Safety & Environment</span>
                 <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 12%</span>
-                  <span className="text-[12px] font-[800] text-[#10B981]">{safetyEnvironment || 0}%</span>
+                  <span className="text-[10px] text-[#6b7280]">Wt: 12.4%</span>
+                  <span className="text-[12px] font-[800] text-[#10B981]">{safetyEnvironment !== null ? safetyEnvironment.toFixed(2) + '%' : '—'}</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
                 <div className="h-full bg-[#10B981] rounded-full transition-all" style={{ width: `${safetyEnvironment || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((safetyEnvironment || 0) * 0.12).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{safetyEnvironment !== null && safetyEnvironment !== undefined ? ((safetyEnvironment / 100) * 110).toFixed(1) : '0.0'} pts</strong></div>
             </div>
 
             <div>
               <div className="flex justify-between items-center mb-[4px] gap-[8px]">
                 <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Reputational Capital</span>
                 <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 3%</span>
-                  <span className="text-[12px] font-[800] text-[#8B5CF6]">{reputationalCapital || 0}%</span>
+                  <span className="text-[10px] text-[#6b7280]">Wt: 3.0%</span>
+                  <span className="text-[12px] font-[800] text-[#8B5CF6]">{reputationalCapital !== null ? reputationalCapital.toFixed(2) + '%' : '—'}</span>
                 </div>
               </div>
               <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
                 <div className="h-full bg-[#8B5CF6] rounded-full transition-all" style={{ width: `${reputationalCapital || 0}%` }}></div>
               </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{((reputationalCapital || 0) * 0.03).toFixed(2)} pts</strong></div>
+              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{reputationalCapital !== null && reputationalCapital !== undefined ? ((reputationalCapital / 100) * 27).toFixed(1) : '0.0'} pts</strong></div>
             </div>
 
             <div className="bg-[#0D2B55] rounded-[9px] p-[11px_14px] flex justify-between items-center mt-[4px]">
-              <span className="text-[12px] font-[700] text-white/60">BSC Raw Score &rarr; CP%</span>
+              <span className="text-[12px] font-[700] text-white/60">BSC Raw Score &rarr; Final CP</span>
               <div>
-                {/* 🚨 FIX: Applied safe fallback */}
-                <span className="text-[20px] font-[800] text-[#e8c96a]">{(bscRawScore || 0).toFixed(2)}</span>
-                <span className="text-[12px] text-white/50"> / 100 &rarr; </span>
-                <span className="text-[16px] font-[800] text-[#e8c96a]">{(cpPct || 0).toFixed(2)}%</span>
+                {/* 🚨 UPGRADED: Accurately outputting the raw BSC and safe CP Pct securely matched to 887 */}
+                <span className="text-[20px] font-[800] text-[#e8c96a]">{calcBscRaw !== null ? calcBscRaw.toFixed(1) : '—'}</span>
+                <span className="text-[12px] text-white/50"> / 887 &rarr; </span>
+                <span className="text-[16px] font-[800] text-[#e8c96a]">{safeCpPct !== null ? safeCpPct.toFixed(2) : '—'}%</span>
               </div>
             </div>
 
@@ -261,15 +407,14 @@ export default function ManagerDashboard() {
             <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFFBEB] flex items-center justify-center text-[13px] shrink-0">&#128176;</div>
             <div>
               <div className="text-[13px] font-[700] text-[#0D2B55]">STIP Award Preview by Rating</div>
-              {/* 🚨 FIX: Applied safe fallback */}
-              <div className="text-[11px] text-[#6b7280]">CP = {(cpPct || 0).toFixed(2)}% &middot; Pro-Rata = 1.000 (full year)</div>
+              <div className="text-[11px] text-[#6b7280]">CP = {safeCpPct !== null ? safeCpPct.toFixed(2) : '0.00'}% &middot; Pro-Rata = 1.000 (full year)</div>
             </div>
           </div>
           <div className="p-[14px_16px] flex flex-col gap-[9px]">
             <div className="bg-[#FEE2E2] border border-[#FECACA] rounded-[10px] p-[12px_14px] flex justify-between items-center gap-[10px]">
               <div className="min-w-0">
                 <div className="text-[13px] font-[700] text-[#991B1B]">0.0 &mdash; Less than Satisfactory</div>
-                <div className="text-[11px] text-[#991B1B]/75 mt-[2px]">{(cpPct || 0).toFixed(2)}% &times; 0.0 &times; Pro-Rata &times; Salary</div>
+                <div className="text-[11px] text-[#991B1B]/75 mt-[2px]">{safeCpPct !== null ? safeCpPct.toFixed(2) : '0.00'}% &times; 0.0 &times; Pro-Rata &times; Salary</div>
               </div>
               <div className="text-[22px] font-[800] text-[#991B1B] shrink-0">0.00%</div>
             </div>
@@ -311,7 +456,7 @@ export default function ManagerDashboard() {
               <div className="w-[28px] h-[28px] rounded-[7px] bg-[#EDE9FE] flex items-center justify-center text-[13px] shrink-0">&#128203;</div>
               <div>
                 <div className="text-[13px] font-[700] text-[#0D2B55]">My Appraisal Activity</div>
-                <div className="text-[11px] text-[#6b7280]">Submissions, drafts &amp; status</div>
+                <div className="text-[11px] text-[#6b7280]">Submissions, drafts &amp; status for {selectedQuarter} {selectedYear}</div>
               </div>
             </div>
             <button 
@@ -342,7 +487,7 @@ export default function ManagerDashboard() {
             <div className="flex flex-col gap-[6px] flex-1">
               {recentActivity.length === 0 ? (
                 <div className="text-center p-[18px] text-[#6b7280] text-[12px] bg-[#FAF8F4] rounded-[8px]">
-                  No activity yet &mdash; start by creating an appraisal
+                  No activity for this period &mdash; start by creating an appraisal
                 </div>
               ) : (
                 recentActivity.map((a, i) => (
@@ -401,7 +546,7 @@ export default function ManagerDashboard() {
                 {dbQuarters.length === 0 ? (
                   <tr><td colSpan="4" className="text-center p-4 text-gray-500">No timeline data available.</td></tr>
                 ) : (
-                  dbQuarters.map(q => {
+                  dbQuarters.filter(q => q.year.toString() === selectedYear.toString()).map(q => {
                     const now = new Date();
                     const exp = now > new Date(q.endDate);
                     const isActive = q._id === activeQuarter?._id;
@@ -425,7 +570,7 @@ export default function ManagerDashboard() {
                       <tr key={q._id} className={bgRow}>
                         <td className={`p-[9px_8px] font-[700] ${textClass} rounded-l-[6px]`}>{q.name}</td>
                         <td className="p-[9px_8px] text-[#0f1923]">{q.year}</td>
-                        <td className={`p-[9px_8px] text-center font-[700] ${textClass}`}>{new Date(q.endDate).toLocaleDateString()}</td>
+                        <td className={`p-[9px_8px] text-center font-[700] ${textClass}`}>{formatDateTime(q.endDate, true)}</td>
                         <td className="p-[9px_8px] text-center rounded-r-[6px]">{statusBadge}</td>
                       </tr>
                     );

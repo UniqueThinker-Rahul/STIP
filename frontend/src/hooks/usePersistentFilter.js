@@ -1,33 +1,34 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function usePersistentFilter(key, initialValue) {
-  // Safely grab the data from browser memory
-  const getSavedValue = () => {
-    if (typeof window === 'undefined') return initialValue;
-    try {
-      const item = window.localStorage.getItem(`stip_filter_${key}`);
-      return item !== null ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      return initialValue;
+  // 1. Synchronously initialize state from localStorage to prevent API race conditions
+  const [value, setValue] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const item = window.localStorage.getItem(`stip_filter_${key}`);
+        return item !== null ? JSON.parse(item) : initialValue;
+      } catch (error) {
+        console.error("Error reading localStorage", error);
+        return initialValue;
+      }
     }
-  };
+    return initialValue;
+  });
 
-  const [value, setValue] = useState(initialValue);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const isFirstRender = useRef(true);
 
-  // 1. Hydration: Sync with localStorage ONLY once when the component officially mounts
+  // 2. Only save to localStorage AFTER the first render to avoid accidental overwrites on mount
   useEffect(() => {
-    setValue(getSavedValue());
-    setIsHydrated(true);
-  }, [key]);
-
-  // 2. Persistence: Save to localStorage whenever value changes, BUT ONLY after data has hydrated
-  useEffect(() => {
-    if (isHydrated) {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(`stip_filter_${key}`, JSON.stringify(value));
     }
-  }, [key, value, isHydrated]);
+  }, [key, value]);
 
   return [value, setValue];
 }

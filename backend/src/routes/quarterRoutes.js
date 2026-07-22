@@ -6,7 +6,7 @@ const { logAudit } = require('../utils/logger');
 
 router.use(authGuard);
 
-// 1. GET ALL QUARTERS (🚨 UPGRADED: Hides unpublished quarters universally)
+// 1. GET ALL QUARTERS (Hides unpublished quarters universally)
 router.get('/', async (req, res) => {
   try {
     const { all } = req.query;
@@ -28,6 +28,11 @@ router.get('/', async (req, res) => {
 router.post('/', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) => {
   try {
     const { name, year, startDate, endDate, isPublished } = req.body;
+
+    // 🚨 UPGRADED: Block HR from publishing during creation
+    if (isPublished === true && req.user.role === 'HR_ADMIN') {
+      return res.status(403).json({ message: 'Permission Denied: HR can create quarters, but only the CEO can publish them.' });
+    }
 
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -76,7 +81,7 @@ router.put('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) =
     
     if (!quarter) return res.status(404).json({ message: 'Quarter not found' });
 
-    // 🚨 UPGRADED: Smart bypass for the isPublished toggle.
+    // Smart bypass for the isPublished toggle.
     const start = new Date(quarter.startDate);
     start.setHours(0, 0, 0, 0);
     const isActiveOrExpired = new Date() >= start;
@@ -94,8 +99,14 @@ router.put('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) =
         return res.status(403).json({ message: 'Permission Denied: Only Upcoming quarters can have their dates or names modified.' });
       }
 
-      // If core fields exactly match, it means they are ONLY toggling the publish button. Allow it to bypass the lock.
-      if (isPublished !== undefined) quarter.isPublished = isPublished;
+      // 🚨 UPGRADED: Block HR from publishing/unpublishing via the active bypass
+      if (isPublished !== undefined && quarter.isPublished !== isPublished) {
+        if (req.user.role === 'HR_ADMIN') {
+          return res.status(403).json({ message: 'Permission Denied: Only the CEO can publish or unpublish a quarter.' });
+        }
+        quarter.isPublished = isPublished;
+      }
+
       await quarter.save();
       return res.json({ message: 'Quarter publish state updated successfully', data: quarter });
     }
@@ -132,7 +143,14 @@ router.put('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), async (req, res) =
     quarter.year = year;
     quarter.startDate = startDate;
     quarter.endDate = endDate;
-    if (isPublished !== undefined) quarter.isPublished = isPublished; 
+    
+    // 🚨 UPGRADED: Block HR from publishing/unpublishing during standard edit
+    if (isPublished !== undefined && quarter.isPublished !== isPublished) {
+      if (req.user.role === 'HR_ADMIN') {
+        return res.status(403).json({ message: 'Permission Denied: Only the CEO can publish or unpublish a quarter.' });
+      }
+      quarter.isPublished = isPublished; 
+    }
     
     await quarter.save();
 
