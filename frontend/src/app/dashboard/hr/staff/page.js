@@ -127,7 +127,7 @@ export default function StaffManagement() {
   const [dbStaff, setDbStaff] = useState([]);
   const [dbRecycleBin, setDbRecycleBin] = useState([]); 
   const [dbManagers, setDbManagers] = useState([]);
-  const [dbExecutives, setDbExecutives] = useState([]); // 🚨 NEW: State for Executives
+  const [dbExecutives, setDbExecutives] = useState([]); 
   
   const [companyCodes, setCompanyCodes] = useState([]);
   const [officeLocations, setOfficeLocations] = useState([]);
@@ -148,8 +148,6 @@ export default function StaffManagement() {
   const [openDropdown, setOpenDropdown] = useState(null);
   const [searchQueries, setSearchQueries] = useState({ title: '', office: '', co: '', mgr: '', exec: '' });
   const dropdownRef = useRef(null);
-
-  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const [selectedStaffIds, setSelectedStaffIds] = useState([]);
   const [isBulkActing, setIsBulkActing] = useState(false);
@@ -200,9 +198,8 @@ export default function StaffManagement() {
       setDbRecycleBin(resBin.data?.data || []);
       setDbManagers(resMgrs.data?.data || []);
       
-      // 🚨 FIX: Ensure dbExecutives actually receives the data array
       const execsData = resExecs.data?.data || [];
-      console.log('Fetched Executives:', execsData); // debug log to confirm data
+      console.log('Fetched Executives:', execsData); 
       setDbExecutives(execsData);
       
       const configData = configRes.data?.data || {};
@@ -301,7 +298,7 @@ export default function StaffManagement() {
     );
   };
 
- const handleBulkRestore = () => {
+  const handleBulkRestore = () => {
     if (selectedStaffIds.length === 0) return;
 
     showDialog('confirm', 'Confirm Bulk Restore', `Are you sure you want to restore ${selectedStaffIds.length} selected employees back to the active directory?`, async () => {
@@ -368,32 +365,6 @@ export default function StaffManagement() {
         showDialog('alert', 'Error', "Failed to delete from database."); 
       }
     });
-  };
-
-  const handleMassDelete = () => {
-    if (dbStaff.length === 0) return showDialog('alert', 'Notice', "No active staff to delete.");
-    showDialog('confirm', 'Mass Deletion Warning', `WARNING: You are about to move ALL ${dbStaff.length} active employees to the Recycle Bin.\n\nAre you absolutely sure you want to do this?`, () => {
-        showDialog('prompt', 'Confirm MASSIVE Action', 'To confirm this mass deletion, please type "DELETE ALL" below:', async (inputValue) => {
-            if (inputValue !== "DELETE ALL") {
-              showDialog('alert', 'Action Cancelled', 'Mass deletion cancelled.');
-              return;
-            }
-            closeDialog();
-            try {
-              setIsDeletingAll(true);
-              await api.delete('/users/mass-delete'); 
-              setSuccessMsg(`All employees have been successfully moved to the Recycle Bin.`);
-              fetchData();
-              setTimeout(() => setSuccessMsg(''), 5000);
-            } catch (e) { 
-              showDialog('alert', 'Error', "Failed to execute mass deletion."); 
-            } finally {
-              setIsDeletingAll(false);
-            }
-          }
-        );
-      }
-    );
   };
 
  const handleRestore = async (userId) => {
@@ -475,7 +446,6 @@ export default function StaffManagement() {
     });
   };
 
-  // 🚨 FIX: ensure options are passed properly for the executive dropdown
   const renderSearchableDropdown = (fieldKey, dbFieldObj, dbFieldProp, options, placeholder, displayKey, valueKey = null) => {
     const isOpen = openDropdown === fieldKey;
     const query = searchQueries[fieldKey] || '';
@@ -702,17 +672,6 @@ export default function StaffManagement() {
           </div>
           
           <div className="flex gap-2">
-            {!isRecycleBinView && (
-              <button 
-                onClick={handleMassDelete} 
-                disabled={dbStaff.length === 0 || isDeletingAll}
-                className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm disabled:opacity-50"
-              >
-                {isDeletingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />} 
-                Delete All Staff
-              </button>
-            )}
-
             <button onClick={handleDownloadCSV} className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-slate-700 bg-white border shadow-sm hover:bg-slate-50 rounded-lg transition-colors">
                <Download className="w-3.5 h-3.5" /> Download CSV
             </button>
@@ -801,7 +760,7 @@ export default function StaffManagement() {
                       </div>
                     </td>
                     <td className="px-6 py-3 text-[11px] font-medium text-slate-600">{mgrName}</td>
-                   <td className="px-6 py-3 text-center">
+                    <td className="px-6 py-3 text-center">
                       {isRecycleBinView ? (
                         <div className="flex items-center justify-center gap-2">
                           <button onClick={() => handleRestore(e._id)} className="px-3 py-1.5 text-xs font-bold border border-green-200 text-green-700 hover:bg-green-50 rounded-md flex items-center gap-1.5 transition-colors bg-white shadow-sm">
@@ -901,7 +860,7 @@ export default function StaffManagement() {
           
           <div className="w-px h-6 bg-slate-700"></div>
 
-         <div className="flex gap-2">
+          <div className="flex gap-2">
             {!isRecycleBinView ? (
               <button 
                 onClick={handleBulkDelete}
@@ -1152,7 +1111,6 @@ export default function StaffManagement() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-[#9F1239] uppercase mb-1">Executive Member (Oversight)</label>
-                    {/* 🚨 FIX: Pass dbExecutives array explicitly here instead of depending on older closure references */}
                     {renderSearchableDropdown('exec', 'employmentDetails', 'executiveTo', dbExecutives, 'Assign to Executive...', (m) => {
                        if (!m) return '';
                        const { firstName, middleName, lastName } = splitName(m.personalDetails || m);

@@ -301,7 +301,7 @@ export default function StaffManagement() {
     );
   };
 
-  const handleBulkRestore = () => {
+ const handleBulkRestore = () => {
     if (selectedStaffIds.length === 0) return;
 
     showDialog('confirm', 'Confirm Bulk Restore', `Are you sure you want to restore ${selectedStaffIds.length} selected employees back to the active directory?`, async () => {
@@ -315,27 +315,6 @@ export default function StaffManagement() {
           setTimeout(() => setSuccessMsg(''), 3000);
         } catch (e) {
           showDialog('alert', 'Error', "Failed to restore some or all selected users.");
-        } finally {
-          setIsBulkActing(false);
-        }
-      }
-    );
-  };
-
-  const handleBulkPermanentDelete = () => {
-    if (selectedStaffIds.length === 0) return;
-
-    showDialog('confirm', 'Bulk Permanent Deletion', `WARNING: This will permanently erase ${selectedStaffIds.length} selected employees from the database. This action CANNOT be undone. Are you sure?`, async () => {
-        closeDialog();
-        setIsBulkActing(true);
-        try {
-          await Promise.all(selectedStaffIds.map(id => api.delete(`/users/${id}/permanent`)));
-          setSuccessMsg(`${selectedStaffIds.length} employees permanently deleted.`);
-          setSelectedStaffIds([]);
-          fetchData();
-          setTimeout(() => setSuccessMsg(''), 3000);
-        } catch (e) {
-          showDialog('alert', 'Error', "Failed to permanently delete some or all selected users.");
         } finally {
           setIsBulkActing(false);
         }
@@ -417,7 +396,7 @@ export default function StaffManagement() {
     );
   };
 
-  const handleRestore = async (userId) => {
+ const handleRestore = async (userId) => {
     try {
       await api.patch(`/users/${userId}/restore`);
       setSuccessMsg("Employee successfully restored to active directory.");
@@ -426,21 +405,6 @@ export default function StaffManagement() {
     } catch (e) { 
       showDialog('alert', 'Error', "Failed to restore user."); 
     }
-  };
-
-  const handlePermanentDelete = (userId) => {
-    showDialog('confirm', 'Permanent Deletion', "WARNING: This will permanently erase the employee from the database. This action cannot be undone. Are you sure?", async () => {
-        closeDialog();
-        try {
-          await api.delete(`/users/${userId}/permanent`);
-          setSuccessMsg("Employee permanently deleted from the system.");
-          fetchData();
-          setTimeout(() => setSuccessMsg(''), 3000);
-        } catch (e) { 
-          showDialog('alert', 'Error', "Failed to permanently delete user."); 
-        }
-      }
-    );
   };
 
   const handleDownloadCSV = () => {
@@ -673,14 +637,9 @@ export default function StaffManagement() {
           </div>
           <div className="flex flex-wrap gap-2">
             {isRecycleBinView ? (
-              <>
-                <button onClick={handleBulkRestore} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#065F46] bg-[#D1FAE5] hover:bg-[#A7F3D0] border border-[#A7F3D0] rounded-lg transition-colors shadow-sm disabled:opacity-50">
-                  {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Restore Selected
-                </button>
-                <button onClick={handleBulkPermanentDelete} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm disabled:opacity-50">
-                  {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Permanently Delete Selected
-                </button>
-              </>
+              <button onClick={handleBulkRestore} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#065F46] bg-[#D1FAE5] hover:bg-[#A7F3D0] border border-[#A7F3D0] rounded-lg transition-colors shadow-sm disabled:opacity-50">
+                {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Restore Selected
+              </button>
             ) : (
               <button onClick={handleBulkDelete} disabled={isBulkActing} className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#991B1B] bg-[#FEF2F2] hover:bg-[#FECACA] border border-[#FECACA] rounded-lg transition-colors shadow-sm disabled:opacity-50">
                 {isBulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Move Selected to Recycle Bin
@@ -842,14 +801,11 @@ export default function StaffManagement() {
                       </div>
                     </td>
                     <td className="px-6 py-3 text-[11px] font-medium text-slate-600">{mgrName}</td>
-                    <td className="px-6 py-3 text-center">
+                   <td className="px-6 py-3 text-center">
                       {isRecycleBinView ? (
                         <div className="flex items-center justify-center gap-2">
                           <button onClick={() => handleRestore(e._id)} className="px-3 py-1.5 text-xs font-bold border border-green-200 text-green-700 hover:bg-green-50 rounded-md flex items-center gap-1.5 transition-colors bg-white shadow-sm">
                             <RotateCcw className="w-3 h-3" /> Restore
-                          </button>
-                          <button onClick={() => handlePermanentDelete(e._id)} className="p-1.5 border border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors bg-white shadow-sm" title="Permanently Delete">
-                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       ) : (
@@ -945,7 +901,7 @@ export default function StaffManagement() {
           
           <div className="w-px h-6 bg-slate-700"></div>
 
-          <div className="flex gap-2">
+         <div className="flex gap-2">
             {!isRecycleBinView ? (
               <button 
                 onClick={handleBulkDelete}
@@ -954,20 +910,12 @@ export default function StaffManagement() {
                 <Trash2 className="w-4 h-4" /> Move to Recycle Bin
               </button>
             ) : (
-              <>
-                <button 
-                  onClick={handleBulkRestore}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-full transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" /> Restore Selected
-                </button>
-                <button 
-                  onClick={handleBulkPermanentDelete}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-full transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" /> Permanently Delete
-                </button>
-              </>
+              <button 
+                onClick={handleBulkRestore}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-full transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" /> Restore Selected
+              </button>
             )}
             <button 
               onClick={() => setSelectedStaffIds([])}
