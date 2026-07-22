@@ -29,7 +29,6 @@ export default function ICTScorecardControl() {
   const [isManualYear, setIsManualYear] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q2');
   
-  // 🚨 UPGRADED: State for Bulk/Employee ID Revert Input
   const [revertInput, setRevertInput] = useState('');
 
   const fetchMetrics = async () => {
@@ -37,7 +36,6 @@ export default function ICTScorecardControl() {
       setLoading(true);
       const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
       
-      // 🚨 FIXED: Fetch from BOTH endpoints to guarantee we catch the saved toggle state
       const [qscRes, metricsRes] = await Promise.all([
         api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } })),
         api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }))
@@ -47,7 +45,6 @@ export default function ICTScorecardControl() {
       const match = list.find(item => item.quarter === selectedQuarter) || {};
       const cMetrics = metricsRes.data?.data || {};
 
-      // Merge safely, trusting company-metrics for the toggle state
       setMetrics({
         ...match,
         ...cMetrics,
@@ -109,9 +106,8 @@ export default function ICTScorecardControl() {
     }
   };
 
-  const requireAck = metrics?.requireAcknowledgment !== false; // Safely defaults to true
+  const requireAck = metrics?.requireAcknowledgment !== false; 
 
-  // 🚨 FIXED: Uses explicit requireAck state to prevent getting "stuck"
   const handleAckToggle = async () => {
     try {
       setIsProcessing(true);
@@ -155,25 +151,26 @@ export default function ICTScorecardControl() {
     }
   };
 
-  // 🚨 UPGRADED: Advanced Bulk & Employee ID Revert Logic
   const handleRevertAck = async () => {
     if (!revertInput) return;
     try {
       setIsProcessing(true);
       
-      // 1. Fetch all appraisals
       const res = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
       const allApps = res.data?.data || [];
       
-      // 2. Filter exactly for this Quarter and Year that are currently ACKNOWLEDGED
       const quarterApps = allApps.filter(a => {
         const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
-        const appQtr = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name;
+        
+        // 🚨 UPGRADE: Safely normalize the quarter name string (e.g. "Quarter 1 (Q1)" strictly becomes "Q1")
+        const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
+        const qMatch = String(appQtrRaw).match(/Q?([1-4])/i) || String(appQtrRaw).match(/([1-4])/);
+        const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
+
         const isAck = a.workflow?.status === 'ACKNOWLEDGED' || a.status === 'ACKNOWLEDGED';
         return appYear?.toString() === selectedYear.toString() && appQtr === selectedQuarter && isAck;
       });
 
-      // 3. Filter for 'ALL' or specific Employee ID
       let targets = [];
       const inputClean = revertInput.trim().toUpperCase();
       
@@ -197,16 +194,21 @@ export default function ICTScorecardControl() {
         return;
       }
 
-      // 4. Automatically process all matched targets back to APPROVED
       let successCount = 0;
       for (const app of targets) {
         try {
-          await api.put(`/appraisals/${app._id}`, {
-            ...app,
-            status: 'APPROVED',
-            workflow: { ...(app.workflow || {}), status: 'APPROVED' },
-            acknowledgedAt: null
-          });
+          // Attempt dedicated reset route first
+          try {
+             await api.patch(`/appraisals/${app._id}/reset-ack`);
+          } catch (err) {
+             // Fallback to standard PUT update to revert status to APPROVED
+             await api.put(`/appraisals/${app._id}`, {
+               ...app,
+               status: 'APPROVED',
+               workflow: { ...(app.workflow || {}), status: 'APPROVED' },
+               acknowledgedAt: null
+             });
+          }
           successCount++;
         } catch (e) {
           console.error(`Failed to revert appraisal ${app._id}`, e);
@@ -414,14 +416,12 @@ export default function ICTScorecardControl() {
                       <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-md ${requireAck ? 'translate-x-7' : 'translate-x-1'}`} />
                     </button>
                   </div>
-
                 </div>
                 
-                {/* 🚨 UPGRADED: Revert Acknowledgment Feature Card */}
                 <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
                   <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">Revert Employee Acknowledgment</div>
                   <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
-                    Enter an Employee ID (e.g., <strong>3692026</strong>) or type <strong>ALL</strong> to revert acknowledged appraisals back to APPROVED for {selectedQuarter} {selectedYear}. This allows them to acknowledge again.
+                    Enter an Employee ID (e.g., <strong>369, 000, 111</strong>) or type <strong>ALL</strong> to revert acknowledged appraisals back to APPROVED for {selectedQuarter} {selectedYear}. This allows them to acknowledge again.
                   </div>
                   <div className="flex flex-col sm:flex-row gap-[8px]">
                     <input 

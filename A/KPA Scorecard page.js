@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 import StipCategoryChart from '../../../../components/charts/StipCategoryChart';
 
+// 🚨 FIXED: Synchronized the exact Weights and Max Points from the official Excel logic
 const KPAS = [
   { name: 'Financial Resilience', wt: 13.5, maxPoints: 120, color: '#3B82F6' },
   { name: 'Operational Effectiveness', wt: 45.1, maxPoints: 400, color: '#059669' },
@@ -42,6 +42,7 @@ export default function KPAScorecard() {
     const fetchDynamicQuarters = async () => {
       setLoading(true);
       try {
+        // 🚨 ADDED: Pass the ?all=true flag so Admin can see ALL quarters (published and unpublished)
         const res = await api.get('/quarters?all=true').catch(() => ({ data: { data: [] } }));
         const allQuarters = res.data?.data || [];
         
@@ -165,26 +166,17 @@ export default function KPAScorecard() {
 
   let bscRaw = null;
   let cpPct = null;
-  let safeCpPct = null; 
   let tierPct = null;
   const anyKpaEntered = kpaActuals.some(v => v !== null);
   
   if (anyKpaEntered) {
-    // 🚨 FIXED: Match UI point rounding before summing to prevent precision loss recalculation
-    bscRaw = kpaActuals.reduce((sum, val, idx) => {
-      const pts = ((val || 0) / 100) * KPAS[idx].maxPoints;
-      return sum + Number(pts.toFixed(1)); 
-    }, 0);
-    
+    bscRaw = kpaActuals.reduce((sum, val, idx) => sum + (((val || 0) / 100) * KPAS[idx].maxPoints), 0);
     cpPct = bscRaw / 100;
 
-    // 🚨 FIXED: Safe IEEE 754 rounding to guarantee accurate human rounding (7.415 -> 7.42)
-    safeCpPct = Math.round((cpPct + Number.EPSILON) * 100) / 100;
-
     const currentMaxCp = 8.87;
-    if (safeCpPct >= currentMaxCp) tierPct = 15;
-    else if (safeCpPct >= currentMaxCp * 0.8) tierPct = 10;
-    else if (safeCpPct >= currentMaxCp * 0.48) tierPct = 5;
+    if (cpPct >= currentMaxCp) tierPct = 15;
+    else if (cpPct >= currentMaxCp * 0.8) tierPct = 10;
+    else if (cpPct >= currentMaxCp * 0.48) tierPct = 5;
     else tierPct = 0;
   }
 
@@ -204,7 +196,7 @@ export default function KPAScorecard() {
         safetyEnvironment: kpaActuals[3],
         reputationalCapital: kpaActuals[4],
         bscRawScore: bscRaw,
-        cpPct: cpPct, 
+        cpPct: cpPct, // Saved securely out of 8.87 to map with the Quarterly Scorecard logic
         locked: false
       };
       
@@ -264,8 +256,7 @@ export default function KPAScorecard() {
         show: true,
         icon: '🔒',
         title: 'Scorecard Locked',
-        // 🚨 Applied safe rounding for final text
-        detail: `CP for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear} has been permanently set to ${safeCpPct.toFixed(2)}. The scorecard is now read-only.`
+        detail: `CP for ${availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} ${selectedYear} has been permanently set to ${cpPct.toFixed(2)}. The scorecard is now read-only.`
       });
     } catch (error) {
       alert("Failed to lock the scorecard.");
@@ -310,6 +301,7 @@ export default function KPAScorecard() {
                disabled={availableQuarters.length === 0}
              >
                 {availableQuarters.length === 0 && <option value="">No Quarters Created</option>}
+                {/* 🚨 ADDED: Displays (Unpublished) tag dynamically inside the dropdown options */}
                 {availableQuarters.map(q => (
                    <option key={q.val} value={q.val}>
                      {q.label} {!q.isPublished ? '(Unpublished)' : ''}
@@ -477,8 +469,7 @@ export default function KPAScorecard() {
               <div>
                 <div className="text-[12px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">BSC Raw Score &rarr; Final CP</div>
                 <div className="text-[24px] font-[800] text-[#0D2B55] leading-none mb-[6px]">
-                  {/* 🚨 FIXED: Used safeCpPct for perfect alignment with Quarterly Scorecard panel */}
-                  {cpPct !== null ? `${bscRaw.toFixed(1)} / 887 → ${safeCpPct.toFixed(2)}` : '—'}
+                  {cpPct !== null ? `${bscRaw.toFixed(1)} / 887 → ${cpPct.toFixed(2)}` : '—'}
                 </div>
                 <div className="text-[11px] text-[#6b7280]">Enter all 5 KPA scores to calculate &middot; Max CP cap: 8.87</div>
               </div>
@@ -517,7 +508,7 @@ export default function KPAScorecard() {
               <div className="flex flex-col gap-[12px]">
                 <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
                   <span className="text-[12px] font-[600] text-[#6b7280]">BSC Raw Score</span>
-                  <span className="text-[14px] font-[800] text-[#0D2B55]">{cpPct !== null ? bscRaw.toFixed(1) : '—'}</span>
+                  <span className="text-[14px] font-[800] text-[#0D2B55]">{cpPct !== null ? bscRaw.toFixed(2) : '—'}</span>
                 </div>
                 <div className="flex justify-between items-center pb-[8px] border-b border-[#E2DDD4]">
                   <span className="text-[12px] font-[600] text-[#6b7280]">Max CP Cap</span>
@@ -525,8 +516,7 @@ export default function KPAScorecard() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[12px] font-[600] text-[#6b7280]">Final CP</span>
-                  {/* 🚨 FIXED: Used safeCpPct for perfect visual sync */}
-                  <span className="text-[16px] font-[800] text-[#065F46]">{cpPct !== null ? safeCpPct.toFixed(2) : '—'}</span>
+                  <span className="text-[16px] font-[800] text-[#065F46]">{cpPct !== null ? cpPct.toFixed(2) : '—'}</span>
                 </div>
               </div>
             </div>
@@ -598,7 +588,7 @@ export default function KPAScorecard() {
               <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">Lock {availableQuarters.find(q=>q.val===selectedQuarter)?.label || `Q${selectedQuarter}`} {selectedYear} Scorecard?</div>
               <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
                 This action is <strong>irreversible</strong> from the CEO panel. 
-                Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{safeCpPct.toFixed(2)}</strong>?
+                Are you absolutely sure the Board has approved the final CP calculation of <strong className="text-[#0D2B55]">{cpPct.toFixed(2)}</strong>?
               </div>
               <div className="flex gap-[12px] justify-center">
                 <button 
