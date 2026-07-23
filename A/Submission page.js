@@ -115,14 +115,14 @@ export default function MySubmissions() {
           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
         
-        // 🚨 UPGRADE: Stop filtering out DRAFTs so the system knows an appraisal is actually in progress!
         const myAppraisals = appRes.data?.data || [];
-        myAppraisals.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-        
         const myTeam = teamRes.data?.data || [];
         const activeQuarters = quarterRes.data?.data || [];
         
-        setSubmissions(myAppraisals);
+        const submitted = myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT');
+        submitted.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+        
+        setSubmissions(submitted);
         setTeam(myTeam);
         setQuarters(activeQuarters);
         
@@ -145,16 +145,13 @@ export default function MySubmissions() {
     fetchSubmissionsAndContext();
   }, []);
 
-  // 🚨 UPGRADE: Added missing DRAFT and ACKNOWLEDGED mappings
   const getStatusConfig = (status) => {
     switch(status) {
-      case 'DRAFT': return { text: 'Saved in Draft', badgeClass: 'bg-[#FAF8F4] text-[#6b7280] border border-[#E2DDD4]' };
       case 'SUBMITTED': return { text: 'Submitted to HR', badgeClass: 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]' };
       case 'UNDER_HR_REVIEW': return { text: 'Under HR Review', badgeClass: 'bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE]' };
       case 'APPROVED_BY_HR': return { text: 'HR Approved', badgeClass: 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' };
       case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
       case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
-      case 'ACKNOWLEDGED': return { text: 'Emp. Acknowledged', badgeClass: 'bg-[#065F46] text-white border border-[#065F46]' };
       case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       case 'REOPENED': return { text: 'HR Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       case 'PENDING_SUBMISSION': return { text: 'Awaiting Manager Rating', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
@@ -162,7 +159,6 @@ export default function MySubmissions() {
     }
   };
 
-  // 🚨 UPGRADE: Bulletproof categorization of Missing, Draft, and Submitted states
   const getDisplayedItems = () => {
     if (!selectedQuarterId) return [];
 
@@ -171,19 +167,15 @@ export default function MySubmissions() {
       return qId === selectedQuarterId;
     });
 
-    const appraisedStaffIds = quarterAppraisals.map(app => (app.employeeId?._id || app.employeeId).toString());
+    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
     let items = [];
 
-    if (reportType === 'SUBMITTED') {
-      items = quarterAppraisals.filter(a => a.workflow?.status !== 'DRAFT');
-    } else if (reportType === 'ALL') {
+    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
       items = [...quarterAppraisals];
-    } else if (reportType === 'MISSING') {
-      items = quarterAppraisals.filter(a => a.workflow?.status === 'DRAFT');
     }
 
     if (reportType === 'MISSING' || reportType === 'ALL') {
-      const missingStaff = team.filter(u => !appraisedStaffIds.includes(u._id.toString()));
+      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
       const missingItems = missingStaff.map(u => ({
         _id: `missing-${u._id}`,
         isMissing: true,
@@ -195,57 +187,77 @@ export default function MySubmissions() {
       items = [...items, ...missingItems];
     }
 
-    // Sort to put missing/pending staff at the top, followed by date updated
-    items.sort((a, b) => {
-      if (a.isMissing && !b.isMissing) return -1;
-      if (!a.isMissing && b.isMissing) return 1;
-      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
-    });
-
     return items;
   };
 
   const displayedItems = getDisplayedItems();
 
-  // 🚨 UPGRADE: Flawless CSV sync—it now explicitly prints the exact same data rendered on the screen
   const handleDownloadTeamReport = () => {
     if (!selectedQuarterId) return alert('Please select a quarter first.');
+    
     const targetQuarter = quarters.find(q => q._id === selectedQuarterId);
     if (!targetQuarter) return;
 
-    let csvRows = [];
-    const headers = ['Employee ID', 'Employee Name', 'Job Title', 'Company Code', 'Appraisal Reference', 'Final IPRF Score', 'Calculated Award %', 'Status', 'Last Action Date'];
-    csvRows.push(headers.join(','));
-
-    displayedItems.forEach(record => {
-      const isMissing = record.isMissing;
-      const u = isMissing ? record.employeeId : record.employeeId;
-      const empName = `${u?.personalDetails?.firstName || ''} ${u?.personalDetails?.lastName || ''}`.trim();
-      const jobTitle = u?.employmentDetails?.jobTitle || 'Staff';
-      const compCode = u?.companyCode || 'FSM';
-      const empId = u?.employeeId || 'N/A';
-      
-      const iprf = record.calculatedResults?.finalIprfScore || 0;
-      const prorate = (u?.employmentDetails?.prorateValue || 12) / 12;
-      const awardPct = isMissing ? '—' : (cpPct * iprf * prorate).toFixed(2) + '%';
-      
-      const statusText = getStatusConfig(record.workflow?.status).text;
-      const date = (record.updatedAt || record.createdAt) ? new Date(record.updatedAt || record.createdAt).toLocaleDateString('en-GB') : 'N/A';
-
-      csvRows.push([
-        empId,
-        `"${empName}"`,
-        `"${jobTitle}"`,
-        compCode,
-        record.appraisalRef || 'N/A',
-        isMissing ? '—' : iprf.toFixed(2),
-        awardPct,
-        `"${statusText}"`,
-        date
-      ].join(','));
+    const quarterAppraisals = submissions.filter(app => {
+      const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
+      return qId === selectedQuarterId;
     });
+    
+    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
 
-    const filename = `My_Team_${reportType}_Report_${targetQuarter.name}.csv`;
+    let csvRows = [];
+    let filename = '';
+
+    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
+      const headers = ['Employee Name', 'Job Title', 'Appraisal Reference', 'Final IPRF Score', 'Calculated Award %', 'Status', 'Submission Date'];
+      if (reportType === 'ALL') csvRows.push('--- STAFF WHO HAVE SUBMITTED ---');
+      csvRows.push(headers.join(','));
+
+      quarterAppraisals.forEach(record => {
+        const empName = `${record.employeeId?.personalDetails?.firstName || ''} ${record.employeeId?.personalDetails?.lastName || ''}`;
+        const jobTitle = record.employeeId?.employmentDetails?.jobTitle || 'Staff';
+        const iprf = record.calculatedResults?.finalIprfScore || 0;
+        const prorate = (record.employeeId?.employmentDetails?.prorateValue || 12) / 12;
+        const awardPct = (cpPct * iprf * prorate).toFixed(2);
+        
+        csvRows.push([
+          `"${empName}"`,
+          `"${jobTitle}"`,
+          record.appraisalRef || 'N/A',
+          iprf.toFixed(2),
+          `${awardPct}%`,
+          record.workflow?.status || 'UNKNOWN',
+          record.createdAt ? new Date(record.createdAt).toLocaleDateString() : 'N/A'
+        ].join(','));
+      });
+      filename = `My_Team_Submitted_Report_${targetQuarter.name}.csv`;
+    }
+
+    if (reportType === 'MISSING' || reportType === 'ALL') {
+      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
+      
+      if (reportType === 'ALL') {
+        csvRows.push(''); 
+        csvRows.push('--- STAFF WITH PENDING SUBMISSIONS ---');
+      }
+      
+      const missingHeaders = ['Employee ID', 'Employee Name', 'Job Title', 'Company Code', 'Action Required'];
+      csvRows.push(missingHeaders.join(','));
+
+      missingStaff.forEach(u => {
+        const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`;
+        csvRows.push([
+           u.employeeId || 'N/A',
+           `"${empName}"`,
+           `"${u.employmentDetails?.jobTitle || 'N/A'}"`,
+           u.companyCode || 'FSM',
+           'Awaiting Manager Rating'
+        ].join(','));
+      });
+      
+      if (reportType === 'MISSING') filename = `My_Team_Pending_Report_${targetQuarter.name}.csv`;
+      else filename = `My_Team_Complete_Status_Report_${targetQuarter.name}.csv`;
+    }
 
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -257,6 +269,7 @@ export default function MySubmissions() {
     document.body.removeChild(link);
   };
 
+  // 🚨 UPGRADED: Robust parseComments function accurately handling the new backend format
   const parseComments = (combinedString) => {
     if (!combinedString) return {};
     
@@ -379,7 +392,7 @@ export default function MySubmissions() {
                 <div className="flex-1">
                   <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
                   <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· ${a.workflow?.status === 'DRAFT' ? 'Saved' : 'Submitted'} ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
+                    {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· Submitted ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
                   </div>
                   
                   {!a.isMissing && a.narrative?.hrComments && a.workflow?.status === 'REOPENED' && (
@@ -444,7 +457,7 @@ export default function MySubmissions() {
                     {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
                   </h3>
                   <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; {selectedAppraisal.workflow?.status === 'DRAFT' ? 'Saved' : 'Submitted'} {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Submitted {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               </div>
@@ -469,9 +482,7 @@ export default function MySubmissions() {
               </div>
 
               <div className="mb-[24px]">
-                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">
-                  {selectedAppraisal.workflow?.status === 'DRAFT' ? 'Drafted KPA Ratings & Comments' : 'Submitted KPA Ratings & Comments'}
-                </h4>
+                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings & Comments</h4>
                 <div className="flex flex-col gap-[10px]">
                   {Object.entries(SCORE_LABELS).map(([key, label]) => {
                     const rating = selectedAppraisal.scores?.[key]?.rating;

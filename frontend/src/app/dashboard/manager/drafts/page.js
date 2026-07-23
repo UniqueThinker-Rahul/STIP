@@ -24,27 +24,48 @@ const SCORE_LABELS = {
 
 export default function Drafts() {
   const router = useRouter();
+  
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [selectedYear, setSelectedYear] = useState(currentYearStr);
+  const [selectedQuarterName, setSelectedQuarterName] = useState('');
+  const [isManualYear, setIsManualYear] = useState(false);
+  const [dbQuarters, setDbQuarters] = useState([]);
+
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(true);
   
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
-  const [expandedComment, setExpandedComment] = useState(null); // Added state for toggling comments
+  const [expandedComment, setExpandedComment] = useState(null);
 
   useEffect(() => {
     const fetchDrafts = async () => {
       try {
         setLoading(true);
-        const res = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
-        const allApps = res.data?.data || [];
+        const [appsRes, qtrsRes] = await Promise.all([
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
+        ]);
+
+        const fetchedQuarters = qtrsRes.data?.data || [];
+        fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        setDbQuarters(fetchedQuarters);
+
+        const allApps = appsRes.data?.data || [];
         
-        // Smart Auto-Cleanup & Garbage Collection
+        // 🚨 UPGRADED: Smart Auto-Cleanup & Garbage Collection fixed to include YEAR
         const submittedApps = allApps.filter(a => a.workflow?.status !== 'DRAFT');
         
         const submittedSignatures = new Set(
           submittedApps.map(a => {
             const empId = a.employeeId?._id || a.employeeId || 'unknown';
-            const qtr = a.period?.quarter || 'unknown';
-            return `${empId}-${qtr}`;
+            const rawQtr = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || 'unknown';
+            const qMatch = String(rawQtr).match(/Q?([1-4])/i);
+            const qtr = qMatch ? `Q${qMatch[1]}` : rawQtr;
+            const yr = a.reviewYear || a.appraisalQuarter?.year || a.period?.year || 'unknown';
+            return `${empId}-${qtr}-${yr}`;
           })
         );
 
@@ -56,8 +77,12 @@ export default function Drafts() {
 
         for (const draft of rawDrafts) {
           const empId = draft.employeeId?._id || draft.employeeId || 'unknown';
-          const qtr = draft.period?.quarter || 'unknown';
-          const signature = `${empId}-${qtr}`;
+          const rawQtr = draft.appraisalQuarter?.name || draft.period?.quarter || draft.quarter?.name || 'unknown';
+          const qMatch = String(rawQtr).match(/Q?([1-4])/i);
+          const qtr = qMatch ? `Q${qMatch[1]}` : rawQtr;
+          const yr = draft.reviewYear || draft.appraisalQuarter?.year || draft.period?.year || 'unknown';
+          
+          const signature = `${empId}-${qtr}-${yr}`;
 
           if (submittedSignatures.has(signature)) {
             api.delete(`/appraisals/${draft._id}`).catch(e => console.error('Auto-cleanup failed', e));
@@ -81,6 +106,45 @@ export default function Drafts() {
     fetchDrafts();
   }, []);
 
+  // 🚨 UPGRADED: Safely bind dropdown options to DB availability AND existing drafts
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
+    const dbQs = qtrsForSelectedYear.map(q => {
+      const m = String(q.name).match(/Q?([1-4])/i);
+      return m ? `Q${m[1]}` : q.name;
+    });
+
+    const draftQs = drafts
+      .filter(d => (d.reviewYear || d.appraisalQuarter?.year || d.period?.year)?.toString() === selectedYear.toString())
+      .map(d => {
+        const raw = d.appraisalQuarter?.name || d.period?.quarter || d.quarter?.name || '';
+        const m = String(raw).match(/Q?([1-4])/i);
+        return m ? `Q${m[1]}` : raw;
+      });
+
+    // Merge published DB quarters AND any quarters that actually have drafts
+    const availableQs = [...new Set([...dbQs, ...draftQs])].sort();
+
+    if (availableQs.length > 0) {
+      if (!selectedQuarterName || !availableQs.includes(selectedQuarterName)) {
+        // Find active quarter in DB
+        const now = new Date();
+        let active = qtrsForSelectedYear.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return now >= start && now <= end && !q.isLocked;
+        });
+        
+        const activeNameMatch = active ? String(active.name).match(/Q?([1-4])/i) : null;
+        const mappedActiveName = activeNameMatch ? `Q${activeNameMatch[1]}` : (active ? active.name : null);
+
+        setSelectedQuarterName(mappedActiveName || availableQs[availableQs.length - 1]);
+      }
+    } else {
+      setSelectedQuarterName('');
+    }
+  }, [dbQuarters, drafts, selectedYear, selectedQuarterName]);
+
   const deleteDraft = async (id) => {
     if (confirm('Are you sure you want to delete this draft?')) {
       try {
@@ -92,7 +156,6 @@ export default function Drafts() {
     }
   };
 
-  // Helper to extract specific comment from the compiled narrative text
   const extractComment = (generalComments, currentLabel, nextLabel) => {
     if (!generalComments) return '';
     const startIdx = generalComments.indexOf(currentLabel);
@@ -119,24 +182,104 @@ export default function Drafts() {
     return {};
   };
 
+  const filteredDrafts = drafts.filter(d => {
+    if (!selectedYear || !selectedQuarterName) return false;
+    
+    const appYear = d.reviewYear || d.appraisalQuarter?.year || d.period?.year;
+    const appQtrRaw = d.appraisalQuarter?.name || d.period?.quarter || d.quarter?.name || '';
+    const qMatch = String(appQtrRaw).match(/Q?([1-4])/i) || String(appQtrRaw).match(/([1-4])/);
+    const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
+
+    return appYear?.toString() === selectedYear.toString() && appQtr === selectedQuarterName;
+  });
+
+  // 🚨 UPGRADED: Ensuring unique Available Quarters merges dbQuarters and Draft Quarters for the dropdown
+  const qtrsForSelectedYearDB = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
+  const dbQsDropdown = qtrsForSelectedYearDB.map(q => {
+    const qMatch = String(q.name).match(/Q?([1-4])/i);
+    return qMatch ? `Q${qMatch[1]}` : q.name;
+  });
+
+  const draftQsDropdown = drafts
+    .filter(d => (d.reviewYear || d.appraisalQuarter?.year || d.period?.year)?.toString() === selectedYear.toString())
+    .map(d => {
+      const raw = d.appraisalQuarter?.name || d.period?.quarter || d.quarter?.name || '';
+      const m = String(raw).match(/Q?([1-4])/i);
+      return m ? `Q${m[1]}` : raw;
+    });
+
+  const uniqueAvailableQuarters = [...new Set([...dbQsDropdown, ...draftQsDropdown])].sort();
+
   if (loading) return <div className="p-10 text-center text-slate-500">Loading drafts...</div>;
 
   return (
     <div className="w-full max-w-full pb-[60px] relative">
-      <div className="mb-[20px]">
-        <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">&#128190; Saved Drafts</div>
-        <div className="text-[13px] text-[#6b7280]">Appraisals in progress, not yet sent to HR</div>
+      
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">&#128190; Saved Drafts</div>
+          <div className="text-[13px] text-[#6b7280]">Appraisals in progress, not yet sent to HR</div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-[10px]">
+          <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+            <select 
+              value={selectedQuarterName} 
+              onChange={(e) => setSelectedQuarterName(e.target.value)}
+              className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+              disabled={uniqueAvailableQuarters.length === 0}
+            >
+              {uniqueAvailableQuarters.length === 0 && <option value="">No Quarters Active</option>}
+              {uniqueAvailableQuarters.map(q => (
+                 <option key={q} value={q}>{q}</option>
+              ))}
+            </select>
+            <span className="text-[#E2DDD4]">|</span>
+            {isManualYear ? (
+              <input 
+                type="number" 
+                autoFocus
+                defaultValue={selectedYear}
+                onBlur={(e) => {
+                  if (e.target.value) setSelectedYear(e.target.value);
+                  setIsManualYear(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value) setSelectedYear(e.target.value);
+                    setIsManualYear(false);
+                  }
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+              />
+            ) : (
+              <select 
+                value={selectedYear} 
+                onChange={(e) => {
+                  if (e.target.value === 'manual') setIsManualYear(true);
+                  else setSelectedYear(e.target.value);
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
+              >
+                {yearOptions.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+              </select>
+            )}
+          </div>
+        </div>
       </div>
       
-      {drafts.length === 0 ? (
+      {filteredDrafts.length === 0 ? (
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[40px] text-center">
           <div className="text-[40px] mb-[10px]">&#128221;</div>
           <div className="text-[15px] font-[700] text-[#0D2B55] mb-[5px]">No Drafts</div>
-          <div className="text-[13px] text-[#6b7280]">You do not have any saved appraisal drafts.</div>
+          <div className="text-[13px] text-[#6b7280]">You do not have any saved appraisal drafts for this period.</div>
         </div>
       ) : (
         <div className="flex flex-col gap-[12px]">
-          {drafts.map((d) => {
+          {filteredDrafts.map((d) => {
             const fName = d.employeeId?.personalDetails?.firstName || 'Unknown';
             const lName = d.employeeId?.personalDetails?.lastName || '';
             const jobTitle = d.employeeId?.employmentDetails?.jobTitle || 'Staff';
@@ -147,7 +290,7 @@ export default function Drafts() {
                 <div className="flex-1">
                   <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
                   <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} 2026 &middot; Last saved {new Date(d.updatedAt || d.createdAt).toLocaleDateString()} at {new Date(d.updatedAt || d.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {jobTitle} &middot; {quarter} {selectedYear} &middot; Last saved {new Date(d.updatedAt || d.createdAt).toLocaleDateString()} at {new Date(d.updatedAt || d.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
                 
@@ -159,7 +302,7 @@ export default function Drafts() {
                     <button 
                       onClick={() => {
                         setSelectedAppraisal(d);
-                        setExpandedComment(null); // Reset expansions on new view
+                        setExpandedComment(null); 
                       }} 
                       className="px-[14px] py-[7px] bg-white border border-[#E2DDD4] hover:border-[#0D2B55] hover:text-[#0D2B55] text-[#0f1923] text-[12px] font-[700] rounded-[9px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                     >

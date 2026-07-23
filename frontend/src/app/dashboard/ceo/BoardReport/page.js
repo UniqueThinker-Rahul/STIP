@@ -113,8 +113,6 @@ const T = {
   red: "#B42318",
 };
 
-const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
-
 const CRIT = [
   { key: "competence",    label: "Job Competence",             weight: 10, color: "#7C3AED" },
   { key: "behaviors",     label: "Behaviours",                 weight: 20, color: "#1E40AF" },
@@ -441,31 +439,83 @@ export default function BoardReportPage() {
   const [offices, setOffices] = useState(["All"]);
   
   const [year, setYear] = useState(currentYear.toString());
-  const [quarter, setQuarter] = useState("Q2");
+  const [quarter, setQuarter] = useState("");
   const [office, setOffice] = useState("All");
   
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
 
-  // 1. Fetch Dynamic Dropdowns (Office Codes from Database)
+  const [isManualYear, setIsManualYear] = useState(false);
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [metrics, setMetrics] = useState(null);
+
+  // 1. Fetch Config & Quarters ONCE (Lazy load heavy data later)
   useEffect(() => {
-    const fetchConfig = async () => {
+    const fetchBaseData = async () => {
       try {
-        const res = await api.get('/config/dropdowns');
-        const companyCodes = res.data?.data?.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM'];
+        const [configRes, qtrsRes] = await Promise.all([
+          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
+        ]);
+
+        const companyCodes = configRes.data?.data?.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM'];
         setOffices(["All", ...companyCodes]);
+        
+        const fetchedQuarters = qtrsRes.data?.data || [];
+        fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        setDbQuarters(fetchedQuarters);
       } catch (error) {
-        console.error("Failed to load config dropdowns", error);
+        console.error("Failed to load base data", error);
         setOffices(["All", "FSM", "CDU", "NAR", "GUM"]); 
       }
     };
-    fetchConfig();
+    fetchBaseData();
   }, []);
 
-  // 2. Fetch Actual Real-Time Aggregated Data from Database
+  // 2. Fetch Dynamic Metrics
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      if (!year) return;
+      try {
+        const targetMonth = quarter ? (parseInt(quarter.replace('Q', '')) * 3 || 3) : 3;
+        const metricsRes = await api.get(`/company-metrics/${year}/${targetMonth}`).catch(() => ({ data: { data: null } }));
+        setMetrics(metricsRes.data?.data || null);
+      } catch (error) {
+        console.error('Failed to fetch metrics', error);
+      }
+    };
+    fetchMetrics();
+  }, [year, quarter]);
+
+  // 3. Dynamic Quarters Check
+  useEffect(() => {
+    if (dbQuarters.length === 0) return;
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === year.toString());
+    if (qtrsForSelectedYear.length > 0) {
+      const availableQs = [...new Set(qtrsForSelectedYear.map(q => {
+        const m = String(q.name).match(/Q?([1-4])/i);
+        return m ? `Q${m[1]}` : q.name;
+      }))].sort();
+      
+      if (!quarter || !availableQs.includes(quarter)) {
+        setQuarter(availableQs[availableQs.length - 1]);
+      }
+    } else {
+      setQuarter('');
+    }
+  }, [dbQuarters, year, quarter]);
+
+  const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === year.toString());
+  const uniqueAvailableQuarters = [...new Set(qtrsForSelectedYear.map(q => {
+    const m = String(q.name).match(/Q?([1-4])/i);
+    return m ? `Q${m[1]}` : q.name;
+  }))].sort();
+
+  // 4. Fetch Actual Real-Time Aggregated Data from Database
   useEffect(() => {
     const fetchReport = async () => {
+      if (!quarter) return;
       setLoading(true);
       try {
         const res = await api.get(`/reports/board-report`, { params: { year, quarter, office } });
@@ -477,6 +527,94 @@ export default function BoardReportPage() {
     };
     fetchReport();
   }, [year, quarter, office]);
+
+  const triggerCSV = (csvContent, filename) => {
+    const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const triggerPDF = (title, tableHtml, summaryHtml = '') => {
+    const htmlContent = `
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 40px; }
+            h1 { color: #0D2B55; text-align: center; border-bottom: 2px solid #0D2B55; padding-bottom: 10px; }
+            .meta { text-align: center; color: #666; margin-bottom: 30px; font-size: 11px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ddd; padding: 10px 8px; text-align: left; }
+            th { background-color: #0D2B55; color: white; font-weight: bold; }
+            .right { text-align: right; }
+            .center { text-align: center; }
+            tr:nth-child(even) { background-color: #f9fafb; }
+            .total-row { font-size: 16px; font-weight: bold; color: #0D2B55; text-align: right; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <h1>${title}</h1>
+          <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')} | Financial Year: CY${year} | FSM Petroleum Corporation</div>
+          ${summaryHtml}
+          ${tableHtml}
+        </body>
+      </html>
+    `;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); }, 250);
+  };
+
+  // 🚨 UPGRADE: Heavy Lazy Loaded Office PDF/CSV Generator
+  const generateOffice = async (fmt) => {
+    setBusy(`office-${fmt}`);
+    try {
+      const [userRes, appRes] = await Promise.all([
+        api.get('/users').catch(() => ({ data: { data: [] } })),
+        api.get('/appraisals').catch(() => ({ data: { data: [] } }))
+      ]);
+      
+      const currentUsers = userRes.data?.data || [];
+      const currentApps = appRes.data?.data || [];
+      
+      const companyList = offices.filter(o => o !== 'All');
+      const data = companyList.map(off => {
+        const staff = currentUsers.filter(u => u.companyCode === off);
+        const apps = currentApps.filter(a => {
+           const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+           return a.employeeId?.companyCode === off && appYear?.toString() === year.toString();
+        });
+        const apprs = apps.filter(a => a.workflow?.status === 'APPROVED');
+        const eps = apps.filter(a => a.calculatedResults?.finalIprfScore >= 1.3).length;
+        let payout = 0;
+        if (metrics?.cpPct) {
+          payout = apprs.reduce((s, a) => s + ((a.employeeBaseSalary || 30000) * (((metrics.cpPct * (a.calculatedResults?.finalIprfScore || 0)) * ((a.employeeId?.employmentDetails?.prorateValue || 12)/12)) / 100)), 0);
+        }
+        return { off, staff: staff.length, apps: apps.length, apprs: apprs.length, eps, payout };
+      });
+
+      if (fmt === 'csv') {
+        let csv = "Company,Headcount,Submitted Appraisals,Approved Appraisals,EP Ratings,Est Payout ($)\r\n";
+        data.forEach(x => { csv += `"${x.off}","${x.staff}","${x.apps}","${x.apprs}","${x.eps}","${x.payout.toFixed(2)}"\r\n`; });
+        triggerCSV(csv, `STIP_Office_Report_CY${year}.csv`);
+      } else {
+        let rows = '';
+        data.forEach(x => { rows += `<tr><td class="center font-bold">${x.off}</td><td class="center">${x.staff}</td><td class="center">${x.apps}</td><td class="center">${x.apprs}</td><td class="center">${x.eps}</td><td class="right">$${x.payout.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td></tr>`; });
+        const tableHtml = `<table><thead><tr><th>Company</th><th>Headcount</th><th>Submitted</th><th>Approved</th><th>EP Ratings</th><th class="right">Est Payout ($)</th></tr></thead><tbody>${rows}</tbody></table>`;
+        triggerPDF('Report by Office', tableHtml);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate Office report");
+    }
+    setBusy("");
+  };
 
   const onExcel = async () => {
     if (!d) return;
@@ -532,14 +670,47 @@ export default function BoardReportPage() {
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Year</span>
-              <select value={year} onChange={(e) => setYear(e.target.value)} className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}>
-                {years.map((y) => (<option key={y} value={y}>{y}</option>))}
-              </select>
+              {isManualYear ? (
+                <input 
+                  type="number" 
+                  autoFocus
+                  defaultValue={year}
+                  onBlur={(e) => {
+                    if (e.target.value) setYear(e.target.value);
+                    setIsManualYear(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (e.target.value) setYear(e.target.value);
+                      setIsManualYear(false);
+                    }
+                  }}
+                  className="bg-transparent text-sm font-bold outline-none w-16" style={{ color: T.navy }}
+                />
+              ) : (
+                <select 
+                  value={year} 
+                  onChange={(e) => {
+                    if (e.target.value === 'manual') setIsManualYear(true);
+                    else setYear(e.target.value);
+                  }} 
+                  className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}
+                >
+                  {years.map((y) => (<option key={y} value={y}>{y}</option>))}
+                  <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+                </select>
+              )}
             </label>
             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Quarter</span>
-              <select value={quarter} onChange={(e) => setQuarter(e.target.value)} className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}>
-                {QUARTERS.map((x) => (<option key={x} value={x}>{x} {year}</option>))}
+              <select 
+                value={quarter} 
+                onChange={(e) => setQuarter(e.target.value)} 
+                disabled={uniqueAvailableQuarters.length === 0}
+                className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}
+              >
+                {uniqueAvailableQuarters.length === 0 && <option value="">No Quarters</option>}
+                {uniqueAvailableQuarters.map((x) => (<option key={x} value={x}>{x}</option>))}
               </select>
             </label>
             <button type="button" onClick={onExcel} disabled={!!busy || loading} className="rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed" style={{ background: T.gold, color: T.navy, border: "1px solid #B99433", opacity: busy === "xlsx" || loading ? 0.6 : 1 }}>
@@ -551,6 +722,14 @@ export default function BoardReportPage() {
             <button type="button" onClick={csv} disabled={loading} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold disabled:opacity-60" style={{ borderColor: T.border, color: T.navy }}>
               ⬇ CSV
             </button>
+            <div className="flex gap-2 border-l pl-2 ml-2" style={{ borderColor: T.border }}>
+              <button type="button" onClick={() => generateOffice('pdf')} disabled={!!busy || loading || !metrics} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold disabled:opacity-60" style={{ borderColor: T.border, color: T.navy }}>
+                {busy === 'office-pdf' ? "..." : "🏢 Office PDF"}
+              </button>
+              <button type="button" onClick={() => generateOffice('csv')} disabled={!!busy || loading || !metrics} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold disabled:opacity-60" style={{ borderColor: T.border, color: T.navy }}>
+                {busy === 'office-csv' ? "..." : "🏢 Office CSV"}
+              </button>
+            </div>
           </div>
         </div>
 

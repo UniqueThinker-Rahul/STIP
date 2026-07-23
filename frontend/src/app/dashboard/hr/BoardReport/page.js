@@ -113,8 +113,6 @@ const T = {
   red: "#B42318",
 };
 
-const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
-
 const CRIT = [
   { key: "competence",    label: "Job Competence",             weight: 10, color: "#7C3AED" },
   { key: "behaviors",     label: "Behaviours",                 weight: 20, color: "#1E40AF" },
@@ -441,31 +439,91 @@ export default function BoardReportPage() {
   const [offices, setOffices] = useState(["All"]);
   
   const [year, setYear] = useState(currentYear.toString());
-  const [quarter, setQuarter] = useState("Q2");
+  const [quarter, setQuarter] = useState("");
   const [office, setOffice] = useState("All");
   
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
 
-  // 1. Fetch Dynamic Dropdowns (Office Codes from Database)
+  const [isManualYear, setIsManualYear] = useState(false);
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [metrics, setMetrics] = useState(null);
+
+  // 🚨 UPGRADE: Office Station States
+  const [stationLocations, setStationLocations] = useState([]);
+  const [selectedStation, setSelectedStation] = useState("");
+
+  // 1. Fetch Config & Quarters ONCE (Lazy load heavy data later)
   useEffect(() => {
-    const fetchConfig = async () => {
+    const fetchBaseData = async () => {
       try {
-        const res = await api.get('/config/dropdowns');
-        const companyCodes = res.data?.data?.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM'];
+        const [configRes, qtrsRes] = await Promise.all([
+          api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
+          api.get('/quarters').catch(() => ({ data: { data: [] } }))
+        ]);
+
+        const companyCodes = configRes.data?.data?.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM'];
         setOffices(["All", ...companyCodes]);
+        
+        const fetchedQuarters = qtrsRes.data?.data || [];
+        fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        setDbQuarters(fetchedQuarters);
+
+        // 🚨 UPGRADE: Fetch Office Locations for the new card
+        const stList = configRes.data?.data?.officeLocations || [];
+        setStationLocations(stList.sort());
       } catch (error) {
-        console.error("Failed to load config dropdowns", error);
+        console.error("Failed to load base data", error);
         setOffices(["All", "FSM", "CDU", "NAR", "GUM"]); 
       }
     };
-    fetchConfig();
+    fetchBaseData();
   }, []);
 
-  // 2. Fetch Actual Real-Time Aggregated Data from Database
+  // 2. Fetch Dynamic Metrics
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      if (!year) return;
+      try {
+        const targetMonth = quarter ? (parseInt(quarter.replace('Q', '')) * 3 || 3) : 3;
+        const metricsRes = await api.get(`/company-metrics/${year}/${targetMonth}`).catch(() => ({ data: { data: null } }));
+        setMetrics(metricsRes.data?.data || null);
+      } catch (error) {
+        console.error('Failed to fetch metrics', error);
+      }
+    };
+    fetchMetrics();
+  }, [year, quarter]);
+
+  // 3. Dynamic Quarters Check
+  useEffect(() => {
+    if (dbQuarters.length === 0) return;
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === year.toString());
+    if (qtrsForSelectedYear.length > 0) {
+      const availableQs = [...new Set(qtrsForSelectedYear.map(q => {
+        const m = String(q.name).match(/Q?([1-4])/i);
+        return m ? `Q${m[1]}` : q.name;
+      }))].sort();
+      
+      if (!quarter || !availableQs.includes(quarter)) {
+        setQuarter(availableQs[availableQs.length - 1]);
+      }
+    } else {
+      setQuarter('');
+    }
+  }, [dbQuarters, year, quarter]);
+
+  const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === year.toString());
+  const uniqueAvailableQuarters = [...new Set(qtrsForSelectedYear.map(q => {
+    const m = String(q.name).match(/Q?([1-4])/i);
+    return m ? `Q${m[1]}` : q.name;
+  }))].sort();
+
+  // 4. Fetch Actual Real-Time Aggregated Data from Database
   useEffect(() => {
     const fetchReport = async () => {
+      if (!quarter) return;
       setLoading(true);
       try {
         const res = await api.get(`/reports/board-report`, { params: { year, quarter, office } });
@@ -477,6 +535,132 @@ export default function BoardReportPage() {
     };
     fetchReport();
   }, [year, quarter, office]);
+
+  const triggerCSV = (csvContent, filename) => {
+    const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const triggerPDF = (title, tableHtml, summaryHtml = '') => {
+    const htmlContent = `
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 40px; }
+            h1 { color: #0D2B55; text-align: center; border-bottom: 2px solid #0D2B55; padding-bottom: 10px; }
+            .meta { text-align: center; color: #666; margin-bottom: 30px; font-size: 11px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ddd; padding: 10px 8px; text-align: left; }
+            th { background-color: #0D2B55; color: white; font-weight: bold; }
+            .right { text-align: right; }
+            .center { text-align: center; }
+            tr:nth-child(even) { background-color: #f9fafb; }
+            .total-row { font-size: 16px; font-weight: bold; color: #0D2B55; text-align: right; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <h1>${title}</h1>
+          <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')} | Financial Year: CY${year} | FSM Petroleum Corporation</div>
+          ${summaryHtml}
+          ${tableHtml}
+        </body>
+      </html>
+    `;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); }, 250);
+  };
+
+  // 🚨 UPGRADE: Heavy Lazy Loaded Office Missing Generator
+  const generateOfficeMissing = async (fmt) => {
+    setBusy(`station-${fmt}`);
+    try {
+      const [userRes, appRes] = await Promise.all([
+        api.get('/users').catch(() => ({ data: { data: [] } })),
+        api.get('/appraisals').catch(() => ({ data: { data: [] } }))
+      ]);
+      
+      const currentUsers = userRes.data?.data || [];
+      const currentApps = appRes.data?.data || [];
+      
+      const quarterAppraisals = currentApps.filter(a => {
+         const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+         const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
+         const qMatch = String(appQtrRaw).match(/Q?([1-4])/i);
+         const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
+         return appYear?.toString() === year.toString() && appQtr === quarter;
+      });
+      
+      const submittedUserIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
+      
+      const title = `Unappraised Staff - ${selectedStation || 'All Offices'} - ${quarter} ${year}`;
+      const columns = ['Employee ID', 'Employee Name', 'Job Title', 'Office Station', 'Manager Name'];
+      const rows = [];
+
+      const missingUsers = currentUsers.filter(u => {
+        if (!u.employmentDetails?.isActive || u.security?.role === 'CEO') return false;
+        if (selectedStation && u.employmentDetails?.officeLocation !== selectedStation) return false;
+        return !submittedUserIds.includes(u._id);
+      });
+
+      missingUsers.forEach(u => {
+        const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
+        
+        const mgr = u.employmentDetails?.reportingTo;
+        let mgrName = 'Unassigned';
+        if (mgr) {
+          if (mgr.personalDetails) {
+            mgrName = `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim();
+          } else {
+             const foundMgr = currentUsers.find(s => s._id === mgr || s._id === mgr._id);
+             if (foundMgr) mgrName = `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim();
+          }
+        } else if (u.employmentDetails?.rawManagerName) {
+           mgrName = u.employmentDetails.rawManagerName;
+        }
+
+        rows.push([
+          u.employeeId || 'N/A', 
+          empName, 
+          u.employmentDetails?.jobTitle || '', 
+          u.employmentDetails?.officeLocation || 'N/A',
+          mgrName
+        ]);
+      });
+
+      if (rows.length === 0) {
+         alert(`All staff in ${selectedStation || 'all offices'} have been appraised for this quarter.`);
+         setBusy("");
+         return;
+      }
+
+      if (fmt === 'CSV') {
+        let csvString = columns.join(',') + '\r\n';
+        rows.forEach(row => {
+          const cleanRow = row.map(cell => typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell);
+          csvString += cleanRow.join(',') + '\r\n';
+        });
+        triggerCSV(csvString, `${title.replace(/\s+/g, '_')}.csv`);
+      } else {
+        let htmlRows = '';
+        rows.forEach(r => { htmlRows += `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`; });
+        const tableHtml = `<table><thead><tr><th>Emp ID</th><th>Name</th><th>Job Title</th><th>Office Station</th><th>Manager Name</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
+        triggerPDF(title, tableHtml);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate Office report");
+    }
+    setBusy("");
+  };
 
   const onExcel = async () => {
     if (!d) return;
@@ -532,14 +716,47 @@ export default function BoardReportPage() {
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Year</span>
-              <select value={year} onChange={(e) => setYear(e.target.value)} className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}>
-                {years.map((y) => (<option key={y} value={y}>{y}</option>))}
-              </select>
+              {isManualYear ? (
+                <input 
+                  type="number" 
+                  autoFocus
+                  defaultValue={year}
+                  onBlur={(e) => {
+                    if (e.target.value) setYear(e.target.value);
+                    setIsManualYear(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (e.target.value) setYear(e.target.value);
+                      setIsManualYear(false);
+                    }
+                  }}
+                  className="bg-transparent text-sm font-bold outline-none w-16" style={{ color: T.navy }}
+                />
+              ) : (
+                <select 
+                  value={year} 
+                  onChange={(e) => {
+                    if (e.target.value === 'manual') setIsManualYear(true);
+                    else setYear(e.target.value);
+                  }} 
+                  className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}
+                >
+                  {years.map((y) => (<option key={y} value={y}>{y}</option>))}
+                  <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+                </select>
+              )}
             </label>
             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Quarter</span>
-              <select value={quarter} onChange={(e) => setQuarter(e.target.value)} className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}>
-                {QUARTERS.map((x) => (<option key={x} value={x}>{x} {year}</option>))}
+              <select 
+                value={quarter} 
+                onChange={(e) => setQuarter(e.target.value)} 
+                disabled={uniqueAvailableQuarters.length === 0}
+                className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}
+              >
+                {uniqueAvailableQuarters.length === 0 && <option value="">No Quarters</option>}
+                {uniqueAvailableQuarters.map((x) => (<option key={x} value={x}>{x}</option>))}
               </select>
             </label>
             <button type="button" onClick={onExcel} disabled={!!busy || loading} className="rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed" style={{ background: T.gold, color: T.navy, border: "1px solid #B99433", opacity: busy === "xlsx" || loading ? 0.6 : 1 }}>
@@ -626,6 +843,45 @@ export default function BoardReportPage() {
             </Card>
           </>
         )}
+
+        {/* 🚨 NEW: Report by Office Station Card */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6 mt-8 font-sans">
+          <div className="bg-white border border-[#E4E0D8] rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden text-left shadow-sm">
+            <div className="p-6 flex-grow flex flex-col">
+              <div className="text-4xl mb-4">📍</div>
+              <div className="text-[16px] font-bold text-slate-900 mb-2">Report by Office Station</div>
+              <div className="text-xs text-slate-500 leading-relaxed mb-4">
+                Identify staff missing appraisals, isolated by a specific office location.
+              </div>
+              
+              <div className="mt-auto mb-4">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Filter Station</label>
+                <select 
+                  value={selectedStation} 
+                  onChange={e => setSelectedStation(e.target.value)}
+                  className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 focus:border-blue-400 outline-none"
+                >
+                  <option value="">-- All Office Stations --</option>
+                  {stationLocations.map(loc => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                 <span className="inline-flex items-center px-2.5 py-1 rounded-[6px] text-[10px] font-bold tracking-wide bg-green-50 text-green-700">✓ Available any time</span>
+              </div>
+            </div>
+            <div className="flex bg-slate-50/50 border-t border-slate-100 p-4 gap-3">
+               <button onClick={() => generateOfficeMissing('PDF')} disabled={busy !== ""} className="flex-1 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 transition-colors">
+                 {busy === 'station-PDF' ? '...' : 'PDF Download'}
+               </button>
+               <button onClick={() => generateOfficeMissing('CSV')} disabled={busy !== ""} className="flex-1 py-2.5 rounded-lg bg-white border border-[#E4E0D8] text-slate-700 hover:bg-slate-50 text-[11px] font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 transition-colors">
+                 {busy === 'station-CSV' ? '...' : 'CSV Download'}
+               </button>
+            </div>
+          </div>
+        </div>
 
         <p className="rounded-xl border bg-white px-4 py-3 text-xs" style={{ borderColor: T.border, color: T.muted }}>
           <b style={{ color: T.navy }}>Exports:</b> <b>Excel</b> is the designed workbook — navy title band, band-coloured

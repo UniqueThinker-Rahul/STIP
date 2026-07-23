@@ -23,6 +23,54 @@ const CRIT_WTS = {
   adaptability: '10%'
 };
 
+// 🚨 UPGRADE: Dynamic Comment Parsing Engine
+const parseComments = (combinedString) => {
+  if (!combinedString) return {};
+  const comments = {};
+  
+  const labels = [
+    { key: 'jobCompetence', matches: ['Job Competence:'] },
+    { key: 'behaviors', matches: ['Behaviors & Initiative:', 'Demonstrated Initiative:'] },
+    { key: 'dependability', matches: ['Dependability:'] },
+    { key: 'adaptability', matches: ['Adaptability:'] },
+    { key: 'safeWorking', matches: ['Safe Working:', 'Demonstrated Safe Working:'] },
+    { key: 'deliveredResults', matches: ['Delivered Expected Results:', 'Delivered Results:'] }
+  ];
+
+  let foundLabels = [];
+  labels.forEach(labelDef => {
+    let bestIdx = -1;
+    let bestMatch = '';
+    for (const matchStr of labelDef.matches) {
+      const idx = combinedString.indexOf(matchStr);
+      if (idx !== -1) {
+        bestIdx = idx;
+        bestMatch = matchStr;
+        break;
+      }
+    }
+    if (bestIdx !== -1) {
+      foundLabels.push({ key: labelDef.key, index: bestIdx, match: bestMatch });
+    }
+  });
+
+  foundLabels.sort((a, b) => a.index - b.index);
+
+  foundLabels.forEach((label, i) => {
+    const start = label.index + label.match.length;
+    if (i + 1 < foundLabels.length) {
+      const nextLabelIdx = foundLabels[i + 1].index;
+      let content = combinedString.substring(start, nextLabelIdx);
+      content = content.replace(/\s*\d+\.\s*$/, ''); // Backtrack and remove the proceeding list numbers
+      comments[label.key] = content.trim();
+    } else {
+      comments[label.key] = combinedString.substring(start).trim();
+    }
+  });
+
+  return comments;
+};
+
 export default function EmployeeAppraisal() {
   const router = useRouter();
 
@@ -289,34 +337,54 @@ export default function EmployeeAppraisal() {
                     6 Performance Criteria
                   </div>
                   
-                  <div className="border border-[#E2DDD4] rounded-[8px] overflow-hidden">
-                    {Object.entries(CRIT_NAMES).map(([key, name]) => {
-                      const rating = appraisal.scores?.[key]?.rating || 0;
-                      const col = iprfColor(rating);
-                      const lbl = {0:'LS',0.7:'NI',1:'E',1.3:'EP'}[rating] || rating;
-                      
-                      return (
-                        <div key={key} className="flex justify-between items-center p-[10px_14px] border-b border-[#E2DDD4] last:border-0 bg-white">
-                          <div className="flex-1">
-                            <div className="text-[13px] font-[600] text-[#0f1923]">{name}</div>
-                          </div>
-                          <span className="text-[11px] font-[600] text-[#6b7280] w-[40px] text-right mr-[16px]">{CRIT_WTS[key]}</span>
-                          <span className="text-[13px] font-[800] w-[80px] text-right" style={{ color: col }}>
-                            {rating.toFixed(1)} &mdash; {lbl}
-                          </span>
+                 {/* 🚨 UPGRADE: Structured Criteria UI displaying specific comments per row */}
+                  {(() => {
+                    const parsedComments = parseComments(appraisal.narrative?.generalComments);
+                    const hasParsedComments = Object.keys(parsedComments).length > 0;
+                    
+                    return (
+                      <>
+                        <div className="border border-[#E2DDD4] rounded-[8px] overflow-hidden">
+                          {Object.entries(CRIT_NAMES).map(([key, name]) => {
+                            const rating = appraisal.scores?.[key]?.rating || 0;
+                            const col = iprfColor(rating);
+                            const lbl = {0:'LS',0.7:'NI',1:'E',1.3:'EP'}[rating] || rating;
+                            const comment = parsedComments[key];
+                            
+                            return (
+                              <div key={key} className="border-b border-[#E2DDD4] last:border-0 bg-white">
+                                <div className="flex justify-between items-center p-[10px_14px]">
+                                  <div className="flex-1">
+                                    <div className="text-[13px] font-[600] text-[#0f1923]">{name}</div>
+                                  </div>
+                                  <span className="text-[11px] font-[600] text-[#6b7280] w-[40px] text-right mr-[16px]">{CRIT_WTS[key]}</span>
+                                  <span className="text-[13px] font-[800] w-[80px] text-right" style={{ color: col }}>
+                                    {rating.toFixed(1)} &mdash; {lbl}
+                                  </span>
+                                </div>
+                                {comment && (
+                                  <div className="p-[0_14px_12px_14px] text-[12px] text-[#6b7280] italic leading-[1.6]">
+                                    <span className="font-[700] not-italic text-[#0D2B55] text-[10px] uppercase tracking-widest block mb-[2px]">Manager Justification:</span>
+                                    "{comment}"
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                  </div>
-                  
-                  {appraisal.narrative?.generalComments && (
-                    <div className="mt-[12px] bg-[#FAF8F4] border border-[#E2DDD4] rounded-[8px] p-[12px_14px]">
-                      <div className="text-[11px] font-[800] text-[#0D2B55] mb-[5px] uppercase tracking-widest">Manager Comments</div>
-                      <div className="text-[12px] text-[#6b7280] leading-[1.6] italic">
-                        "{appraisal.narrative.generalComments}"
-                      </div>
-                    </div>
-                  )}
+                        
+                        {/* 🚨 UPGRADE: Fallback block - only shows if parsing fails (preventing data loss) */}
+                        {appraisal.narrative?.generalComments && !hasParsedComments && (
+                          <div className="mt-[12px] bg-[#FAF8F4] border border-[#E2DDD4] rounded-[8px] p-[12px_14px]">
+                            <div className="text-[11px] font-[800] text-[#0D2B55] mb-[5px] uppercase tracking-widest">Manager Comments</div>
+                            <div className="text-[12px] text-[#6b7280] leading-[1.6] italic whitespace-pre-wrap">
+                              "{appraisal.narrative.generalComments}"
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   
                 </div>
               </div>
