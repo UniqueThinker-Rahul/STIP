@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
-import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, AlertTriangle, Calendar, Eye, X, Download } from 'lucide-react';
+import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Calendar, Eye, X, Download } from 'lucide-react';
 
 // Map backend API score keys to readable labels (Added for parsing comments)
 const SCORE_LABELS = {
@@ -115,14 +115,14 @@ export default function MySubmissions() {
           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
         
+        // 🚨 UPGRADE: Stop filtering out DRAFTs so the system knows an appraisal is actually in progress!
         const myAppraisals = appRes.data?.data || [];
+        myAppraisals.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+        
         const myTeam = teamRes.data?.data || [];
         const activeQuarters = quarterRes.data?.data || [];
         
-        const submitted = myAppraisals.filter(a => a.workflow?.status && a.workflow?.status !== 'DRAFT');
-        submitted.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-        
-        setSubmissions(submitted);
+        setSubmissions(myAppraisals);
         setTeam(myTeam);
         setQuarters(activeQuarters);
         
@@ -147,14 +147,16 @@ export default function MySubmissions() {
 
   const getStatusConfig = (status) => {
     switch(status) {
+      case 'DRAFT': return { text: 'Saved in Draft', badgeClass: 'bg-[#FAF8F4] text-[#6b7280] border border-[#E2DDD4]' };
       case 'SUBMITTED': return { text: 'Submitted to HR', badgeClass: 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]' };
       case 'UNDER_HR_REVIEW': return { text: 'Under HR Review', badgeClass: 'bg-[#DBEAFE] text-[#1E40AF] border border-[#BFDBFE]' };
       case 'APPROVED_BY_HR': return { text: 'HR Approved', badgeClass: 'bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0]' };
       case 'WITH_CEO': return { text: 'With CEO', badgeClass: 'bg-[#EDE9FE] text-[#4C1D95] border border-[#DDD6FE]' };
       case 'APPROVED': return { text: 'Fully Approved', badgeClass: 'bg-[#059669] text-white border border-[#065F46]' };
+      case 'ACKNOWLEDGED': return { text: 'Emp. Acknowledged', badgeClass: 'bg-[#065F46] text-white border border-[#065F46]' };
       case 'NOT_APPROVED': return { text: 'CEO Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       case 'REOPENED': return { text: 'HR Rejected', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
-      case 'PENDING_SUBMISSION': return { text: 'Awaiting Manager Rating', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
+      case 'PENDING_SUBMISSION': return { text: 'Appraisal Not Yet Started', badgeClass: 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]' };
       default: return { text: status?.replace(/_/g, ' ') || 'Unknown', badgeClass: 'bg-[#E2DDD4] text-[#6b7280]' };
     }
   };
@@ -167,15 +169,20 @@ export default function MySubmissions() {
       return qId === selectedQuarterId;
     });
 
-    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
+    // Extract exactly as strings to ensure perfect filtering
+    const appraisedStaffIds = quarterAppraisals.map(app => (app.employeeId?._id || app.employeeId).toString());
     let items = [];
 
-    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
+    if (reportType === 'SUBMITTED') {
+      items = quarterAppraisals.filter(a => a.workflow?.status !== 'DRAFT');
+    } else if (reportType === 'ALL') {
       items = [...quarterAppraisals];
+    } else if (reportType === 'MISSING') {
+      items = quarterAppraisals.filter(a => a.workflow?.status === 'DRAFT');
     }
 
     if (reportType === 'MISSING' || reportType === 'ALL') {
-      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
+      const missingStaff = team.filter(u => !appraisedStaffIds.includes(u._id.toString()));
       const missingItems = missingStaff.map(u => ({
         _id: `missing-${u._id}`,
         isMissing: true,
@@ -187,6 +194,12 @@ export default function MySubmissions() {
       items = [...items, ...missingItems];
     }
 
+    items.sort((a, b) => {
+      if (a.isMissing && !b.isMissing) return -1;
+      if (!a.isMissing && b.isMissing) return 1;
+      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+    });
+
     return items;
   };
 
@@ -194,70 +207,42 @@ export default function MySubmissions() {
 
   const handleDownloadTeamReport = () => {
     if (!selectedQuarterId) return alert('Please select a quarter first.');
-    
     const targetQuarter = quarters.find(q => q._id === selectedQuarterId);
     if (!targetQuarter) return;
 
-    const quarterAppraisals = submissions.filter(app => {
-      const qId = app.appraisalQuarter?._id || app.appraisalQuarter || app.quarter?._id || app.quarterId;
-      return qId === selectedQuarterId;
-    });
-    
-    const submittedStaffIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
-
     let csvRows = [];
-    let filename = '';
+    const headers = ['Employee ID', 'Employee Name', 'Job Title', 'Company Code', 'Appraisal Reference', 'Final IPRF Score', 'Calculated Award %', 'Status', 'Last Action Date'];
+    csvRows.push(headers.join(','));
 
-    if (reportType === 'SUBMITTED' || reportType === 'ALL') {
-      const headers = ['Employee Name', 'Job Title', 'Appraisal Reference', 'Final IPRF Score', 'Calculated Award %', 'Status', 'Submission Date'];
-      if (reportType === 'ALL') csvRows.push('--- STAFF WHO HAVE SUBMITTED ---');
-      csvRows.push(headers.join(','));
-
-      quarterAppraisals.forEach(record => {
-        const empName = `${record.employeeId?.personalDetails?.firstName || ''} ${record.employeeId?.personalDetails?.lastName || ''}`;
-        const jobTitle = record.employeeId?.employmentDetails?.jobTitle || 'Staff';
-        const iprf = record.calculatedResults?.finalIprfScore || 0;
-        const prorate = (record.employeeId?.employmentDetails?.prorateValue || 12) / 12;
-        const awardPct = (cpPct * iprf * prorate).toFixed(2);
-        
-        csvRows.push([
-          `"${empName}"`,
-          `"${jobTitle}"`,
-          record.appraisalRef || 'N/A',
-          iprf.toFixed(2),
-          `${awardPct}%`,
-          record.workflow?.status || 'UNKNOWN',
-          record.createdAt ? new Date(record.createdAt).toLocaleDateString() : 'N/A'
-        ].join(','));
-      });
-      filename = `My_Team_Submitted_Report_${targetQuarter.name}.csv`;
-    }
-
-    if (reportType === 'MISSING' || reportType === 'ALL') {
-      const missingStaff = team.filter(u => !submittedStaffIds.includes(u._id));
+    displayedItems.forEach(record => {
+      const isMissing = record.isMissing;
+      const u = record.employeeId;
+      const empName = `${u?.personalDetails?.firstName || ''} ${u?.personalDetails?.lastName || ''}`.trim();
+      const jobTitle = u?.employmentDetails?.jobTitle || 'Staff';
+      const compCode = u?.companyCode || 'FSM';
+      const empId = u?.employeeId || 'N/A';
       
-      if (reportType === 'ALL') {
-        csvRows.push(''); 
-        csvRows.push('--- STAFF WITH PENDING SUBMISSIONS ---');
-      }
+      const iprf = record.calculatedResults?.finalIprfScore || 0;
+      const prorate = (u?.employmentDetails?.prorateValue || 12) / 12;
+      const awardPct = isMissing ? '—' : (cpPct * iprf * prorate).toFixed(2) + '%';
       
-      const missingHeaders = ['Employee ID', 'Employee Name', 'Job Title', 'Company Code', 'Action Required'];
-      csvRows.push(missingHeaders.join(','));
+      const statusText = getStatusConfig(record.workflow?.status).text;
+      const date = (record.updatedAt || record.createdAt) ? new Date(record.updatedAt || record.createdAt).toLocaleDateString('en-GB') : 'N/A';
 
-      missingStaff.forEach(u => {
-        const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`;
-        csvRows.push([
-           u.employeeId || 'N/A',
-           `"${empName}"`,
-           `"${u.employmentDetails?.jobTitle || 'N/A'}"`,
-           u.companyCode || 'FSM',
-           'Awaiting Manager Rating'
-        ].join(','));
-      });
-      
-      if (reportType === 'MISSING') filename = `My_Team_Pending_Report_${targetQuarter.name}.csv`;
-      else filename = `My_Team_Complete_Status_Report_${targetQuarter.name}.csv`;
-    }
+      csvRows.push([
+        empId,
+        `"${empName}"`,
+        `"${jobTitle}"`,
+        compCode,
+        record.appraisalRef || 'N/A',
+        isMissing ? '—' : iprf.toFixed(2),
+        awardPct,
+        `"${statusText}"`,
+        date
+      ].join(','));
+    });
+
+    const filename = `My_Team_${reportType}_Report_${targetQuarter.name}.csv`;
 
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -269,53 +254,51 @@ export default function MySubmissions() {
     document.body.removeChild(link);
   };
 
-  // 🚨 UPGRADED: Robust parseComments function accurately handling the new backend format
   const parseComments = (combinedString) => {
     if (!combinedString) return {};
+    const comments = {};
     
-    // Parse New Accurate Format
-    if (combinedString.includes('1. Job Competence:')) {
-      const extract = (currentLabel, nextLabel) => {
-        const startIdx = combinedString.indexOf(currentLabel);
-        if (startIdx === -1) return '';
-        const startOfContent = startIdx + currentLabel.length;
-        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
-        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
-        return combinedString.substring(startOfContent, endIdx).trim();
-      };
+    const labels = [
+      { key: 'jobCompetence', matches: ['Job Competence:'] },
+      { key: 'behaviors', matches: ['Behaviors & Initiative:', 'Demonstrated Initiative:'] },
+      { key: 'dependability', matches: ['Dependability:'] },
+      { key: 'adaptability', matches: ['Adaptability:'] },
+      { key: 'safeWorking', matches: ['Safe Working:', 'Demonstrated Safe Working:'] },
+      { key: 'deliveredResults', matches: ['Delivered Expected Results:', 'Delivered Results:'] }
+    ];
 
-      return {
-        jobCompetence: extract('1. Job Competence:', '2. Behaviors & Initiative:'),
-        behaviors: extract('2. Behaviors & Initiative:', '3. Dependability:'),
-        dependability: extract('3. Dependability:', '4. Adaptability:'),
-        adaptability: extract('4. Adaptability:', '5. Safe Working:'),
-        safeWorking: extract('5. Safe Working:', '6. Delivered Expected Results:'),
-        deliveredResults: extract('6. Delivered Expected Results:', null)
-      };
-    }
+    let foundLabels = [];
+    labels.forEach(labelDef => {
+      let bestIdx = -1;
+      let bestMatch = '';
+      for (const matchStr of labelDef.matches) {
+        const idx = combinedString.indexOf(matchStr);
+        if (idx !== -1) {
+          bestIdx = idx;
+          bestMatch = matchStr;
+          break;
+        }
+      }
+      if (bestIdx !== -1) {
+        foundLabels.push({ key: labelDef.key, index: bestIdx, match: bestMatch });
+      }
+    });
 
-    // Fallback for extreme legacy format if any
-    if (combinedString.includes('1. Delivered Expected Results:')) {
-      const extract = (currentLabel, nextLabel) => {
-        const startIdx = combinedString.indexOf(currentLabel);
-        if (startIdx === -1) return '';
-        const startOfContent = startIdx + currentLabel.length;
-        const endIdx = nextLabel ? combinedString.indexOf(nextLabel) : combinedString.length;
-        if (endIdx === -1) return combinedString.substring(startOfContent).trim();
-        return combinedString.substring(startOfContent, endIdx).trim();
-      };
+    foundLabels.sort((a, b) => a.index - b.index);
 
-      return {
-        deliveredResults: extract('1. Delivered Expected Results:', '2. Behaviors & Initiative:'),
-        behaviors: extract('2. Behaviors & Initiative:', '3. Safe Working:'),
-        safeWorking: extract('3. Safe Working:', '4. Job Competence:'),
-        jobCompetence: extract('4. Job Competence:', '5. Dependability:'),
-        dependability: extract('5. Dependability:', '6. Adaptability:'),
-        adaptability: extract('6. Adaptability:', null)
-      };
-    }
-    
-    return {};
+    foundLabels.forEach((label, i) => {
+      const start = label.index + label.match.length;
+      if (i + 1 < foundLabels.length) {
+        const nextLabelIdx = foundLabels[i + 1].index;
+        let content = combinedString.substring(start, nextLabelIdx);
+        content = content.replace(/\s*\d+\.\s*$/, ''); // Backtrack and remove proceeding list numbers
+        comments[label.key] = content.trim();
+      } else {
+        comments[label.key] = combinedString.substring(start).trim();
+      }
+    });
+
+    return comments;
   };
 
   if (loading) return <div className="p-10 text-center text-slate-500">Loading submissions...</div>;
@@ -325,7 +308,9 @@ export default function MySubmissions() {
       
       <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E2DDD4] pb-4">
         <div>
-          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">&#128228; My Submissions</div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">
+            &#128228; My Submissions {quarters.find(q => String(q._id) === String(selectedQuarterId))?.name || ''}
+          </div>
           <div className="text-[13px] text-[#6b7280]">Appraisals sent to HR for review and approval</div>
         </div>
 
@@ -392,7 +377,7 @@ export default function MySubmissions() {
                 <div className="flex-1">
                   <div className="text-[14px] font-[700] text-[#0D2B55]">{fName} {lName}</div>
                   <div className="text-[11px] text-[#6b7280] mt-[3px]">
-                    {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· Submitted ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
+                    {jobTitle} &middot; {quarter} {a.isMissing ? '' : `· ${a.workflow?.status === 'DRAFT' ? 'Saved' : 'Submitted'} ${new Date(a.updatedAt || a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at ${new Date(a.updatedAt || a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} &middot; IPRF: {a.isMissing ? '—' : iprf.toFixed(1)} &mdash; Award: {a.isMissing ? '—' : awardPct + (awardPct !== '—' ? '%' : '')}
                   </div>
                   
                   {!a.isMissing && a.narrative?.hrComments && a.workflow?.status === 'REOPENED' && (
@@ -457,7 +442,7 @@ export default function MySubmissions() {
                     {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
                   </h3>
                   <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; Submitted {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; {selectedAppraisal.workflow?.status === 'DRAFT' ? 'Saved' : 'Submitted'} {new Date(selectedAppraisal.updatedAt || selectedAppraisal.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               </div>
@@ -482,44 +467,52 @@ export default function MySubmissions() {
               </div>
 
               <div className="mb-[24px]">
-                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">Submitted KPA Ratings & Comments</h4>
-                <div className="flex flex-col gap-[10px]">
-                  {Object.entries(SCORE_LABELS).map(([key, label]) => {
-                    const rating = selectedAppraisal.scores?.[key]?.rating;
-                    const commentsObj = parseComments(selectedAppraisal.narrative?.generalComments);
-                    const comment = commentsObj[key] || "No justification provided.";
-                    const isExpanded = expandedComment === key;
-                    const hasRating = rating !== null && rating !== undefined;
-
-                    return (
-                      <div key={key} className="bg-white border border-[#E2DDD4] rounded-[8px] overflow-hidden shadow-sm transition-all duration-200">
-                        <div 
-                          className="flex justify-between items-center p-[10px_14px] cursor-pointer hover:bg-slate-50 transition-colors"
-                          onClick={() => setExpandedComment(isExpanded ? null : key)}
-                        >
-                          <div className="flex items-center gap-2">
-                             <span className="text-[13px] font-[600] text-[#475569]">{label}</span>
-                             {hasRating && rating !== 1.0 && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
-                          </div>
+                <h4 className="text-[12px] font-[800] text-[#0D2B55] uppercase tracking-wider mb-[12px] pb-[8px] border-b border-[#E2DDD4]">
+                  {selectedAppraisal.workflow?.status === 'DRAFT' ? 'Drafted KPA Ratings & Comments' : 'Submitted KPA Ratings & Comments'}
+                </h4>
+                
+                {(() => {
+                  const parsedComments = parseComments(selectedAppraisal.narrative?.generalComments);
+                  const hasParsedComments = Object.keys(parsedComments).length > 0;
+                  
+                  return (
+                    <>
+                      <div className="bg-white border border-[#E2DDD4] rounded-[10px] overflow-hidden mb-[24px]">
+                        {Object.entries(SCORE_LABELS).map(([key, name]) => {
+                          const rating = selectedAppraisal.scores?.[key]?.rating;
+                          const color = rating === 0.0 ? 'text-[#991B1B]' : rating === 0.7 ? 'text-[#92400E]' : rating === 1.0 ? 'text-[#065F46]' : rating === 1.3 ? 'text-[#1E40AF]' : 'text-[#6b7280]';
+                          const comment = parsedComments[key];
                           
-                          <div className="flex items-center gap-3">
-                            <span className={`text-[14px] font-[800] ${!hasRating ? 'text-slate-300' : rating >= 3 ? 'text-[#059669]' : rating >= 2 ? 'text-[#D97706]' : 'text-[#DC2626]'}`}>
-                              {hasRating ? rating.toFixed(1) : '-'}
-                            </span>
-                            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          return (
+                            <div key={key} className="border-b border-[#E2DDD4] last:border-0">
+                              <div className="flex justify-between items-center p-[10px_16px]">
+                                <div className="font-[500] text-[#0f1923] text-[13px]">{name}</div>
+                                <div className="text-right">
+                                  <span className={`font-[800] ${color} text-[13px]`}>{rating !== undefined ? rating.toFixed(1) : '—'}</span>
+                                </div>
+                              </div>
+                              {comment && (
+                                <div className="p-[0_16px_12px_16px] text-[12px] text-[#6b7280] italic leading-[1.6]">
+                                  <span className="font-[700] not-italic text-[#0D2B55] text-[10px] uppercase tracking-widest block mb-[2px]">Manager Justification:</span>
+                                  "{comment}"
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {selectedAppraisal.narrative?.generalComments && !hasParsedComments && (
+                        <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px] mb-[24px]">
+                          <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
+                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
+                            "{selectedAppraisal.narrative.generalComments}"
                           </div>
                         </div>
-
-                        {isExpanded && (
-                          <div className="p-[10px_14px] bg-slate-50 border-t border-[#E2DDD4] text-[12px] text-slate-700 animate-in fade-in slide-in-from-top-1">
-                            <div className="font-semibold text-slate-500 mb-1 text-[10px] uppercase tracking-wider">Manager Justification:</div>
-                            <div className="italic leading-relaxed">{comment}</div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               
               {selectedAppraisal.narrative?.epJustification && (
@@ -530,6 +523,17 @@ export default function MySubmissions() {
                     </div>
                  </div>
               )}
+
+              <div className="flex flex-col gap-[12px]">
+                {selectedAppraisal.narrative?.hrComments && (
+                  <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
+                    <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
+                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
+                      "{selectedAppraisal.narrative.hrComments}"
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
                 <div className={`text-[11px] font-[700] p-[4px_12px] rounded-full whitespace-nowrap ${getStatusConfig(selectedAppraisal.workflow?.status).badgeClass}`}>

@@ -132,8 +132,8 @@ function NewAppraisalForm() {
   const [activeQuarterId, setActiveQuarterId] = useState('');
   
   const [filterYear, setFilterYear] = useState('');
+  const [isManualYear, setIsManualYear] = useState(false);
 
-  // 🚨 FIX: Added extraComment to state for the new optional box
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '', extraComment: '' });
   
@@ -153,7 +153,6 @@ function NewAppraisalForm() {
   const [searchQueries, setSearchQueries] = useState({ emp: '', title: '' });
   const dropdownRef = useRef(null);
 
-  // Custom Modal State to lock page and center alerts
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
     type: 'alert', 
@@ -198,13 +197,12 @@ function NewAppraisalForm() {
         dependability: extract('3. Dependability:', '4. Adaptability:'),
         adaptability: extract('4. Adaptability:', '5. Safe Working:'),
         safeWorking: extract('5. Safe Working:', '6. Delivered Expected Results:'),
-        // 🚨 FIX: Extract general/extra notes if they exist, otherwise just go to end
         expectedResults: extract('6. Delivered Expected Results:', '7. General Manager Notes:'),
         extraComment: extract('7. General Manager Notes:', null)
       };
     }
 
-    // Parse Legacy Format (To handle older drafts safely)
+    // Parse Legacy Format
     if (combinedString.includes('1. Delivered Expected Results:')) {
       const extract = (currentLabel, nextLabel) => {
         const startIdx = combinedString.indexOf(currentLabel);
@@ -310,7 +308,7 @@ function NewAppraisalForm() {
               title: emp?.employmentDetails?.jobTitle || '',
               quarter: qId,
               epJustification: draftData.narrative?.epJustification || '',
-              extraComment: parsedDftComments.extraComment || '' // 🚨 FIX: Load back extra comments
+              extraComment: parsedDftComments.extraComment || ''
             });
 
             if (matchedQ) {
@@ -458,10 +456,7 @@ function NewAppraisalForm() {
   const isCriterionComplete = (critId) => {
     const val = scores[critId];
     if (val === null) return false;
-    
-    // 1.0 no longer requires a comment to be considered complete
     if (val === 1.0) return true;
-    
     const comment = criterionComments[critId] || '';
     return comment.trim().length >= 5;
   };
@@ -474,8 +469,6 @@ function NewAppraisalForm() {
 
   const handleScore = (critId, val) => {
     if (isCurrentQuarterLocked) return;
-    
-    // Removed auto-clear of comments when selecting 1.0
     setScores(prev => ({ ...prev, [critId]: val }));
   };
 
@@ -519,7 +512,6 @@ function NewAppraisalForm() {
     if (!isDraft) {
       const missingComments = CRITERIA.filter(c => {
          const s = scores[c.id];
-         // Validation remains ignored for 1.0, treating the comment as strictly optional
          if (s === 1.0) return false;
          const com = criterionComments[c.id] || '';
          return com.trim().length < 5;
@@ -532,7 +524,6 @@ function NewAppraisalForm() {
 
     setIsSubmitting(true);
     try {
-      // 🚨 FIX: Compiled the new general notes safely onto the end of the text blob
       let compiledComments = 
 `1. Job Competence:
 ${criterionComments.jobCompetence || (scores.jobCompetence === 1.0 ? 'No comment required for E (1.0).' : '')}
@@ -617,6 +608,12 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
           onClick={() => {
              if (draftId && fieldKey === 'emp') return; 
              if (isCurrentQuarterLocked && fieldKey === 'title') return; 
+             
+             if (fieldKey === 'emp' && (!filterYear || !formData.quarter)) {
+                 showDialog('alert', 'Selection Required', 'Please select an Appraisal Quarter and Year from the top filters before selecting a staff member.');
+                 return;
+             }
+
              setOpenDropdown(isOpen ? null : fieldKey);
           }}
           className={`w-full px-[12px] py-[9px] border-[1.5px] rounded-[8px] text-[13px] bg-white transition-colors flex justify-between items-center ${
@@ -690,11 +687,94 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
 
   return (
     <div className="max-w-6xl mx-auto pb-20 font-sans relative">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-[#0D2B55]">
-          {draftId ? 'Resume Appraisal Draft' : 'New Staff Appraisal'}
-        </h2>
-        <p className="text-sm text-gray-500 mt-1">Select a staff member • rate 6 criteria • save draft or submit to HR</p>
+      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E2DDD4] pb-4">
+        <div>
+          <h2 className="text-2xl font-bold text-[#0D2B55]">
+            {draftId ? 'Resume Appraisal Draft' : 'New Staff Appraisal'}
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">Select a staff member • rate 6 criteria • save draft or submit to HR</p>
+        </div>
+        
+        <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-[#E2DDD4] shadow-sm">
+          <div className="text-[11px] font-bold text-[#0D2B55] flex items-center gap-1.5 mr-1">
+            <Calendar className="w-3.5 h-3.5 text-[#C9A84C]" /> Period:
+          </div>
+          
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                  setFormData(prev => ({...prev, quarter: ''}));
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                    setFormData(prev => ({...prev, quarter: ''}));
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[6px] px-[10px] bg-white border border-[#0D2B55] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none w-[80px]"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else {
+                  setFilterYear(e.target.value);
+                  const firstQOfYear = dbQuarters.find(q => q.year?.toString() === e.target.value);
+                  setFormData(prev => ({ ...prev, quarter: firstQOfYear ? firstQOfYear._id : '' }));
+                }
+              }} 
+              className="py-[6px] px-[10px] bg-slate-50 border border-[#E2DDD4] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[90px]"
+            >
+              <option value="">Year</option>
+              {availableYears.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
+
+          <select 
+            value={formData.quarter} 
+            onChange={e => setFormData({...formData, quarter: e.target.value})}
+            className="py-[6px] px-[10px] bg-slate-50 border border-[#E2DDD4] rounded-[6px] text-[12px] font-[700] text-[#0f1923] outline-none cursor-pointer min-w-[130px]"
+          >
+            {dbQuarters.filter(q => q.year?.toString() === filterYear).length === 0 ? (
+              <option value="">No Quarters</option>
+            ) : (
+              dbQuarters.filter(q => q.year?.toString() === filterYear).map(q => {
+                const start = new Date(q.startDate); start.setHours(0,0,0,0);
+                const end = new Date(q.endDate); end.setHours(23,59,59,999);
+                const now = new Date();
+                const isQFuture = now < start;
+                const exp = now > end;
+                
+                let lockStatus = '';
+                if (quarterStatuses[q._id] === 'submitted') lockStatus = 'Submitted';
+                else if (q.isLocked || (exp && !q.forceUnlock)) lockStatus = 'Locked';
+                else if (isQFuture) lockStatus = 'Upcoming';
+                else if (q.forceUnlock) lockStatus = 'Open';
+                else lockStatus = 'Active';
+
+                return (
+                  <option key={q._id} value={q._id}>
+                    {q.name} — {lockStatus}
+                  </option>
+                );
+              })
+            )}
+          </select>
+        </div>
       </div>
 
       {selectedStaff && (
@@ -771,7 +851,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                   <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[14px] shrink-0">&#128100;</div>
                   <div>
                     <div className="text-sm font-bold text-[#0D2B55]">Employee Details</div>
-                    <div className="text-[11px] text-[#6b7280]">Edit title and quarter before rating</div>
+                    <div className="text-[11px] text-[#6b7280]">Edit title before rating</div>
                   </div>
                 </div>
                 <div className="p-5">
@@ -833,43 +913,12 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                     </div>
                     
                     <div className="flex flex-col gap-1">
-                      <label className="text-[11px] font-[600] text-[#0D2B55]">Appraisal Quarter <span className="text-red-500">*</span></label>
-                      <div className="flex gap-2">
-                        <select 
-                          value={filterYear} 
-                          onChange={handleYearChange}
-                          className={`p-[10px] border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all w-[35%] ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
-                        >
-                          {availableYears.length === 0 ? <option value="">Year</option> : availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
-
-                        <select 
-                          value={formData.quarter} 
-                          onChange={e => setFormData({...formData, quarter: e.target.value})}
-                          className={`p-[10px] border rounded-lg text-xs font-semibold outline-none cursor-pointer transition-all w-[65%] ${isCurrentQuarterLocked ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 text-gray-900 bg-white'}`}
-                        >
-                          {dbQuarters.filter(q => q.year?.toString() === filterYear).length === 0 ? <option value="">No Quarters</option> : dbQuarters.filter(q => q.year?.toString() === filterYear).map(q => {
-                             const start = new Date(q.startDate); start.setHours(0,0,0,0);
-                             const end = new Date(q.endDate); end.setHours(23,59,59,999);
-                             const now = new Date();
-                             const isQFuture = now < start;
-                             const exp = now > end;
-                             
-                             let lockStatus = '';
-                             if (quarterStatuses[q._id] === 'submitted') lockStatus = 'Already Submitted';
-                             else if (q.isLocked || (exp && !q.forceUnlock)) lockStatus = 'Locked';
-                             else if (isQFuture) lockStatus = 'Upcoming';
-                             else if (q.forceUnlock) lockStatus = 'Open (Override)';
-                             else lockStatus = 'Active';
-
-                             return (
-                               <option key={q._id} value={q._id}>
-                                 {q.name} — {lockStatus}
-                               </option>
-                             );
-                          })}
-                        </select>
-                      </div>
+                      <label className="text-[11px] font-[600] text-[#0D2B55]">Appraisal Quarter <span className="text-[9px] font-[700] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-1 uppercase">Auto</span></label>
+                      <input 
+                        readOnly 
+                        value={currentQObj ? `${currentQObj.name} (${filterYear})` : 'Not Selected'} 
+                        className="p-2 border border-dashed border-gray-200 rounded-lg text-xs font-bold text-[#0D2B55] bg-gray-50 cursor-default" 
+                      />
                     </div>
                   </div>
                   
@@ -1309,7 +1358,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                   type="button"
                   onClick={() => modalConfig.onConfirm()}
                   className={`px-[20px] py-[10px] text-white font-[800] text-[13px] rounded-[8px] shadow-sm transition-colors ${
-                    modalConfig.title.includes('Error') || modalConfig.title.includes('System Lock')
+                    modalConfig.title.includes('Error') || modalConfig.title.includes('System Lock') || modalConfig.title.includes('Required')
                       ? 'bg-red-600 hover:bg-red-700' 
                       : 'bg-[#0D2B55] hover:bg-[#1a3d6e]'
                   }`}
