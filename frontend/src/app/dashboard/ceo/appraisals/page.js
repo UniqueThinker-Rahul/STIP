@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
-import { Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 
 const CRIT_NAMES = {
   deliveredResults: 'Delivered Expected Results',
@@ -116,6 +116,7 @@ export default function CEOAllAppraisals() {
   
   // Modal
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
+  const [expandedComment, setExpandedComment] = useState(null);
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
@@ -449,6 +450,53 @@ export default function CEOAllAppraisals() {
     return pages;
   };
 
+  const parseComments = (combinedString) => {
+    if (!combinedString) return {};
+    const comments = {};
+    
+    const labels = [
+      { key: 'jobCompetence', matches: ['Job Competence:'] },
+      { key: 'behaviors', matches: ['Behaviors & Initiative:', 'Demonstrated Initiative:'] },
+      { key: 'dependability', matches: ['Dependability:'] },
+      { key: 'adaptability', matches: ['Adaptability:'] },
+      { key: 'safeWorking', matches: ['Safe Working:', 'Demonstrated Safe Working:'] },
+      { key: 'deliveredResults', matches: ['Delivered Expected Results:', 'Delivered Results:'] }
+    ];
+
+    let foundLabels = [];
+    labels.forEach(labelDef => {
+      let bestIdx = -1;
+      let bestMatch = '';
+      for (const matchStr of labelDef.matches) {
+        const idx = combinedString.indexOf(matchStr);
+        if (idx !== -1) {
+          bestIdx = idx;
+          bestMatch = matchStr;
+          break;
+        }
+      }
+      if (bestIdx !== -1) {
+        foundLabels.push({ key: labelDef.key, index: bestIdx, match: bestMatch });
+      }
+    });
+
+    foundLabels.sort((a, b) => a.index - b.index);
+
+    foundLabels.forEach((label, i) => {
+      const start = label.index + label.match.length;
+      if (i + 1 < foundLabels.length) {
+        const nextLabelIdx = foundLabels[i + 1].index;
+        let content = combinedString.substring(start, nextLabelIdx);
+        content = content.replace(/\s*\d+\.\s*$/, ''); 
+        comments[label.key] = content.trim();
+      } else {
+        comments[label.key] = combinedString.substring(start).trim();
+      }
+    });
+
+    return comments;
+  };
+
   return (
     <div className="max-w-6xl mx-auto pb-[60px] font-sans">
       
@@ -693,8 +741,11 @@ export default function CEOAllAppraisals() {
                         {a.isMissing ? (
                            <span className="text-[10px] font-bold text-red-400 italic">No Data</span>
                         ) : (
-                          <button 
-                            onClick={() => setSelectedAppraisal(a)}
+                         <button 
+                            onClick={() => {
+                              setSelectedAppraisal(a);
+                              setExpandedComment(null);
+                            }}
                             className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
                           >
                             View
@@ -820,55 +871,79 @@ export default function CEOAllAppraisals() {
               </div>
 
               <h4 className="text-[12px] font-[800] text-[#0D2B55] mb-[12px] uppercase tracking-widest">Criteria Breakdown</h4>
-              <div className="bg-white border border-[#E2DDD4] rounded-[10px] overflow-hidden mb-[24px]">
-                <table className="w-full text-left text-[13px]">
-                  <tbody className="divide-y divide-[#E2DDD4]">
-                    {Object.entries(CRIT_NAMES).map(([key, name]) => {
-                      const rating = selectedAppraisal.scores?.[key]?.rating;
-                      const color = rating === 0.0 ? 'text-[#991B1B]' : rating === 0.7 ? 'text-[#92400E]' : rating === 1.0 ? 'text-[#065F46]' : rating === 1.3 ? 'text-[#1E40AF]' : 'text-[#6b7280]';
-                      return (
-                        <tr key={key}>
-                          <td className="p-[10px_16px] font-[500] text-[#0f1923]">{name}</td>
-                          <td className="p-[10px_16px] text-right">
-                            <span className={`font-[800] ${color}`}>{rating !== undefined ? rating.toFixed(1) : '—'}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex flex-col gap-[12px]">
-                {selectedAppraisal.narrative?.epJustification && (
-                  <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] rounded-[10px] p-[16px]">
-                    <div className="text-[11px] font-[800] text-[#92400E] uppercase tracking-[.06em] mb-[6px] flex items-center gap-[6px]">
-                      <span>⭐</span> EP Justification
-                    </div>
-                    <div className="text-[13px] text-[#92400E] leading-relaxed font-[500] whitespace-pre-wrap">
-                      {selectedAppraisal.narrative.epJustification}
-                    </div>
-                  </div>
-                )}
+              
+              {(() => {
+                const parsedComments = parseComments(selectedAppraisal.narrative?.generalComments);
+                const hasParsedComments = Object.keys(parsedComments).length > 0;
                 
-                {selectedAppraisal.narrative?.generalComments && (
-                  <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px]">
-                    <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
-                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
-                      "{selectedAppraisal.narrative.generalComments}"
+                return (
+                  <>
+                    <div className="bg-white border border-[#E2DDD4] rounded-[10px] overflow-hidden mb-[24px]">
+                      {Object.entries(CRIT_NAMES).map(([key, name]) => {
+                        const rating = selectedAppraisal.scores?.[key]?.rating;
+                        const color = rating === 0.0 ? 'text-[#991B1B]' : rating === 0.7 ? 'text-[#92400E]' : rating === 1.0 ? 'text-[#065F46]' : rating === 1.3 ? 'text-[#1E40AF]' : 'text-[#6b7280]';
+                        const comment = parsedComments[key];
+                        const isExpanded = expandedComment === key;
+                        
+                        return (
+                          <div key={key} className="border-b border-[#E2DDD4] last:border-0">
+                            <div 
+                              className="flex justify-between items-center p-[10px_16px] cursor-pointer hover:bg-slate-50 transition-colors"
+                              onClick={() => setExpandedComment(isExpanded ? null : key)}
+                            >
+                              <div className="font-[500] text-[#0f1923] text-[13px] flex items-center gap-2">
+                                {name}
+                                {comment && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
+                              </div>
+                              <div className="flex items-center gap-3 text-right">
+                                <span className={`font-[800] ${color} text-[13px]`}>{rating !== undefined ? rating.toFixed(1) : '—'}</span>
+                                <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </div>
+                            {isExpanded && comment && (
+                              <div className="p-[0_16px_12px_16px] text-[12px] text-[#6b7280] italic leading-[1.6] animate-in fade-in slide-in-from-top-1">
+                                <span className="font-[700] not-italic text-[#0D2B55] text-[10px] uppercase tracking-widest block mb-[2px]">Manager Justification:</span>
+                                "{comment}"
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                )}
 
-                {selectedAppraisal.narrative?.hrComments && (
-                  <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
-                    <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
-                    <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
-                      "{selectedAppraisal.narrative.hrComments}"
+                    <div className="flex flex-col gap-[12px]">
+                      {selectedAppraisal.narrative?.epJustification && (
+                        <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] rounded-[10px] p-[16px]">
+                          <div className="text-[11px] font-[800] text-[#92400E] uppercase tracking-[.06em] mb-[6px] flex items-center gap-[6px]">
+                            <span>⭐</span> EP Justification
+                          </div>
+                          <div className="text-[13px] text-[#92400E] leading-relaxed font-[500] whitespace-pre-wrap">
+                            {selectedAppraisal.narrative.epJustification}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedAppraisal.narrative?.generalComments && !hasParsedComments && (
+                        <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px]">
+                          <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
+                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
+                            "{selectedAppraisal.narrative.generalComments}"
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedAppraisal.narrative?.hrComments && (
+                        <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
+                          <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
+                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
+                            "{selectedAppraisal.narrative.hrComments}"
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
-              </div>
+                  </>
+                );
+              })()}
               
               <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
                 <StatusTag st={selectedAppraisal.workflow?.status} />
