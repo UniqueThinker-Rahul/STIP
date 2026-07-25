@@ -114,12 +114,12 @@ const T = {
 };
 
 const CRIT = [
-  { key: "competence",    label: "Job Competence",             weight: 10, color: "#7C3AED" },
-  { key: "behaviors",     label: "Behaviours",                 weight: 20, color: "#1E40AF" },
-  { key: "dependability", label: "Dependability",              weight: 10, color: "#0369A1" },
-  { key: "adaptability",  label: "Adaptability",               weight: 10, color: "#D97706" },
-  { key: "safety",        label: "Safe Working",               weight: 20, color: "#059669" },
-  { key: "results",       label: "Delivered Expected Results", weight: 30, color: "#0D2B55" },
+  { key: "jobCompetence",    label: "Job Competence",             weight: 10, color: "#7C3AED" },
+  { key: "behaviors",        label: "Behaviours",                 weight: 20, color: "#1E40AF" },
+  { key: "dependability",    label: "Dependability",              weight: 10, color: "#0369A1" },
+  { key: "adaptability",     label: "Adaptability",               weight: 10, color: "#D97706" },
+  { key: "safeWorking",      label: "Safe Working",               weight: 20, color: "#059669" },
+  { key: "deliveredResults", label: "Delivered Expected Results", weight: 30, color: "#0D2B55" },
 ];
 
 const RB = [
@@ -346,7 +346,12 @@ async function makePdf(d) {
   RB.forEach((b) => {
     const c = hx(noHash(b.hex)); doc.setFillColor(c[0], c[1], c[2]); doc.rect(lx, ly - 2.4, 2.6, 2.6, "F");
     doc.setFontSize(6.4); doc.setTextColor(102, 112, 133);
-    doc.text(`${rateLbl(b.v)} \u00b7 ${b.k} (${d.totals[b.k]})`, lx + 3.6, ly);
+    
+    // 🚨 UPGRADE: Stripped out absolute count, only showing Percentages in PDF
+    const v = d.totals[b.k];
+    const pc = d.totalRatings ? (v / d.totalRatings) * 100 : 0;
+    doc.text(`${rateLbl(b.v)} \u00b7 ${b.k} (${pc.toFixed(1)}%)`, lx + 3.6, ly);
+    
     lx += 32;
   });
   doc.setFontSize(7.5); doc.setTextColor(102, 112, 133);
@@ -450,17 +455,26 @@ export default function BoardReportPage() {
   const [dbQuarters, setDbQuarters] = useState([]);
   const [metrics, setMetrics] = useState(null);
 
-  // 🚨 UPGRADE: Office Station States
   const [stationLocations, setStationLocations] = useState([]);
-  const [selectedStation, setSelectedStation] = useState("");
+  
+  const [selectedTopStation, setSelectedTopStation] = useState("All");
 
-  // 1. Fetch Config & Quarters ONCE (Lazy load heavy data later)
+  const [selectedAppraisedStation, setSelectedAppraisedStation] = useState("");
+  const [selectedMissingStation, setSelectedMissingStation] = useState("");
+
+  // 🚨 UPGRADE: Added master memory state so we can filter perfectly without relying on backend constraints
+  const [allAppraisals, setAllAppraisals] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+
+  // 1. Fetch Config & Quarters ONCE
   useEffect(() => {
     const fetchBaseData = async () => {
       try {
-        const [configRes, qtrsRes] = await Promise.all([
+        const [configRes, qtrsRes, appRes, usersRes] = await Promise.all([
           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
-          api.get('/quarters').catch(() => ({ data: { data: [] } }))
+          api.get('/quarters').catch(() => ({ data: { data: [] } })),
+          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+          api.get('/users').catch(() => ({ data: { data: [] } }))
         ]);
 
         const companyCodes = configRes.data?.data?.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM'];
@@ -470,9 +484,12 @@ export default function BoardReportPage() {
         fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         setDbQuarters(fetchedQuarters);
 
-        // 🚨 UPGRADE: Fetch Office Locations for the new card
         const stList = configRes.data?.data?.officeLocations || [];
         setStationLocations(stList.sort());
+
+        setAllAppraisals(appRes.data?.data || []);
+        setAllUsers(usersRes.data?.data || []);
+
       } catch (error) {
         console.error("Failed to load base data", error);
         setOffices(["All", "FSM", "CDU", "NAR", "GUM"]); 
@@ -520,21 +537,97 @@ export default function BoardReportPage() {
     return m ? `Q${m[1]}` : q.name;
   }))].sort();
 
-  // 4. Fetch Actual Real-Time Aggregated Data from Database
+  // 4. 🚨 UPGRADE: Frontend Mathematical Aggregation 
+  // Solves the top Office Station filter issue by bypassing the backend and calculating directly in real-time
   useEffect(() => {
-    const fetchReport = async () => {
-      if (!quarter) return;
-      setLoading(true);
+    if (!quarter || allAppraisals.length === 0) {
+       return;
+    }
+    setLoading(true);
+
+    setTimeout(() => {
       try {
-        const res = await api.get(`/reports/board-report`, { params: { year, quarter, office } });
-        setD(res.data.data);
+        const qObj = dbQuarters.find(q => String(q._id) === String(quarter));
+        const qName = qObj ? qObj.name : quarter;
+
+        let validApps = allAppraisals.filter(a => {
+           const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
+           const qMatch = String(appQtrRaw).match(/Q?([1-4])/i);
+           const appQtrName = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
+
+           const isMatchQtrId = String(a.appraisalQuarter?._id || a.appraisalQuarter) === String(quarter);
+           const isMatchQtrName = appQtrName === qName;
+           
+           const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+           const isMatchYear = String(appYear) === String(year);
+
+           return (isMatchQtrId || isMatchQtrName) && isMatchYear;
+        });
+
+        // Filter out Drafts and Not Started to perfectly match actual backend parameters
+        validApps = validApps.filter(a => a.workflow?.status && !['DRAFT', 'NOT_STARTED'].includes(a.workflow.status));
+
+        if (office !== 'All') {
+          validApps = validApps.filter(a => a.employeeId?.companyCode === office);
+        }
+        if (selectedTopStation !== 'All') {
+          validApps = validApps.filter(a => a.employeeId?.employmentDetails?.officeLocation === selectedTopStation);
+        }
+
+        const N = validApps.length;
+        const critRows = CRIT.map(c => {
+           const counts = { LS: 0, NI: 0, E: 0, EP: 0 };
+           let rated = 0;
+           let sum = 0;
+           validApps.forEach(a => {
+               const r = a.scores?.[c.key]?.rating;
+               if (r !== undefined && r !== null) {
+                   rated++;
+                   sum += r;
+                   if (r === 0 || r === 0.0) counts.LS++;
+                   else if (r === 0.7) counts.NI++;
+                   else if (r === 1 || r === 1.0) counts.E++;
+                   else if (r >= 1.3) counts.EP++;
+               }
+           });
+           return {
+               cat: c,
+               counts,
+               rated,
+               avg: rated > 0 ? sum / rated : 0,
+               contrib: rated > 0 ? (sum / rated) * (c.weight / 100) : 0
+           };
+        });
+
+        const totals = { LS: 0, NI: 0, E: 0, EP: 0 };
+        let totalRatings = 0;
+        critRows.forEach(cr => {
+           totals.LS += cr.counts.LS;
+           totals.NI += cr.counts.NI;
+           totals.E += cr.counts.E;
+           totals.EP += cr.counts.EP;
+           totalRatings += cr.rated;
+        });
+
+        let scopeStr = 'Whole organisation';
+        if (office !== 'All' && selectedTopStation !== 'All') scopeStr = `${office} - ${selectedTopStation}`;
+        else if (office !== 'All') scopeStr = office;
+        else if (selectedTopStation !== 'All') scopeStr = selectedTopStation;
+
+        setD({
+           scope: scopeStr,
+           period: `${qName} ${year}`,
+           N,
+           critRows,
+           totals,
+           totalRatings
+        });
       } catch (err) {
-        console.error("Failed to fetch Board Report data", err);
+        console.error(err);
       }
       setLoading(false);
-    };
-    fetchReport();
-  }, [year, quarter, office]);
+    }, 0);
+  }, [year, quarter, office, selectedTopStation, allAppraisals, dbQuarters]);
 
   const triggerCSV = (csvContent, filename) => {
     const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
@@ -546,72 +639,35 @@ export default function BoardReportPage() {
     document.body.removeChild(link);
   };
 
-  const triggerPDF = (title, tableHtml, summaryHtml = '') => {
-    const htmlContent = `
-      <html>
-        <head>
-          <title>${title}</title>
-          <style>
-            body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 40px; }
-            h1 { color: #0D2B55; text-align: center; border-bottom: 2px solid #0D2B55; padding-bottom: 10px; }
-            .meta { text-align: center; color: #666; margin-bottom: 30px; font-size: 11px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #ddd; padding: 10px 8px; text-align: left; }
-            th { background-color: #0D2B55; color: white; font-weight: bold; }
-            .right { text-align: right; }
-            .center { text-align: center; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-            .total-row { font-size: 16px; font-weight: bold; color: #0D2B55; text-align: right; margin-top: 20px; }
-          </style>
-        </head>
-        <body>
-          <h1>${title}</h1>
-          <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')} | Financial Year: CY${year} | FSM Petroleum Corporation</div>
-          ${summaryHtml}
-          ${tableHtml}
-        </body>
-      </html>
-    `;
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => { printWindow.print(); }, 250);
-  };
-
-  // 🚨 UPGRADE: Heavy Lazy Loaded Office Missing Generator
-  const generateOfficeMissing = async (fmt) => {
-    setBusy(`station-${fmt}`);
+  // 🚨 UPGRADE: Heavy Lazy Loaded Office APPRAISED Generator (Now prints direct PDF and S.No)
+  const generateOfficeAppraised = async (fmt) => {
+    setBusy(`appraised-${fmt}`);
     try {
-      const [userRes, appRes] = await Promise.all([
-        api.get('/users').catch(() => ({ data: { data: [] } })),
-        api.get('/appraisals').catch(() => ({ data: { data: [] } }))
-      ]);
-      
-      const currentUsers = userRes.data?.data || [];
-      const currentApps = appRes.data?.data || [];
-      
-      const quarterAppraisals = currentApps.filter(a => {
+      const quarterAppraisals = allAppraisals.filter(a => {
          const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
          const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
          const qMatch = String(appQtrRaw).match(/Q?([1-4])/i);
          const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
-         return appYear?.toString() === year.toString() && appQtr === quarter;
+         
+         const isMatchingDate = appYear?.toString() === year.toString() && appQtr === quarter;
+         const isSubmitted = a.workflow?.status && a.workflow.status !== 'DRAFT' && a.workflow.status !== 'NOT_STARTED';
+         
+         return isMatchingDate && isSubmitted;
       });
       
-      const submittedUserIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
-      
-      const title = `Unappraised Staff - ${selectedStation || 'All Offices'} - ${quarter} ${year}`;
-      const columns = ['Employee ID', 'Employee Name', 'Job Title', 'Office Station', 'Manager Name'];
+      const title = `Appraised Staff - ${selectedAppraisedStation || 'All Offices'} - ${quarter} ${year}`;
+      const columns = ['S.No', 'Employee ID', 'Employee Name', 'Job Title', 'Office Station', 'Manager Name', 'Status', 'IPRF Score'];
       const rows = [];
 
-      const missingUsers = currentUsers.filter(u => {
+      const appraisedUserIds = quarterAppraisals.map(a => String(a.employeeId?._id || a.employeeId));
+
+      const appraisedUsers = allUsers.filter(u => {
         if (!u.employmentDetails?.isActive || u.security?.role === 'CEO') return false;
-        if (selectedStation && u.employmentDetails?.officeLocation !== selectedStation) return false;
-        return !submittedUserIds.includes(u._id);
+        if (selectedAppraisedStation && u.employmentDetails?.officeLocation !== selectedAppraisedStation) return false;
+        return appraisedUserIds.includes(String(u._id));
       });
 
-      missingUsers.forEach(u => {
+      appraisedUsers.forEach((u, index) => {
         const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
         
         const mgr = u.employmentDetails?.reportingTo;
@@ -620,24 +676,31 @@ export default function BoardReportPage() {
           if (mgr.personalDetails) {
             mgrName = `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim();
           } else {
-             const foundMgr = currentUsers.find(s => s._id === mgr || s._id === mgr._id);
+             const foundMgr = allUsers.find(s => String(s._id) === String(mgr._id || mgr));
              if (foundMgr) mgrName = `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim();
           }
         } else if (u.employmentDetails?.rawManagerName) {
            mgrName = u.employmentDetails.rawManagerName;
         }
 
+        const app = quarterAppraisals.find(a => String(a.employeeId?._id || a.employeeId) === String(u._id));
+        const status = app?.workflow?.status?.replace(/_/g, ' ') || 'UNKNOWN';
+        const iprf = app?.calculatedResults?.finalIprfScore?.toFixed(2) || '0.00';
+
         rows.push([
+          index + 1,
           u.employeeId || 'N/A', 
           empName, 
           u.employmentDetails?.jobTitle || '', 
           u.employmentDetails?.officeLocation || 'N/A',
-          mgrName
+          mgrName,
+          status,
+          iprf
         ]);
       });
 
       if (rows.length === 0) {
-         alert(`All staff in ${selectedStation || 'all offices'} have been appraised for this quarter.`);
+         alert(`No appraised staff found in ${selectedAppraisedStation || 'all offices'} for this quarter.`);
          setBusy("");
          return;
       }
@@ -650,14 +713,120 @@ export default function BoardReportPage() {
         });
         triggerCSV(csvString, `${title.replace(/\s+/g, '_')}.csv`);
       } else {
-        let htmlRows = '';
-        rows.forEach(r => { htmlRows += `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`; });
-        const tableHtml = `<table><thead><tr><th>Emp ID</th><th>Name</th><th>Job Title</th><th>Office Station</th><th>Manager Name</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
-        triggerPDF(title, tableHtml);
+        await ensureLibs("pdf");
+        const doc = new window.jspdf.jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+        doc.setFillColor(13, 43, 85); doc.rect(0, 0, 297, 27, "F");
+        doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont(undefined, "bold");
+        doc.text(title, 14, 18);
+        doc.setTextColor(100, 100, 100); doc.setFontSize(9); doc.setFont(undefined, "normal");
+        doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')} | Financial Year: CY${year}`, 14, 35);
+        
+        doc.autoTable({
+          startY: 40,
+          head: [columns],
+          body: rows,
+          theme: "grid",
+          headStyles: { fillColor: [13, 43, 85], textColor: [255, 255, 255], fontStyle: "bold" },
+          alternateRowStyles: { fillColor: [245, 248, 250] },
+          styles: { fontSize: 8 }
+        });
+        
+        doc.save(`${title.replace(/\s+/g, '_')}.pdf`);
       }
     } catch (err) {
       console.error(err);
-      alert("Failed to generate Office report");
+      alert("Failed to generate Appraised Office report");
+    }
+    setBusy("");
+  };
+
+  // 🚨 UPGRADE: Heavy Lazy Loaded Office Missing Generator (Now prints direct PDF and S.No)
+  const generateOfficeMissing = async (fmt) => {
+    setBusy(`station-${fmt}`);
+    try {
+      const quarterAppraisals = allAppraisals.filter(a => {
+         const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+         const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
+         const qMatch = String(appQtrRaw).match(/Q?([1-4])/i);
+         const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
+         return appYear?.toString() === year.toString() && appQtr === quarter;
+      });
+      
+      const submittedUserIds = quarterAppraisals.map(app => app.employeeId?._id || app.employeeId);
+      
+      const title = `Unappraised Staff - ${selectedMissingStation || 'All Offices'} - ${quarter} ${year}`;
+      const columns = ['S.No', 'Employee ID', 'Employee Name', 'Job Title', 'Office Station', 'Manager Name'];
+      const rows = [];
+
+      const missingUsers = allUsers.filter(u => {
+        if (!u.employmentDetails?.isActive || u.security?.role === 'CEO') return false;
+        if (selectedMissingStation && u.employmentDetails?.officeLocation !== selectedMissingStation) return false;
+        return !submittedUserIds.includes(u._id);
+      });
+
+      missingUsers.forEach((u, index) => {
+        const empName = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
+        
+        const mgr = u.employmentDetails?.reportingTo;
+        let mgrName = 'Unassigned';
+        if (mgr) {
+          if (mgr.personalDetails) {
+            mgrName = `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim();
+          } else {
+             const foundMgr = allUsers.find(s => s._id === mgr || s._id === mgr._id);
+             if (foundMgr) mgrName = `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim();
+          }
+        } else if (u.employmentDetails?.rawManagerName) {
+           mgrName = u.employmentDetails.rawManagerName;
+        }
+
+        rows.push([
+          index + 1,
+          u.employeeId || 'N/A', 
+          empName, 
+          u.employmentDetails?.jobTitle || '', 
+          u.employmentDetails?.officeLocation || 'N/A',
+          mgrName
+        ]);
+      });
+
+      if (rows.length === 0) {
+         alert(`All staff in ${selectedMissingStation || 'all offices'} have been appraised for this quarter.`);
+         setBusy("");
+         return;
+      }
+
+      if (fmt === 'CSV') {
+        let csvString = columns.join(',') + '\r\n';
+        rows.forEach(row => {
+          const cleanRow = row.map(cell => typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell);
+          csvString += cleanRow.join(',') + '\r\n';
+        });
+        triggerCSV(csvString, `${title.replace(/\s+/g, '_')}.csv`);
+      } else {
+        await ensureLibs("pdf");
+        const doc = new window.jspdf.jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+        doc.setFillColor(13, 43, 85); doc.rect(0, 0, 297, 27, "F");
+        doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont(undefined, "bold");
+        doc.text(title, 14, 18);
+        doc.setTextColor(100, 100, 100); doc.setFontSize(9); doc.setFont(undefined, "normal");
+        doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')} | Financial Year: CY${year}`, 14, 35);
+        
+        doc.autoTable({
+          startY: 40,
+          head: [columns],
+          body: rows,
+          theme: "grid",
+          headStyles: { fillColor: [13, 43, 85], textColor: [255, 255, 255], fontStyle: "bold" },
+          alternateRowStyles: { fillColor: [245, 248, 250] },
+          styles: { fontSize: 8 }
+        });
+        
+        doc.save(`${title.replace(/\s+/g, '_')}.pdf`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate Unappraised Office report");
     }
     setBusy("");
   };
@@ -747,6 +916,7 @@ export default function BoardReportPage() {
                 </select>
               )}
             </label>
+            
             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Quarter</span>
               <select 
@@ -759,6 +929,19 @@ export default function BoardReportPage() {
                 {uniqueAvailableQuarters.map((x) => (<option key={x} value={x}>{x}</option>))}
               </select>
             </label>
+
+            <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
+              <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Office Station</span>
+              <select 
+                value={selectedTopStation} 
+                onChange={(e) => setSelectedTopStation(e.target.value)}
+                className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}
+              >
+                <option value="All">All Stations</option>
+                {stationLocations.map((loc) => (<option key={loc} value={loc}>{loc}</option>))}
+              </select>
+            </label>
+
             <button type="button" onClick={onExcel} disabled={!!busy || loading} className="rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed" style={{ background: T.gold, color: T.navy, border: "1px solid #B99433", opacity: busy === "xlsx" || loading ? 0.6 : 1 }}>
               {busy === "xlsx" ? "…" : "⬇ Excel"}
             </button>
@@ -833,7 +1016,8 @@ export default function BoardReportPage() {
                         <div key={b.k} className="my-1 flex items-center gap-2">
                           <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: b.hex }} />
                           <b style={{ color: T.navy, width: 26 }}>{rateLbl(b.v)}</b>
-                          <b>{v}</b><span style={{ color: T.muted }}>{pc.toFixed(1)}%</span>
+                          {/* 🚨 UPGRADE: Removed Absolute Number calculation next to Legend, left only Percentage */}
+                          <span style={{ color: T.muted }}>{pc.toFixed(1)}%</span>
                         </div>
                       );
                     })}
@@ -844,12 +1028,51 @@ export default function BoardReportPage() {
           </>
         )}
 
-        {/* 🚨 NEW: Report by Office Station Card */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6 mt-8 font-sans">
+        {/* 🚨 NEW: Appraised & Unappraised Split View */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 mt-8 font-sans">
+          
+          {/* Left Side: Appraised Card */}
+          <div className="bg-white border border-[#E4E0D8] rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden text-left shadow-sm">
+            <div className="p-6 flex-grow flex flex-col">
+              <div className="text-4xl mb-4">✅</div>
+              <div className="text-[16px] font-bold text-slate-900 mb-2">Appraised Staff - Office Station</div>
+              <div className="text-xs text-slate-500 leading-relaxed mb-4">
+                Identify staff with submitted or approved appraisals, isolated by a specific office location. Includes appraisal status and IPRF rating.
+              </div>
+              
+              <div className="mt-auto mb-4">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Filter Station</label>
+                <select 
+                  value={selectedAppraisedStation} 
+                  onChange={e => setSelectedAppraisedStation(e.target.value)}
+                  className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 focus:border-blue-400 outline-none"
+                >
+                  <option value="">-- All Office Stations --</option>
+                  {stationLocations.map(loc => (
+                    <option key={`appr-${loc}`} value={loc}>{loc}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                 <span className="inline-flex items-center px-2.5 py-1 rounded-[6px] text-[10px] font-bold tracking-wide bg-green-50 text-green-700">✓ Available any time</span>
+              </div>
+            </div>
+            <div className="flex bg-slate-50/50 border-t border-slate-100 p-4 gap-3">
+               <button onClick={() => generateOfficeAppraised('PDF')} disabled={busy !== ""} className="flex-1 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 transition-colors">
+                 {busy === 'appraised-PDF' ? '...' : 'PDF Download'}
+               </button>
+               <button onClick={() => generateOfficeAppraised('CSV')} disabled={busy !== ""} className="flex-1 py-2.5 rounded-lg bg-white border border-[#E4E0D8] text-slate-700 hover:bg-slate-50 text-[11px] font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 transition-colors">
+                 {busy === 'appraised-CSV' ? '...' : 'CSV Download'}
+               </button>
+            </div>
+          </div>
+
+          {/* Right Side: Unappraised Card */}
           <div className="bg-white border border-[#E4E0D8] rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden text-left shadow-sm">
             <div className="p-6 flex-grow flex flex-col">
               <div className="text-4xl mb-4">📍</div>
-              <div className="text-[16px] font-bold text-slate-900 mb-2">Report by Office Station</div>
+              <div className="text-[16px] font-bold text-slate-900 mb-2">Unappraised Staff - Office Station</div>
               <div className="text-xs text-slate-500 leading-relaxed mb-4">
                 Identify staff missing appraisals, isolated by a specific office location.
               </div>
@@ -857,13 +1080,13 @@ export default function BoardReportPage() {
               <div className="mt-auto mb-4">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Filter Station</label>
                 <select 
-                  value={selectedStation} 
-                  onChange={e => setSelectedStation(e.target.value)}
+                  value={selectedMissingStation} 
+                  onChange={e => setSelectedMissingStation(e.target.value)}
                   className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 focus:border-blue-400 outline-none"
                 >
                   <option value="">-- All Office Stations --</option>
                   {stationLocations.map(loc => (
-                    <option key={loc} value={loc}>{loc}</option>
+                    <option key={`missing-${loc}`} value={loc}>{loc}</option>
                   ))}
                 </select>
               </div>
@@ -881,6 +1104,7 @@ export default function BoardReportPage() {
                </button>
             </div>
           </div>
+
         </div>
 
         <p className="rounded-xl border bg-white px-4 py-3 text-xs" style={{ borderColor: T.border, color: T.muted }}>

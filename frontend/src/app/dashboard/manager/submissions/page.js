@@ -306,10 +306,10 @@ export default function MySubmissions() {
   return (
     <div className="w-full max-w-full pb-[60px] relative">
       
-      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E2DDD4] pb-4">
+     <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E2DDD4] pb-4">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">
-            &#128228; My Submissions {quarters.find(q => String(q._id) === String(selectedQuarterId))?.name || ''}
+            &#128228; My {quarters.find(q => String(q._id) === String(selectedQuarterId))?.name ? `${quarters.find(q => String(q._id) === String(selectedQuarterId)).name} ` : ''}Submissions
           </div>
           <div className="text-[13px] text-[#6b7280]">Appraisals sent to HR for review and approval</div>
         </div>
