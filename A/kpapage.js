@@ -475,11 +475,11 @@ export default function KPAScorecard() {
             {/* Total Strip */}
             <div className="mt-[24px] bg-[#FAF8F4] border-[1.5px] border-[#E2DDD4] rounded-[12px] p-[16px] flex flex-col md:flex-row justify-between items-center gap-[16px]">
               <div>
-                <div className="text-[11px] font-bold text-gray-500 uppercase tracking-[0.05em] mb-1.5">Company Performance</div>
-                <div className="text-[28px] font-extrabold text-[#0D2B55] leading-none">
-                  <span>{cpPct !== null ? safeCpPct.toFixed(2) : '—'}</span> <small className="text-[12px] font-semibold text-gray-400">/ 8.87 max</small>
+                <div className="text-[12px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">BSC Raw Score &rarr; Final CP</div>
+                <div className="text-[24px] font-[800] text-[#0D2B55] leading-none mb-[6px]">
+                  {cpPct !== null ? `${bscRaw.toFixed(1)} / 887 → ${safeCpPct.toFixed(2)}` : '—'}
                 </div>
-                <div className="mt-2 text-[12px] text-gray-600">Achievement: <b className="text-gray-900">{cpPct !== null ? ((cpPct / 8.87) * 100).toFixed(1) + '%' : '—'}</b></div>
+                <div className="text-[11px] text-[#6b7280]">Enter all 5 KPA scores to calculate &middot; Max CP cap: 8.87</div>
               </div>
               <div className="flex gap-[6px]">
                 <div className="bg-white border border-[#E2DDD4] rounded-[8px] p-[8px_12px] text-center min-w-[70px] shadow-sm">

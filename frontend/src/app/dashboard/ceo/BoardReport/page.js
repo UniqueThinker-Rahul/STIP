@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import api from '../../../../lib/api';
+import { Search, ChevronDown } from 'lucide-react';
 
 /* ── stylesheet ── */
 const CSS = `
@@ -347,7 +348,6 @@ async function makePdf(d) {
     const c = hx(noHash(b.hex)); doc.setFillColor(c[0], c[1], c[2]); doc.rect(lx, ly - 2.4, 2.6, 2.6, "F");
     doc.setFontSize(6.4); doc.setTextColor(102, 112, 133);
     
-    // 🚨 UPGRADE: Stripped out absolute count, only showing Percentages in PDF
     const v = d.totals[b.k];
     const pc = d.totalRatings ? (v / d.totalRatings) * 100 : 0;
     doc.text(`${rateLbl(b.v)} \u00b7 ${b.k} (${pc.toFixed(1)}%)`, lx + 3.6, ly);
@@ -436,6 +436,83 @@ function BoardDonut({ d }) {
   );
 }
 
+// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
+const SearchableDropdown = ({ value, onChange, options, placeholder, containerClass, textClass }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = options.filter(opt =>
+    opt.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div ref={wrapperRef} className={`relative ${containerClass}`}>
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex justify-between items-center cursor-pointer transition-colors ${textClass}`}
+      >
+        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 top-[calc(100%+4px)] left-0 w-full min-w-[220px] bg-white border border-[#E4E0D8] rounded-xl shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-[#E4E0D8] bg-[#FAF8F4]">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="text"
+                autoFocus
+                placeholder="Search..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-md outline-none focus:border-[#0D2B55]"
+              />
+            </div>
+          </div>
+
+          <div className="max-h-[160px] overflow-y-auto custom-scrollbar" style={{ maxHeight: '160px' }}>
+            <div
+              onClick={() => { onChange(placeholder === 'All Stations' || placeholder.includes('All') ? 'All' : ''); setIsOpen(false); setQuery(''); }}
+              className={`px-3 py-2 text-xs cursor-pointer transition-colors ${(value === '' || value === 'All') ? 'bg-[#EFF6FF] text-[#1E40AF] font-bold' : 'hover:bg-[#FAF8F4] text-gray-700'}`}
+            >
+              {placeholder}
+            </div>
+
+            {filteredOptions.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-center italic text-gray-500">No matches found</div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
+                  className={`px-3 py-2 text-xs cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-bold' : 'hover:bg-[#FAF8F4] text-gray-700'}`}
+                >
+                  {opt.label}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+// ----------------------------------------------
+
 /* ── Main Export ── */
 export default function BoardReportPage() {
   const currentYear = new Date().getFullYear();
@@ -462,7 +539,6 @@ export default function BoardReportPage() {
   const [selectedAppraisedStation, setSelectedAppraisedStation] = useState("");
   const [selectedMissingStation, setSelectedMissingStation] = useState("");
 
-  // 🚨 UPGRADE: Added master memory state so we can filter perfectly without relying on backend constraints
   const [allAppraisals, setAllAppraisals] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
 
@@ -537,8 +613,7 @@ export default function BoardReportPage() {
     return m ? `Q${m[1]}` : q.name;
   }))].sort();
 
-  // 4. 🚨 UPGRADE: Frontend Mathematical Aggregation 
-  // Solves the top Office Station filter issue by bypassing the backend and calculating directly in real-time
+  // 4. Frontend Mathematical Aggregation 
   useEffect(() => {
     if (!quarter || allAppraisals.length === 0) {
        return;
@@ -564,7 +639,6 @@ export default function BoardReportPage() {
            return (isMatchQtrId || isMatchQtrName) && isMatchYear;
         });
 
-        // Filter out Drafts and Not Started to perfectly match actual backend parameters
         validApps = validApps.filter(a => a.workflow?.status && !['DRAFT', 'NOT_STARTED'].includes(a.workflow.status));
 
         if (office !== 'All') {
@@ -639,7 +713,6 @@ export default function BoardReportPage() {
     document.body.removeChild(link);
   };
 
-  // 🚨 UPGRADE: Heavy Lazy Loaded Office APPRAISED Generator (Now prints direct PDF and S.No)
   const generateOfficeAppraised = async (fmt) => {
     setBusy(`appraised-${fmt}`);
     try {
@@ -740,7 +813,6 @@ export default function BoardReportPage() {
     setBusy("");
   };
 
-  // 🚨 UPGRADE: Heavy Lazy Loaded Office Missing Generator (Now prints direct PDF and S.No)
   const generateOfficeMissing = async (fmt) => {
     setBusy(`station-${fmt}`);
     try {
@@ -932,14 +1004,14 @@ export default function BoardReportPage() {
 
             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2" style={{ borderColor: T.border }}>
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: T.muted }}>Office Station</span>
-              <select 
+              <SearchableDropdown 
                 value={selectedTopStation} 
-                onChange={(e) => setSelectedTopStation(e.target.value)}
-                className="cursor-pointer bg-transparent text-sm font-bold outline-none" style={{ color: T.navy }}
-              >
-                <option value="All">All Stations</option>
-                {stationLocations.map((loc) => (<option key={loc} value={loc}>{loc}</option>))}
-              </select>
+                onChange={setSelectedTopStation}
+                options={stationLocations.map((loc) => ({ value: loc, label: loc }))}
+                placeholder="All Stations"
+                containerClass="min-w-[120px]"
+                textClass="bg-transparent text-sm font-bold outline-none text-[#0D2B55]"
+              />
             </label>
 
             <button type="button" onClick={onExcel} disabled={!!busy || loading} className="rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed" style={{ background: T.gold, color: T.navy, border: "1px solid #B99433", opacity: busy === "xlsx" || loading ? 0.6 : 1 }}>
@@ -1016,7 +1088,6 @@ export default function BoardReportPage() {
                         <div key={b.k} className="my-1 flex items-center gap-2">
                           <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: b.hex }} />
                           <b style={{ color: T.navy, width: 26 }}>{rateLbl(b.v)}</b>
-                          {/* 🚨 UPGRADE: Removed Absolute Number calculation next to Legend, left only Percentage */}
                           <span style={{ color: T.muted }}>{pc.toFixed(1)}%</span>
                         </div>
                       );
@@ -1028,10 +1099,8 @@ export default function BoardReportPage() {
           </>
         )}
 
-        {/* 🚨 NEW: Appraised & Unappraised Split View */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 mt-8 font-sans">
           
-          {/* Left Side: Appraised Card */}
           <div className="bg-white border border-[#E4E0D8] rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden text-left shadow-sm">
             <div className="p-6 flex-grow flex flex-col">
               <div className="text-4xl mb-4">✅</div>
@@ -1042,16 +1111,14 @@ export default function BoardReportPage() {
               
               <div className="mt-auto mb-4">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Filter Station</label>
-                <select 
+                <SearchableDropdown 
                   value={selectedAppraisedStation} 
-                  onChange={e => setSelectedAppraisedStation(e.target.value)}
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 focus:border-blue-400 outline-none"
-                >
-                  <option value="">-- All Office Stations --</option>
-                  {stationLocations.map(loc => (
-                    <option key={`appr-${loc}`} value={loc}>{loc}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedAppraisedStation}
+                  options={stationLocations.map(loc => ({ value: loc, label: loc }))}
+                  placeholder="-- All Office Stations --"
+                  containerClass="w-full"
+                  textClass="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 hover:border-blue-400 outline-none"
+                />
               </div>
 
               <div>
@@ -1068,7 +1135,6 @@ export default function BoardReportPage() {
             </div>
           </div>
 
-          {/* Right Side: Unappraised Card */}
           <div className="bg-white border border-[#E4E0D8] rounded-[16px] flex flex-col hover:border-slate-300 hover:shadow-md transition-all duration-200 overflow-hidden text-left shadow-sm">
             <div className="p-6 flex-grow flex flex-col">
               <div className="text-4xl mb-4">📍</div>
@@ -1079,16 +1145,14 @@ export default function BoardReportPage() {
               
               <div className="mt-auto mb-4">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Filter Station</label>
-                <select 
+                <SearchableDropdown 
                   value={selectedMissingStation} 
-                  onChange={e => setSelectedMissingStation(e.target.value)}
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 focus:border-blue-400 outline-none"
-                >
-                  <option value="">-- All Office Stations --</option>
-                  {stationLocations.map(loc => (
-                    <option key={`missing-${loc}`} value={loc}>{loc}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedMissingStation}
+                  options={stationLocations.map(loc => ({ value: loc, label: loc }))}
+                  placeholder="-- All Office Stations --"
+                  containerClass="w-full"
+                  textClass="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-slate-50 hover:border-blue-400 outline-none"
+                />
               </div>
 
               <div>

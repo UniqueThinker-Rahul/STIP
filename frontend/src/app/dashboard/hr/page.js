@@ -442,12 +442,12 @@ export default function HRDashboard() {
             </div>
 
             <div className="bg-slate-900 rounded-xl p-4 flex justify-between items-center mt-2 shadow-sm border border-slate-800">
-              <span className="text-sm font-bold text-slate-300">BSC Raw Score &rarr; CP%</span>
-              <div>
-                <span className="text-xl font-black text-amber-300">{calcBscRaw !== null ? calcBscRaw.toFixed(1) : '—'}</span>
-                <span className="text-xs text-slate-500 mx-2">/ 887 &rarr;</span>
-                <span className="text-xl font-black text-amber-300">{safeCpPct !== null ? safeCpPct.toFixed(2) : '—'}%</span>
-              </div>
+              <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest">
+                Company Performance <span className="text-slate-500 normal-case tracking-normal ml-1">| Achievement: <b className="text-slate-300">{safeCpPct !== null ? ((safeCpPct / 8.87) * 100).toFixed(1) + '%' : '—'}</b></span>
+              </span>
+              <span className="text-[16px] font-black text-amber-300">
+                {safeCpPct !== null ? safeCpPct.toFixed(2) : '—'} <span className="text-[12px] text-slate-500 font-semibold">/ 8.87 max</span>
+              </span>
             </div>
 
           </div>

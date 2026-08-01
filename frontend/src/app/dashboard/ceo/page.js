@@ -72,7 +72,7 @@ export default function CEODashboard() {
            api.get('/appraisals').catch(() => ({ data: { data: [] } })),
            api.get('/users').catch(() => ({ data: { data: [] } })),
            api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })), 
-           api.get('/quarters?all=true').catch(() => ({ data: { data: [] } }))
+           api.get('/quarters').catch(() => ({ data: { data: [] } }))
         ]);
 
         const allApps = appRes.data?.data || [];
@@ -403,9 +403,12 @@ export default function CEODashboard() {
                 </div>
                 {calcBscRaw !== null && (
                   <div className="bg-[#0D2B55] rounded-[10px] p-[12px_16px] flex justify-between items-center mt-auto">
-                    {/* 🚨 UPGRADED: Final CP synchronization */}
-                    <span className="text-[12px] font-[700] text-white/60">BSC Raw Score &rarr; Final CP</span>
-                    <span className="text-[16px] font-[800] text-[#e8c96a]">{calcBscRaw.toFixed(1)} / 887 &rarr; {safeCpPct?.toFixed(2)}</span>
+                    <span className="text-[12px] font-[700] text-white/60 uppercase tracking-widest">
+                      Company Performance <span className="text-white/40 normal-case tracking-normal ml-1">| Achievement: <b className="text-white/80">{safeCpPct !== null ? ((safeCpPct / 8.87) * 100).toFixed(1) + '%' : '—'}</b></span>
+                    </span>
+                    <span className="text-[16px] font-[800] text-[#e8c96a]">
+                      {safeCpPct !== null ? safeCpPct.toFixed(2) : '—'} <span className="text-[12px] text-white/50 font-[600]">/ 8.87 max</span>
+                    </span>
                   </div>
                 )}
               </>
