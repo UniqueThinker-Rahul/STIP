@@ -94,9 +94,10 @@ export default function CEOAllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
   const [staff, setStaff] = useState([]); 
   const [loading, setLoading] = useState(true);
-  const [cpPct, setCpPct] = useState(null);
   
-  // Dynamic state for filters
+  // 🚨 UPGRADE: Now holding a dictionary of LIVE CP scores for ALL quarters
+  const [quarterCPs, setQuarterCPs] = useState({});
+  
   const [dbQuarters, setDbQuarters] = useState([]);
   const [companyCodes, setCompanyCodes] = useState([]);
   const [managerList, setManagerList] = useState([]);
@@ -104,7 +105,6 @@ export default function CEOAllAppraisals() {
   
   const currentYearStr = new Date().getFullYear().toString();
   
-  // Filters
   const [search, setSearch] = useState('');
   const [filterYear, setFilterYear] = useState(currentYearStr); 
   const [isManualYear, setIsManualYear] = useState(false);
@@ -114,11 +114,9 @@ export default function CEOAllAppraisals() {
   const [mgrFilter, setMgrFilter] = useState('');
   const [officeFilter, setOfficeFilter] = useState('');
   
-  // Modal
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
   const [expandedComment, setExpandedComment] = useState(null);
 
-  // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -126,17 +124,12 @@ export default function CEOAllAppraisals() {
     try {
       setLoading(true);
       
-      const [metricsRes, appRes, qtrRes, configRes, usersRes] = await Promise.all([
-        api.get('/company-metrics/2026').catch(() => ({ data: { data: null } })),
+      const [appRes, qtrRes, configRes, usersRes] = await Promise.all([
         api.get('/appraisals').catch(() => ({ data: { data: [] } })),
         api.get('/quarters').catch(() => ({ data: { data: [] } })),
         api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
         api.get('/users').catch(() => ({ data: { data: [] } }))
       ]);
-
-      if (metricsRes.data?.data?.cpPct) {
-        setCpPct(metricsRes.data.data.cpPct);
-      }
 
       const allApps = appRes.data?.data || [];
       setAppraisals(allApps);
@@ -184,7 +177,7 @@ export default function CEOAllAppraisals() {
       setDbQuarters(fetchedQuarters);
 
       const configData = configRes.data?.data || {};
-      setCompanyCodes(configData.companyCodes || ['FSM', 'CDU', 'NAR', 'GUM']);
+      setCompanyCodes(configData.companyCodes || []);
 
     } catch (error) {
       console.error('Failed to fetch appraisals:', error);
@@ -196,6 +189,53 @@ export default function CEOAllAppraisals() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // 🚨 UPGRADE: Fetch ALL metrics for the selected year and calculate true CP dynamically
+  useEffect(() => {
+    const fetchAllYearMetrics = async () => {
+      if (!filterYear) return;
+      
+      const newCps = {};
+      const months = { Q1: 3, Q2: 6, Q3: 9, Q4: 12 };
+
+      await Promise.all(Object.entries(months).map(async ([qName, month]) => {
+        try {
+          const res = await api.get(`/company-metrics/${filterYear}/${month}`);
+          const mData = res.data?.data;
+          
+          if (mData) {
+            const kpaActuals = [
+              mData.financialResilience,
+              mData.operationalEffectiveness,
+              mData.humanCapital,
+              mData.safetyEnvironment,
+              mData.reputationalCapital
+            ];
+            
+            const anyKpaEntered = kpaActuals.some(v => v !== null && v !== undefined);
+            
+            if (anyKpaEntered) {
+              const calcBscRaw = kpaActuals.reduce((sum, val, idx) => {
+                const maxPts = [120, 400, 230, 110, 27][idx];
+                const pts = ((val || 0) / 100) * maxPts;
+                return sum + Number(pts.toFixed(1)); 
+              }, 0);
+              const rawCp = calcBscRaw / 100;
+              newCps[qName] = Math.round((rawCp + Number.EPSILON) * 100) / 100;
+            } else if (mData.cpPct !== undefined && mData.cpPct !== null) {
+              newCps[qName] = mData.cpPct;
+            }
+          }
+        } catch (e) {
+          // If a quarter isn't created yet, ignore
+        }
+      }));
+      
+      setQuarterCPs(newCps);
+    };
+    
+    fetchAllYearMetrics();
+  }, [filterYear]);
 
   useEffect(() => {
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
@@ -294,7 +334,6 @@ export default function CEOAllAppraisals() {
       } else if (statusFilter === 'NOT_APPROVED') {
         matchesStatus = ['NOT_APPROVED'].includes(st);
       } else if (statusFilter === 'ACKNOWLEDGED') {
-        // 🚨 UPGRADE: Added logical condition to filter for ACKNOWLEDGED status
         matchesStatus = ['ACKNOWLEDGED'].includes(st);
       }
     }
@@ -369,7 +408,6 @@ export default function CEOAllAppraisals() {
         return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
       case 'NOT_APPROVED': 
         return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Rejected by CEO</span>;
-      // 🚨 UPGRADE: Explicit handling of the ACKNOWLEDGED status badge
       case 'ACKNOWLEDGED':
         return <span className="bg-[#F0FDF4] text-[#15803D] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[800] border border-[#BBF7D0] whitespace-nowrap flex items-center gap-[4px]"><span className="text-[10px]">✓</span> Acknowledged</span>;
       default: 
@@ -388,7 +426,10 @@ export default function CEOAllAppraisals() {
       const coCode = `"${a.employeeId?.companyCode || 'FSM'}"`;
       const mgrInfo = getManagerInfo(a.managerId);
       const mgrName = `"${mgrInfo.name}"`;
-      const qtrName = `"${getQuarterName(a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter)}"`;
+      
+      const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+      const qtrNameFull = getQuarterName(appQuarterId);
+      const qtrName = `"${qtrNameFull}"`;
       
       const iprf = a.calculatedResults?.finalIprfScore || 0;
       const score = `"${a.isMissing ? 'N/A' : iprf.toFixed(1)}"`;
@@ -396,13 +437,17 @@ export default function CEOAllAppraisals() {
       const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
       const proRataValue = prMonths / 12;
       const proRataStr = `"${proRataValue.toFixed(3)}"`;
-      
+
+      // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
+      const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
+      const qKey = qMatch ? qMatch[0].toUpperCase() : null;
+      const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
+
       let awardDisplay = '—';
-      if (cpPct !== null && iprf > 0) {
-        const finalAw = (cpPct * iprf) * proRataValue;
-        awardDisplay = `"${finalAw.toFixed(2)}%"`;
-      } else if (a.stipAward) {
-        awardDisplay = `"${a.stipAward}%"`;
+      if (liveCp !== null && iprf > 0) {
+        // Calculation: %Award = CP * IPRF rating
+        const finalAw = liveCp * iprf;
+        awardDisplay = `"${finalAw.toFixed(2)}"`;
       }
       
       let statusRaw = a.workflow?.status;
@@ -413,7 +458,6 @@ export default function CEOAllAppraisals() {
       else if (statusRaw === 'WITH_CEO') statusText = 'With CEO/ Pending to CEO';
       else if (statusRaw === 'APPROVED') statusText = 'CEO Approved';
       else if (statusRaw === 'NOT_APPROVED') statusText = 'Rejected by CEO/ Not Approve by CEO';
-      // 🚨 UPGRADE: Added CSV Export mapping for Acknowledged status
       else if (statusRaw === 'ACKNOWLEDGED') statusText = 'Emp. Acknowledged';
       const status = `"${statusText}"`;
       
@@ -504,7 +548,7 @@ export default function CEOAllAppraisals() {
       <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-            &#128196; All Appraisals
+            &#128196; All Appraisals Awaiting CEO Approval
           </div>
           <div className="text-[13px] text-[#6b7280]">Full read-only view of every appraisal — all staff, all quarters</div>
         </div>
@@ -589,7 +633,7 @@ export default function CEOAllAppraisals() {
           </select>
         </div>
 
-        {/* 3. Appraisal Status */}
+        {/* Appraisal Status */}
         <SearchableDropdown 
           value={statusFilter}
           onChange={setStatusFilter}
@@ -599,7 +643,6 @@ export default function CEOAllAppraisals() {
             { value: 'SUBMITTED_TO_HR', label: 'Submitted to HR' },
             { value: 'WITH_CEO', label: 'With CEO/ Pending to CEO' },
             { value: 'APPROVED', label: 'CEO Approved' },
-            // 🚨 UPGRADE: Added Acknowledged option to the filter list
             { value: 'ACKNOWLEDGED', label: 'Emp. Acknowledged' },
             { value: 'NOT_STARTED', label: 'Not started' },
             { value: 'NOT_APPROVED', label: 'Rejected by CEO/ Not Approve by CEO' },
@@ -607,7 +650,7 @@ export default function CEOAllAppraisals() {
           ]}
         />
 
-        {/* 4. All Office Locations */}
+        {/* All Office Locations */}
         <SearchableDropdown 
           value={officeFilter}
           onChange={setOfficeFilter}
@@ -616,7 +659,7 @@ export default function CEOAllAppraisals() {
           options={availableOffices.map(o => ({ value: o, label: o }))}
         />
 
-        {/* 5. All Line Managers */}
+        {/* All Line Managers */}
         <SearchableDropdown 
           value={mgrFilter}
           onChange={setMgrFilter}
@@ -625,13 +668,21 @@ export default function CEOAllAppraisals() {
           options={managerList.map(m => ({ value: m.id, label: m.name }))}
         />
         
-        {/* 6. All Company */}
+        {/* All Company */}
         <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
           <option value="">All Company</option>
           {companyCodes.map(code => (
              <option key={`co-${code}`} value={code}>{code}</option>
           ))}
         </select>
+      </div>
+
+      {/* Formula Info Banner */}
+      <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[12px_16px] mb-[20px] flex items-start sm:items-center gap-[10px] shadow-sm">
+        <div className="text-[16px] leading-none">&#8505;</div>
+        <div className="text-[12px] text-[#475569]">
+          <strong className="text-[#0D2B55] font-[800]">Award Calculation:</strong> The final award percentage is calculated using the formula: <span className="font-mono text-[#1E40AF] bg-[#EFF6FF] px-[6px] py-[2px] rounded-[4px] font-[700] border border-[#BFDBFE]">Award = Quarterly CP (Company Performance) × IPRF Rating Score</span>
+        </div>
       </div>
 
       {/* Main Table */}
@@ -675,16 +726,22 @@ export default function CEOAllAppraisals() {
                   const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
                   
                   const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+                  const qtrNameFull = getQuarterName(appQuarterId);
+                  
                   const iprf = a.calculatedResults?.finalIprfScore || 0;
                   const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
                   const proRataValue = prMonths / 12;
                   
+                  // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
+                  const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
+                  const qKey = qMatch ? qMatch[0].toUpperCase() : null;
+                  const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
+
                   let awardDisplay = '—';
-                  if (cpPct !== null && iprf > 0) {
-                    const finalAw = (cpPct * iprf) * proRataValue;
-                    awardDisplay = `${finalAw.toFixed(2)}%`;
-                  } else if (a.stipAward) {
-                     awardDisplay = `${a.stipAward}%`;
+                  if (liveCp !== null && iprf > 0) {
+                    // Calculation: %Award = CP * IPRF rating
+                    const finalAw = liveCp * iprf;
+                    awardDisplay = `${finalAw.toFixed(2)}`;
                   }
 
                   return (
@@ -714,7 +771,7 @@ export default function CEOAllAppraisals() {
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
                         <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#FDE68A]">
-                          {getQuarterName(appQuarterId)}
+                          {qtrNameFull}
                         </span>
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
@@ -840,19 +897,21 @@ export default function CEOAllAppraisals() {
                 </div>
                 <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
-                  {/* Unified Award Display Logic in Modal */}
                   <div className="text-[22px] font-[800] text-[#059669]">
                     {(() => {
                       const iprf = selectedAppraisal.calculatedResults?.finalIprfScore || 0;
-                      const prMonths = selectedAppraisal.employeeId?.employmentDetails?.prorateValue || 12;
-                      const proRataValue = prMonths / 12;
                       
+                      const appQuarterId = selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter;
+                      const qtrNameFull = getQuarterName(appQuarterId);
+                      const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
+                      const qKey = qMatch ? qMatch[0].toUpperCase() : null;
+                      const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
+
                       let displayAward = '—';
-                      if (cpPct !== null && iprf > 0) {
-                        const finalAw = (cpPct * iprf) * proRataValue;
-                        displayAward = `${finalAw.toFixed(2)}%`;
-                      } else if (selectedAppraisal.stipAward) {
-                        displayAward = `${selectedAppraisal.stipAward}%`;
+                      if (liveCp !== null && iprf > 0) {
+                        // Calculation: %Award = CP * IPRF rating
+                        const finalAw = liveCp * iprf;
+                        displayAward = `${finalAw.toFixed(2)}`;
                       }
                       return displayAward;
                     })()}

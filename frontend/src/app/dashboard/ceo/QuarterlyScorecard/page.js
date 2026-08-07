@@ -9,10 +9,10 @@ import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 const QS = ['Q1', 'Q2', 'Q3', 'Q4'];
 const TOTAL_MAX_DEFAULT = 887; 
 const FACTORS = [
+  ['Less than Satisfactory', 0.0], 
   ['Needs Improvement', 0.7], 
   ['Fully Effective', 1.0], 
-  ['Exceeds', 1.2], 
-  ['Outstanding', 1.3]
+  ['Exceeds Performance', 1.3]
 ];
 
 const QKPAS = [
@@ -1423,7 +1423,7 @@ export default function QuarterlyScorecard() {
       </div>
 
       <div className="text-[12px] text-gray-600 bg-white border border-gray-200 rounded-xl p-4 mt-2 shadow-sm print:hidden">
-        <b className="text-[#0D2B55]">How the number works:</b> each supporting indicator earns points up to its <b>Max</b>; the five KPA totals give the official weights (45.1 / 25.9 / 13.5 / 12.4 / 3%). <b>Company Performance = all actual points &divide; 100</b> (max {currentMaxCp.toFixed(2)}), which sets the bonus tier (&ge;{currentMaxCp.toFixed(2)} &rarr; 15%, &ge;{(currentMaxCp * 0.8).toFixed(2)} &rarr; 10%, &ge;{(currentMaxCp * 0.48).toFixed(2)} &rarr; 5%, otherwise 0%), multiplied by each person&rsquo;s individual factor (0.7 / 1.0 / 1.2 / 1.3).
+        <b className="text-[#0D2B55]">How the number works:</b> each supporting indicator earns points up to its <b>Max</b>; the five KPA totals give the official weights (45.1 / 25.9 / 13.5 / 12.4 / 3%). <b>Company Performance = all actual points &divide; 100</b> (max {currentMaxCp.toFixed(2)}), which sets the bonus tier (&ge;{currentMaxCp.toFixed(2)} &rarr; 15%, &ge;{(currentMaxCp * 0.8).toFixed(2)} &rarr; 10%, &ge;{(currentMaxCp * 0.48).toFixed(2)} &rarr; 5%, otherwise 0%), multiplied by each person&rsquo;s individual factor (0.0 / 0.7 / 1.0 / 1.3).
       </div>
 
       {downloadMenu && (

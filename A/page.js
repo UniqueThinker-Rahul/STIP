@@ -1,595 +1,1009 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import api from '../../../lib/api';
-import StipCategoryChart from '../../../components/charts/StipCategoryChart';
-import usePersistentFilter from '../../../hooks/usePersistentFilter';
+import { useState, useEffect, useRef } from 'react';
+import api from '../../../../lib/api';
+import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 
-const formatDateTime = (dateInput, includeTime = false) => {
-  if (!dateInput) return 'N/A';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return 'N/A';
-  
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const yy = String(d.getFullYear()).slice(-2);
-  
-  let result = `${mm}/${dd}/${yy}`;
-  
-  if (includeTime) {
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    result += ` at ${hh}:${mins}`;
-  }
-  
-  return result;
+const CRIT_NAMES = {
+  deliveredResults: 'Delivered Expected Results',
+  behaviors: 'Demonstrated Initiative',
+  safeWorking: 'Demonstrated Safe Working',
+  jobCompetence: 'Job Competence',
+  dependability: 'Dependability',
+  adaptability: 'Adaptability'
 };
 
-export default function ManagerDashboard() {
-  const router = useRouter();
-  
-  const currentYearNum = new Date().getFullYear();
-  const currentYearStr = currentYearNum.toString();
-
-  const [selectedYear, setSelectedYear] = usePersistentFilter('mgr_dash_year', currentYearStr);
-  const [selectedQuarter, setSelectedQuarter] = usePersistentFilter('mgr_dash_quarter', 'Q1');
-  const [isManualYear, setIsManualYear] = useState(false);
-
-  const [team, setTeam] = useState([]);
-  const [appraisals, setAppraisals] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [dbQuarters, setDbQuarters] = useState([]);
-  const [activeQuarter, setActiveQuarter] = useState(null);
-
-  const [metrics, setMetrics] = useState({
-    financialResilience: null, operationalEffectiveness: null, humanCapital: null,
-    safetyEnvironment: null, reputationalCapital: null
-  });
+// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
+const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef(null);
 
   useEffect(() => {
-    const fetchManagerData = async () => {
-      try {
-        setLoading(true);
-        
-        const [teamRes, appRes, qtrRes] = await Promise.all([
-          api.get('/users/my-team').catch(() => ({ data: { data: [] } })),
-          api.get('/appraisals').catch(() => ({ data: { data: [] } })),
-          api.get('/quarters').catch(() => ({ data: { data: [] } }))
-        ]);
-
-        const myTeam = teamRes.data?.data || [];
-        setTeam(myTeam);
-
-        const myAppraisals = appRes.data?.data || [];
-        setAppraisals(myAppraisals);
-
-        const fetchedQuarters = qtrRes.data?.data || [];
-        fetchedQuarters.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-        setDbQuarters(fetchedQuarters);
-
-        const now = new Date();
-        const active = fetchedQuarters.find(q => new Date(q.startDate) <= now && new Date(q.endDate) >= now && !q.isLocked);
-        setActiveQuarter(active || null);
-
-      } catch (error) {
-        console.error('Failed to load manager base data', error);
-      } finally {
-        setLoading(false);
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
       }
-    };
-    fetchManagerData();
-  }, []);
-
-  useEffect(() => {
-    if (dbQuarters.length === 0) return;
-    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
-    
-    if (qtrsForSelectedYear.length > 0) {
-      const availableQs = [...new Set(qtrsForSelectedYear.map(q => {
-        const m = String(q.name).match(/Q?([1-4])/i);
-        return m ? `Q${m[1]}` : q.name;
-      }))].sort();
-      
-      if (!selectedQuarter || !availableQs.includes(selectedQuarter)) {
-        setSelectedQuarter(availableQs[availableQs.length - 1]);
-      }
-    } else {
-      setSelectedQuarter('');
     }
-  }, [dbQuarters, selectedYear, selectedQuarter, setSelectedQuarter]);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [wrapperRef]);
 
-  useEffect(() => {
-    const fetchDynamicMetrics = async () => {
-      if (!selectedYear || !selectedQuarter) {
-         setMetrics({
-           financialResilience: null, operationalEffectiveness: null, humanCapital: null,
-           safetyEnvironment: null, reputationalCapital: null
-         });
-         return;
-      }
-      try {
-        const targetMonth = parseInt(selectedQuarter.replace('Q', '')) * 3 || 3;
-        const metricsRes = await api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }));
-        const mData = metricsRes.data?.data;
-        if (mData) {
-          setMetrics(mData);
-        } else {
-          setMetrics({
-            financialResilience: null, operationalEffectiveness: null, humanCapital: null,
-            safetyEnvironment: null, reputationalCapital: null
-          });
-        }
-      } catch (error) {
-        console.error('Failed to fetch dynamic company metrics', error);
-      }
-    };
-    fetchDynamicMetrics();
-  }, [selectedYear, selectedQuarter]);
+  const filteredOptions = options.filter(opt => 
+    opt.label.toLowerCase().includes(query.toLowerCase())
+  );
 
-  const filteredAppraisals = appraisals.filter(a => {
-    const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
-    const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
-    const qMatch = String(appQtrRaw).match(/Q?([1-4])/i) || String(appQtrRaw).match(/([1-4])/);
-    const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
-
-    return appYear?.toString() === selectedYear.toString() && appQtr === selectedQuarter;
-  });
-
-  const drafts = filteredAppraisals.filter(a => ['DRAFT', 'REOPENED'].includes(a.workflow?.status));
-  const submissions = filteredAppraisals.filter(a => !['DRAFT', 'REOPENED', 'NOT_STARTED'].includes(a.workflow?.status));
-
-  const pendingHr = submissions.filter(a => ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(a.workflow?.status)).length;
-  const approved = submissions.filter(a => ['APPROVED', 'ACKNOWLEDGED'].includes(a.workflow?.status)).length; 
-  const epRated = submissions.filter(a => a.calculatedResults?.finalIprfScore >= 1.300).length;
-
-  const { financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital } = metrics;
-  
-  // 🚨 UPGRADED: Dynamic 887-point calculation algorithm matching the Quarterly Scorecard
-  const kpaActuals = [financialResilience, operationalEffectiveness, humanCapital, safetyEnvironment, reputationalCapital];
-  let calcBscRaw = null;
-  let safeCpPct = null;
-  const anyKpaEntered = kpaActuals.some(v => v !== null && v !== undefined);
-
-  if (anyKpaEntered) {
-    calcBscRaw = kpaActuals.reduce((sum, val, idx) => {
-      const maxPts = [120, 400, 230, 110, 27][idx];
-      const pts = ((val || 0) / 100) * maxPts;
-      return sum + Number(pts.toFixed(1)); 
-    }, 0);
-    
-    const rawCp = calcBscRaw / 100;
-    safeCpPct = Math.round((rawCp + Number.EPSILON) * 100) / 100;
-  }
-
-  const awNIf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 0.7 × Pro-Rata` : 'CP% × 0.7 × Pro-Rata';
-  const awEf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 1.0 × Pro-Rata` : 'CP% × 1.0 × Pro-Rata';
-  const awEPf = safeCpPct > 0 ? `${safeCpPct.toFixed(2)}% × 1.3 × Pro-Rata` : 'CP% × 1.3 × Pro-Rata';
-  
-  const awNI = safeCpPct > 0 ? (safeCpPct * 0.7).toFixed(2) + '%' : '—';
-  const awE = safeCpPct > 0 ? (safeCpPct * 1.0).toFixed(2) + '%' : '—';
-  const awEP = safeCpPct > 0 ? (safeCpPct * 1.3).toFixed(2) + '%' : '—';
-
-  const recentActivity = [...submissions, ...drafts]
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
-    .slice(0, 3);
-
-  let daysRemainingText = "No active deadlines";
-  if (activeQuarter) {
-    const end = new Date(activeQuarter.endDate);
-    const now = new Date();
-    const diffTime = Math.abs(end - now);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    daysRemainingText = `${diffDays} days remaining`;
-  }
-
-  const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
-  const uniqueAvailableQuarters = [...new Set(qtrsForSelectedYear.map(q => {
-    const qMatch = String(q.name).match(/Q?([1-4])/i);
-    return qMatch ? `Q${qMatch[1]}` : q.name;
-  }))].sort();
-
-  if (loading) return <div className="text-center p-20 text-[#6b7280]">Loading real-time manager dashboard...</div>;
+  const selectedOption = options.find(opt => opt.value === value);
 
   return (
-    <div className="w-full max-w-full pb-10">
-      
-      <div className="mb-[22px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
-        <div>
-          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">Dashboard</div>
-          <div className="text-[13px] text-[#6b7280]">Real-time STIP program overview</div>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-[10px]">
-          <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
-            <select 
-              value={selectedQuarter} 
-              onChange={(e) => setSelectedQuarter(e.target.value)}
-              className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
-              disabled={uniqueAvailableQuarters.length === 0}
-            >
-              {uniqueAvailableQuarters.length === 0 && <option value="">No Quarters Active</option>}
-              {uniqueAvailableQuarters.map(q => (
-                 <option key={q} value={q}>{q}</option>
-              ))}
-            </select>
-            <span className="text-[#E2DDD4]">|</span>
-            {isManualYear ? (
+    <div ref={wrapperRef} className={`relative ${widthClass}`}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full py-[10px] px-[12px] bg-white border rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer flex justify-between items-center transition-colors ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-[#E2DDD4]'}`}
+      >
+        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
+        <ChevronDown className={`w-[14px] h-[14px] text-[#6b7280] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 top-[calc(100%+4px)] left-0 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="p-[8px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
+            <div className="relative">
+              <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[12px] h-[12px] text-[#6b7280]" />
               <input 
-                type="number" 
+                type="text"
                 autoFocus
-                defaultValue={selectedYear}
-                onBlur={(e) => {
-                  if (e.target.value) setSelectedYear(e.target.value);
-                  setIsManualYear(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    if (e.target.value) setSelectedYear(e.target.value);
-                    setIsManualYear(false);
-                  }
-                }}
-                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+                placeholder="Search..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-[26px] pr-[8px] py-[6px] text-[12px] border border-[#E2DDD4] rounded-[6px] outline-none focus:border-[#0D2B55]"
               />
+            </div>
+          </div>
+          
+          <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
+            <div 
+              onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
+              className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors ${value === '' ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#6b7280] hover:bg-[#FAF8F4]'}`}
+            >
+              {placeholder}
+            </div>
+            
+            {filteredOptions.length === 0 ? (
+              <div className="px-[12px] py-[10px] text-[12px] text-[#6b7280] text-center italic">No matches found</div>
             ) : (
-              <select 
-                value={selectedYear} 
-                onChange={(e) => {
-                  if (e.target.value === 'manual') setIsManualYear(true);
-                  else setSelectedYear(e.target.value);
-                }}
-                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
-              >
-                {[currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1].map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
-              </select>
+              filteredOptions.map((opt) => (
+                <div 
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
+                  className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#0f1923] hover:bg-[#FAF8F4]'}`}
+                >
+                  {opt.label}
+                </div>
+              ))
             )}
           </div>
         </div>
-      </div>
+      )}
+    </div>
+  );
+};
+// ----------------------------------------------
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[12px] mb-[16px]">
-        
-        {/* Navy Card: CP Score */}
-        <div className="rounded-[14px] p-[16px_18px] bg-[#0D2B55] text-white min-w-0">
-          <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-white/50">Company Performance</div>
-          {/* 🚨 UPGRADED: Synchronized safe Cp Pct */}
-          <div className="text-[30px] font-[800] leading-[1] text-[#e8c96a]">{safeCpPct !== null ? safeCpPct.toFixed(2) + '%' : '—'}</div>
-          {/* 🚨 UPGRADED: Synchronized 887 point logic */}
-          <div className="text-[11px] mt-[5px] text-white/50">BSC Score: {calcBscRaw !== null ? calcBscRaw.toFixed(1) : '—'} / 887</div>
-          <div className="mt-[8px] h-[5px] bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-[#C9A84C] rounded-full transition-all duration-[0.6s]" style={{ width: calcBscRaw !== null ? Math.min(100, (calcBscRaw / 887) * 100) + '%' : '0%' }}></div>
-          </div>
-          <div className="text-[10px] mt-[5px] text-white/35">Max cap 15% &middot; {calcBscRaw !== null ? 'Data synced' : 'Pending scores'}</div>
-        </div>
+export default function CEOAllAppraisals() {
+  const [appraisals, setAppraisals] = useState([]);
+  const [staff, setStaff] = useState([]); 
+  const [loading, setLoading] = useState(true);
+  
+  // 🚨 UPGRADE: Now holding a dictionary of LIVE CP scores for ALL quarters
+  const [quarterCPs, setQuarterCPs] = useState({});
+  
+  const [dbQuarters, setDbQuarters] = useState([]);
+  const [companyCodes, setCompanyCodes] = useState([]);
+  const [managerList, setManagerList] = useState([]);
+  const [availableOffices, setAvailableOffices] = useState([]);
+  
+  const currentYearStr = new Date().getFullYear().toString();
+  
+  const [search, setSearch] = useState('');
+  const [filterYear, setFilterYear] = useState(currentYearStr); 
+  const [isManualYear, setIsManualYear] = useState(false);
+  const [qtr, setQtr] = useState('');
+  const [co, setCo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [mgrFilter, setMgrFilter] = useState('');
+  const [officeFilter, setOfficeFilter] = useState('');
+  
+  const [selectedAppraisal, setSelectedAppraisal] = useState(null);
+  const [expandedComment, setExpandedComment] = useState(null);
 
-        {/* White Card: Total Staff */}
-        <div className="rounded-[14px] p-[16px_18px] bg-white border border-[#E2DDD4] min-w-0">
-          <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-[#6b7280]">My Direct Reports</div>
-          <div className="text-[30px] font-[800] leading-[1] text-[#0D2B55]">{team.length}</div>
-          <div className="text-[11px] mt-[5px] text-[#6b7280]">STIP-eligible employees assigned to you</div>
-        </div>
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
-        {/* White Card: EP Rated */}
-        <div className="rounded-[14px] p-[16px_18px] bg-white border border-[#E2DDD4] min-w-0">
-          <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-[#6b7280]">My EP Rated Staff</div>
-          <div className="flex items-baseline gap-[5px]">
-            <div className="text-[30px] font-[800] leading-[1] text-[#1E40AF]">{epRated}</div>
-          </div>
-          <div className="text-[11px] mt-[5px] text-[#6b7280]">Exceeds Performance Ratings</div>
-          <div className="mt-[8px] h-[7px] bg-[#DBEAFE] rounded-full overflow-hidden">
-            <div className="h-full bg-[#1E40AF] rounded-full transition-all duration-[0.5s]" style={{ width: Math.min(100, epRated / Math.max(1, team.length) * 100) + '%' }}></div>
-          </div>
-        </div>
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+      const [appRes, qtrRes, configRes, usersRes] = await Promise.all([
+        api.get('/appraisals').catch(() => ({ data: { data: [] } })),
+        api.get('/quarters').catch(() => ({ data: { data: [] } })),
+        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
+        api.get('/users').catch(() => ({ data: { data: [] } }))
+      ]);
 
-        {/* White Card: Pending Approvals */}
-        <div className="rounded-[14px] p-[16px_18px] bg-white border border-[#E2DDD4] min-w-0">
-          <div className="text-[9px] font-[700] uppercase tracking-[.08em] mb-[8px] text-[#6b7280]">My Approvals</div>
-          <div className="text-[30px] font-[800] leading-[1] text-[#92400E]">{pendingHr}</div>
-          <div className="text-[11px] mt-[5px] text-[#6b7280]">Awaiting HR action</div>
-          <div className="flex gap-[6px] mt-[8px]">
-            <div className="flex-1 bg-[#FEF3C7] rounded-[7px] p-[5px_8px] text-center">
-              <div className="text-[14px] font-[700] text-[#92400E]">{pendingHr}</div>
-              <div className="text-[9px] text-[#92400E] mt-[1px]">At HR</div>
-            </div>
-            <div className="flex-1 bg-[#D1FAE5] rounded-[7px] p-[5px_8px] text-center">
-              <div className="text-[14px] font-[700] text-[#065F46]">{approved}</div>
-              <div className="text-[9px] text-[#065F46] mt-[1px]">Approved</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      const allApps = appRes.data?.data || [];
+      setAppraisals(allApps);
 
-      {/* Middle Grid: KPA Progress & Award Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-[14px] mb-[16px]">
-        
-        {/* Balanced Scorecard */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
-          <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
-            <div className="w-[28px] h-[28px] rounded-[7px] bg-[#EFF6FF] flex items-center justify-center text-[13px] shrink-0">&#128200;</div>
-            <div>
-              <div className="text-[13px] font-[700] text-[#0D2B55]">Balanced Scorecard &mdash; KPA Progress</div>
-              <div className="text-[11px] text-[#6b7280]">Live Company performance vs targets</div>
-            </div>
-          </div>
-          <div className="p-[14px_16px] flex flex-col gap-[11px]">
+      const allUsers = usersRes.data?.data || [];
+      setStaff(allUsers);
+
+      const extractedOffices = allUsers
+          .map(u => u?.employmentDetails?.officeLocation)
+          .filter(location => location && typeof location === 'string' && location.trim() !== '');
+      const uniqueOffices = [...new Set(extractedOffices)].sort();
+      setAvailableOffices(uniqueOffices);
+
+      const uniqueManagers = new Map();
+      
+      allApps.forEach(a => {
+        if (a.managerId) {
+          const mId = a.managerId._id || a.managerId;
+          const fName = a.managerId.personalDetails?.firstName || '';
+          const lName = a.managerId.personalDetails?.lastName || '';
+          if (fName || lName) uniqueManagers.set(mId, `${fName} ${lName}`.trim());
+        }
+      });
+
+      allUsers.forEach(u => {
+        const mgr = u.employmentDetails?.reportingTo;
+        if (mgr) {
+          const mId = mgr._id || mgr;
+          if (mgr.personalDetails) {
+            uniqueManagers.set(mId, `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim());
+          } else {
+            const foundMgr = allUsers.find(staffMember => staffMember._id === mId);
+            if (foundMgr) {
+              uniqueManagers.set(mId, `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim());
+            }
+          }
+        }
+      });
+      
+      const mgrArray = Array.from(uniqueManagers, ([id, name]) => ({ id, name }));
+      mgrArray.sort((a, b) => a.name.localeCompare(b.name));
+      setManagerList(mgrArray);
+
+      const fetchedQuarters = qtrRes.data?.data || [];
+      setDbQuarters(fetchedQuarters);
+
+      const configData = configRes.data?.data || {};
+      setCompanyCodes(configData.companyCodes || []);
+
+    } catch (error) {
+      console.error('Failed to fetch appraisals:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // 🚨 UPGRADE: Fetch ALL metrics for the selected year and calculate true CP dynamically
+  useEffect(() => {
+    const fetchAllYearMetrics = async () => {
+      if (!filterYear) return;
+      
+      const newCps = {};
+      const months = { Q1: 3, Q2: 6, Q3: 9, Q4: 12 };
+
+      await Promise.all(Object.entries(months).map(async ([qName, month]) => {
+        try {
+          const res = await api.get(`/company-metrics/${filterYear}/${month}`);
+          const mData = res.data?.data;
+          
+          if (mData) {
+            const kpaActuals = [
+              mData.financialResilience,
+              mData.operationalEffectiveness,
+              mData.humanCapital,
+              mData.safetyEnvironment,
+              mData.reputationalCapital
+            ];
             
-            {/* 🚨 UPGRADED: Explicit math calculation of actual contribution points out of the exact max values */}
-            <div>
-              <div className="flex justify-between items-center mb-[4px] gap-[8px]">
-                <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Financial Resilience</span>
-                <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 13.5%</span>
-                  <span className="text-[12px] font-[800] text-[#3B82F6]">{financialResilience !== null ? financialResilience.toFixed(2) + '%' : '—'}</span>
-                </div>
-              </div>
-              <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#3B82F6] rounded-full transition-all" style={{ width: `${financialResilience || 0}%` }}></div>
-              </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{financialResilience !== null && financialResilience !== undefined ? ((financialResilience / 100) * 120).toFixed(1) : '0.0'} pts</strong></div>
-            </div>
+            const anyKpaEntered = kpaActuals.some(v => v !== null && v !== undefined);
             
-            <div>
-              <div className="flex justify-between items-center mb-[4px] gap-[8px]">
-                <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Operational Effectiveness</span>
-                <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 45.1%</span>
-                  <span className="text-[12px] font-[800] text-[#059669]">{operationalEffectiveness !== null ? operationalEffectiveness.toFixed(2) + '%' : '—'}</span>
-                </div>
-              </div>
-              <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#059669] rounded-full transition-all" style={{ width: `${operationalEffectiveness || 0}%` }}></div>
-              </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{operationalEffectiveness !== null && operationalEffectiveness !== undefined ? ((operationalEffectiveness / 100) * 400).toFixed(1) : '0.0'} pts</strong></div>
-            </div>
+            if (anyKpaEntered) {
+              const calcBscRaw = kpaActuals.reduce((sum, val, idx) => {
+                const maxPts = [120, 400, 230, 110, 27][idx];
+                const pts = ((val || 0) / 100) * maxPts;
+                return sum + Number(pts.toFixed(1)); 
+              }, 0);
+              const rawCp = calcBscRaw / 100;
+              newCps[qName] = Math.round((rawCp + Number.EPSILON) * 100) / 100;
+            } else if (mData.cpPct !== undefined && mData.cpPct !== null) {
+              newCps[qName] = mData.cpPct;
+            }
+          }
+        } catch (e) {
+          // If a quarter isn't created yet, ignore
+        }
+      }));
+      
+      setQuarterCPs(newCps);
+    };
+    
+    fetchAllYearMetrics();
+  }, [filterYear]);
 
-            <div>
-              <div className="flex justify-between items-center mb-[4px] gap-[8px]">
-                <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Human Capital</span>
-                <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 25.9%</span>
-                  <span className="text-[12px] font-[800] text-[#F59E0B]">{humanCapital !== null ? humanCapital.toFixed(2) + '%' : '—'}</span>
-                </div>
-              </div>
-              <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#F59E0B] rounded-full transition-all" style={{ width: `${humanCapital || 0}%` }}></div>
-              </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{humanCapital !== null && humanCapital !== undefined ? ((humanCapital / 100) * 230).toFixed(1) : '0.0'} pts</strong></div>
-            </div>
+  useEffect(() => {
+    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+    if (qtrsForSelectedYear.length > 0) {
+      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
+      const defaultQtr = q1 ? q1._id : qtrsForSelectedYear[0]._id;
+      
+      if (!qtr || !qtrsForSelectedYear.some(q => q._id === qtr)) {
+        setQtr(defaultQtr);
+      }
+    } else {
+      setQtr('');
+    }
+  }, [dbQuarters, filterYear]); 
 
-            <div>
-              <div className="flex justify-between items-center mb-[4px] gap-[8px]">
-                <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Safety & Environment</span>
-                <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 12.4%</span>
-                  <span className="text-[12px] font-[800] text-[#10B981]">{safetyEnvironment !== null ? safetyEnvironment.toFixed(2) + '%' : '—'}</span>
-                </div>
-              </div>
-              <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#10B981] rounded-full transition-all" style={{ width: `${safetyEnvironment || 0}%` }}></div>
-              </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{safetyEnvironment !== null && safetyEnvironment !== undefined ? ((safetyEnvironment / 100) * 110).toFixed(1) : '0.0'} pts</strong></div>
-            </div>
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterYear, qtr, statusFilter, co, mgrFilter, officeFilter]);
 
-            <div>
-              <div className="flex justify-between items-center mb-[4px] gap-[8px]">
-                <span className="text-[12px] font-[600] text-[#0f1923] truncate flex-1">Reputational Capital</span>
-                <div className="flex items-center gap-[8px] shrink-0">
-                  <span className="text-[10px] text-[#6b7280]">Wt: 3.0%</span>
-                  <span className="text-[12px] font-[800] text-[#8B5CF6]">{reputationalCapital !== null ? reputationalCapital.toFixed(2) + '%' : '—'}</span>
-                </div>
-              </div>
-              <div className="h-[9px] bg-[#F1F0EB] rounded-full overflow-hidden">
-                <div className="h-full bg-[#8B5CF6] rounded-full transition-all" style={{ width: `${reputationalCapital || 0}%` }}></div>
-              </div>
-              <div className="text-[10px] text-[#6b7280] mt-[3px]">Contribution to BSC: <strong className="text-[#0f1923]">{reputationalCapital !== null && reputationalCapital !== undefined ? ((reputationalCapital / 100) * 27).toFixed(1) : '0.0'} pts</strong></div>
-            </div>
+  const handleYearChange = (e) => {
+    setFilterYear(e.target.value);
+    setQtr(''); 
+  };
 
-            <div className="bg-[#0D2B55] rounded-[9px] p-[11px_14px] flex justify-between items-center mt-[4px]">
-              <span className="text-[12px] font-[700] text-white/60 uppercase tracking-widest">
-                Company Performance <span className="text-white/40 normal-case tracking-normal ml-1">| Achievement: <b className="text-white/80">{safeCpPct !== null ? ((safeCpPct / 8.87) * 100).toFixed(1) + '%' : '—'}</b></span>
-              </span>
-              <span className="text-[16px] font-[800] text-[#e8c96a]">
-                {safeCpPct !== null ? safeCpPct.toFixed(2) : '—'} <span className="text-[12px] text-white/50 font-[600]">/ 8.87 max</span>
-              </span>
-            </div>
+  const getManagerInfo = (mgrRaw) => {
+    if (!mgrRaw) return { id: null, name: 'Unassigned' };
+    if (mgrRaw._id && mgrRaw.personalDetails) {
+      return { id: mgrRaw._id, name: `${mgrRaw.personalDetails.firstName} ${mgrRaw.personalDetails.lastName}`.trim() };
+    }
+    const mId = mgrRaw._id || mgrRaw;
+    const found = staff.find(s => s._id === mId);
+    if (found) {
+       return { id: mId, name: `${found.personalDetails?.firstName} ${found.personalDetails?.lastName}`.trim() };
+    }
+    return { id: mId, name: 'Unknown Manager' };
+  };
 
+  let dataToFilter = [...appraisals];
+
+  if (qtr) {
+    const qtrAppraisals = appraisals.filter(a => {
+      const appQId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+      return appQId === qtr;
+    });
+    
+    const submittedEmpIds = new Set(qtrAppraisals.map(a => a.employeeId?._id || a.employeeId));
+
+    staff.forEach(emp => {
+      if (!submittedEmpIds.has(emp._id)) {
+        dataToFilter.push({
+          _id: `missing-${emp._id}-${qtr}`,
+          isMissing: true,
+          employeeId: emp,
+          managerId: emp.employmentDetails?.reportingTo,
+          appraisalQuarter: qtr,
+          workflow: { status: 'NOT_STARTED' },
+          calculatedResults: null,
+          updatedAt: null,
+          createdAt: null
+        });
+      }
+    });
+  }
+
+  const filteredData = dataToFilter.filter(a => {
+    const emp = a.employeeId?.personalDetails;
+    const empName = `${emp?.firstName || ''} ${emp?.lastName || ''}`.toLowerCase();
+    const empIdStr = (a.employeeId?.employeeId || '').toLowerCase();
+    
+    const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+    const mgrInfo = getManagerInfo(a.managerId);
+
+    const matchesSearch = search === '' || empName.includes(search.toLowerCase()) || empIdStr.includes(search.toLowerCase());
+    const matchesQtr = qtr === '' || appQuarterId === qtr;
+    
+    const appYear = a.reviewYear || a.appraisalQuarter?.year;
+    const matchesYear = filterYear === '' || (appYear && appYear.toString() === filterYear) || matchesQtr;
+
+    const matchesCo = co === '' || a.employeeId?.companyCode === co;
+    const matchesMgr = mgrFilter === '' || mgrInfo.id === mgrFilter;
+    const matchesOffice = officeFilter === '' || a.employeeId?.employmentDetails?.officeLocation === officeFilter;
+    
+    let matchesStatus = true;
+    if (statusFilter !== '') {
+      const st = a.workflow?.status;
+      if (statusFilter === 'NOT_STARTED') {
+        matchesStatus = a.isMissing || ['NOT_STARTED'].includes(st);
+      } else if (statusFilter === 'DRAFT') {
+        matchesStatus = ['DRAFT', 'REOPENED'].includes(st);
+      } else if (statusFilter === 'SUBMITTED_TO_HR') {
+        matchesStatus = ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(st);
+      } else if (statusFilter === 'WITH_CEO') {
+        matchesStatus = ['WITH_CEO'].includes(st);
+      } else if (statusFilter === 'APPROVED') {
+        matchesStatus = ['APPROVED'].includes(st);
+      } else if (statusFilter === 'NOT_APPROVED') {
+        matchesStatus = ['NOT_APPROVED'].includes(st);
+      } else if (statusFilter === 'ACKNOWLEDGED') {
+        matchesStatus = ['ACKNOWLEDGED'].includes(st);
+      }
+    }
+    
+    return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
+  }).sort((a, b) => {
+    const ceoStatuses = ['WITH_CEO', 'APPROVED', 'ACKNOWLEDGED'];
+    const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
+    const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
+
+    if (isACeo !== isBCeo) {
+      return isBCeo - isACeo; 
+    }
+
+    const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+    const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+    return dateB - dateA; 
+  });
+
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
+
+  const getQuarterName = (qId) => {
+    if (!qId) return 'N/A';
+    const match = dbQuarters.find(q => q._id === qId);
+    return match ? `${match.name} (${match.year})` : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
+  };
+
+  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
+  quartersForSelectedYear.sort((a, b) => a.name.localeCompare(b.name));
+
+  const selectedYearNum = parseInt(filterYear) || new Date().getFullYear();
+  const yearOptions = [
+    selectedYearNum - 3,
+    selectedYearNum - 2,
+    selectedYearNum - 1,
+    selectedYearNum,
+    selectedYearNum + 1
+  ];
+
+  const iprfStyle = (f) => {
+    if (f >= 1.3) return 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]';
+    if (f >= 1.0) return 'bg-[#D1FAE5] text-[#065F46] border-[#A7F3D0]';
+    if (f >= 0.7) return 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]';
+    return 'bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]';
+  };
+
+  const iprfLabel = (f) => {
+    if (f >= 1.3) return 'EP'; 
+    if (f >= 1.0) return 'E';
+    if (f >= 0.7) return 'NI'; 
+    return 'LS'; 
+  };
+
+  const StatusTag = ({ st }) => {
+    if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
+    switch(st) {
+      case 'NOT_STARTED': 
+        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Not started</span>;
+      case 'DRAFT':
+      case 'REOPENED':
+        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">Saved in Draft</span>;
+      case 'SUBMITTED':
+      case 'APPROVED_BY_HR': 
+      case 'UNDER_HR_REVIEW':
+        return <span className="bg-[#DBEAFE] text-[#1E40AF] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#BFDBFE] whitespace-nowrap">Submitted to HR</span>;
+      case 'WITH_CEO': 
+        return <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FDE68A] whitespace-nowrap">With CEO</span>;
+      case 'APPROVED': 
+        return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
+      case 'NOT_APPROVED': 
+        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Rejected by CEO</span>;
+      case 'ACKNOWLEDGED':
+        return <span className="bg-[#F0FDF4] text-[#15803D] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[800] border border-[#BBF7D0] whitespace-nowrap flex items-center gap-[4px]"><span className="text-[10px]">✓</span> Acknowledged</span>;
+      default: 
+        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
+    }
+  };
+
+  const handleDownloadReport = () => {
+    let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Pro-Rata,Award %,Status,Last Updated Date & Time\n";
+    
+    filteredData.forEach(a => {
+      const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
+      const empId = `"${a.employeeId?.employeeId || ''}"`;
+      const jobTitle = `"${a.employeeId?.employmentDetails?.jobTitle || ''}"`;
+      const office = `"${a.employeeId?.employmentDetails?.officeLocation || 'Unassigned'}"`;
+      const coCode = `"${a.employeeId?.companyCode || 'FSM'}"`;
+      const mgrInfo = getManagerInfo(a.managerId);
+      const mgrName = `"${mgrInfo.name}"`;
+      
+      const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+      const qtrNameFull = getQuarterName(appQuarterId);
+      const qtrName = `"${qtrNameFull}"`;
+      
+      const iprf = a.calculatedResults?.finalIprfScore || 0;
+      const score = `"${a.isMissing ? 'N/A' : iprf.toFixed(1)}"`;
+      
+      const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
+      const proRataValue = prMonths / 12;
+      const proRataStr = `"${proRataValue.toFixed(3)}"`;
+
+      // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
+      const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
+      const qKey = qMatch ? qMatch[0].toUpperCase() : null;
+      const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
+
+      let awardDisplay = '—';
+      if (liveCp !== null && iprf > 0) {
+        // Calculation: %Award = CP * IPRF rating
+        const finalAw = liveCp * iprf;
+        awardDisplay = `"${finalAw.toFixed(2)}%"`;
+      }
+      
+      let statusRaw = a.workflow?.status;
+      let statusText = 'UNKNOWN';
+      if (a.isMissing || ['NOT_STARTED'].includes(statusRaw)) statusText = 'Not started';
+      else if (['DRAFT', 'REOPENED'].includes(statusRaw)) statusText = 'Saved in Draft';
+      else if (['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(statusRaw)) statusText = 'Submitted to HR';
+      else if (statusRaw === 'WITH_CEO') statusText = 'With CEO/ Pending to CEO';
+      else if (statusRaw === 'APPROVED') statusText = 'CEO Approved';
+      else if (statusRaw === 'NOT_APPROVED') statusText = 'Rejected by CEO/ Not Approve by CEO';
+      else if (statusRaw === 'ACKNOWLEDGED') statusText = 'Emp. Acknowledged';
+      const status = `"${statusText}"`;
+      
+      const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
+
+      csvContent += `${empName},${empId},${jobTitle},${office},${coCode},${mgrName},${qtrName},${score},${proRataStr},${awardDisplay},${status},${updated}\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `CEO_Appraisals_Report_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const getPageNumbers = () => {
+    let pages = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (currentPage >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+      }
+    }
+    return pages;
+  };
+
+  const parseComments = (combinedString) => {
+    if (!combinedString) return {};
+    const comments = {};
+    
+    const labels = [
+      { key: 'jobCompetence', matches: ['Job Competence:'] },
+      { key: 'behaviors', matches: ['Behaviors & Initiative:', 'Demonstrated Initiative:'] },
+      { key: 'dependability', matches: ['Dependability:'] },
+      { key: 'adaptability', matches: ['Adaptability:'] },
+      { key: 'safeWorking', matches: ['Safe Working:', 'Demonstrated Safe Working:'] },
+      { key: 'deliveredResults', matches: ['Delivered Expected Results:', 'Delivered Results:'] }
+    ];
+
+    let foundLabels = [];
+    labels.forEach(labelDef => {
+      let bestIdx = -1;
+      let bestMatch = '';
+      for (const matchStr of labelDef.matches) {
+        const idx = combinedString.indexOf(matchStr);
+        if (idx !== -1) {
+          bestIdx = idx;
+          bestMatch = matchStr;
+          break;
+        }
+      }
+      if (bestIdx !== -1) {
+        foundLabels.push({ key: labelDef.key, index: bestIdx, match: bestMatch });
+      }
+    });
+
+    foundLabels.sort((a, b) => a.index - b.index);
+
+    foundLabels.forEach((label, i) => {
+      const start = label.index + label.match.length;
+      if (i + 1 < foundLabels.length) {
+        const nextLabelIdx = foundLabels[i + 1].index;
+        let content = combinedString.substring(start, nextLabelIdx);
+        content = content.replace(/\s*\d+\.\s*$/, ''); 
+        comments[label.key] = content.trim();
+      } else {
+        comments[label.key] = combinedString.substring(start).trim();
+      }
+    });
+
+    return comments;
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto pb-[60px] font-sans">
+      
+      {/* Header */}
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
+        <div>
+          <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
+            &#128196; All Appraisals
           </div>
+          <div className="text-[13px] text-[#6b7280]">Full read-only view of every appraisal — all staff, all quarters</div>
         </div>
-
-        {/* STIP Award Preview */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
-          <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
-            <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFFBEB] flex items-center justify-center text-[13px] shrink-0">&#128176;</div>
-            <div>
-              <div className="text-[13px] font-[700] text-[#0D2B55]">STIP Award Preview by Rating</div>
-              <div className="text-[11px] text-[#6b7280]">CP = {safeCpPct !== null ? safeCpPct.toFixed(2) : '0.00'}% &middot; Pro-Rata = 1.000 (full year)</div>
-            </div>
-          </div>
-          <div className="p-[14px_16px] flex flex-col gap-[9px]">
-            <div className="bg-[#FEE2E2] border border-[#FECACA] rounded-[10px] p-[12px_14px] flex justify-between items-center gap-[10px]">
-              <div className="min-w-0">
-                <div className="text-[13px] font-[700] text-[#991B1B]">0.0 &mdash; Less than Satisfactory</div>
-                <div className="text-[11px] text-[#991B1B]/75 mt-[2px]">{safeCpPct !== null ? safeCpPct.toFixed(2) : '0.00'}% &times; 0.0 &times; Pro-Rata &times; Salary</div>
-              </div>
-              <div className="text-[22px] font-[800] text-[#991B1B] shrink-0">0.00%</div>
-            </div>
-            <div className="bg-[#FEF3C7] border border-[#FDE68A] rounded-[10px] p-[12px_14px] flex justify-between items-center gap-[10px]">
-              <div className="min-w-0">
-                <div className="text-[13px] font-[700] text-[#92400E]">0.7 &mdash; Needs Improvement</div>
-                <div className="text-[11px] text-[#92400E]/80 mt-[2px]">{awNIf}</div>
-              </div>
-              <div className="text-[22px] font-[800] text-[#92400E] shrink-0">{awNI}</div>
-            </div>
-            <div className="bg-[#D1FAE5] border-[2px] border-[#A7F3D0] rounded-[10px] p-[12px_14px] flex justify-between items-center gap-[10px]">
-              <div className="min-w-0">
-                <div className="text-[13px] font-[700] text-[#065F46]">1.0 &mdash; Fully Effective</div>
-                <div className="text-[11px] text-[#065F46]/80 mt-[2px]">{awEf}</div>
-              </div>
-              <div className="text-[22px] font-[800] text-[#065F46] shrink-0">{awE}</div>
-            </div>
-            <div className="bg-[#DBEAFE] border border-[#BFDBFE] rounded-[10px] p-[12px_14px] flex justify-between items-center gap-[10px]">
-              <div className="min-w-0">
-                <div className="text-[13px] font-[700] text-[#1E40AF]">1.3 &mdash; Exceeds Performance</div>
-                <div className="text-[11px] text-[#1E40AF]/80 mt-[2px]">{awEPf}</div>
-              </div>
-              <div className="text-[22px] font-[800] text-[#1E40AF] shrink-0">{awEP}</div>
-            </div>
-            <div className="text-[11px] text-[#6b7280] bg-[#FAF8F4] p-[9px_12px] rounded-[8px] mt-[1px] leading-[1.6]">
-              &#8505; Final STIP Pay = Award% &times; Pro-Rata &times; Base Salary. Pro-Rata adjusts for mid-year joiners. All figures gross &mdash; subject to income tax.
-            </div>
-          </div>
+        
+        <div className="flex gap-[8px]">
+          <button onClick={fetchData} className="text-[13px] font-[700] text-[#0D2B55] bg-white border border-[#E2DDD4] py-[10px] px-[16px] rounded-[8px] hover:bg-slate-50 transition-colors shadow-sm">
+            &#8635; Refresh
+          </button>
+          <button 
+            onClick={handleDownloadReport} 
+            disabled={loading || filteredData.length === 0}
+            className="py-[10px] px-[16px] bg-[#059669] hover:bg-[#047857] text-white rounded-[8px] text-[13px] font-[700] transition-colors flex items-center gap-[6px] shadow-sm disabled:opacity-50"
+          >
+            &#11015; Download Filtered Report
+          </button>
         </div>
-
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-[14px]">
+      {/* Filter Bar */}
+      <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm p-[16px] mb-[20px] flex flex-wrap gap-[12px]">
         
-        {/* My Appraisal Activity */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0 flex flex-col">
-          <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center justify-between gap-[9px]">
-            <div className="flex items-center gap-[9px]">
-              <div className="w-[28px] h-[28px] rounded-[7px] bg-[#EDE9FE] flex items-center justify-center text-[13px] shrink-0">&#128203;</div>
-              <div>
-                <div className="text-[13px] font-[700] text-[#0D2B55]">My Appraisal Activity</div>
-                <div className="text-[11px] text-[#6b7280]">Submissions, drafts &amp; status for {selectedQuarter} {selectedYear}</div>
-              </div>
-            </div>
-            <button 
-              className="p-[6px_14px] text-[12px] font-[700] bg-[#0D2B55] text-white border-none rounded-[8px] cursor-pointer hover:bg-[#1a3d6e] transition-colors"
-              onClick={() => router.push('/dashboard/manager/new')}
+        <div className="flex-1 min-w-[200px] relative">
+          <input 
+            type="text" 
+            placeholder="Search staff name or ID..." 
+            value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full pl-[36px] pr-[16px] py-[10px] bg-[#FAF8F4] border border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
+          />
+          <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
+        </div>
+        
+        <div className="flex gap-[6px]">
+          {isManualYear ? (
+            <input 
+              type="number" 
+              autoFocus
+              defaultValue={filterYear}
+              onBlur={(e) => {
+                if (e.target.value) {
+                  setFilterYear(e.target.value);
+                  setQtr(''); 
+                }
+                setIsManualYear(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.target.value) {
+                    setFilterYear(e.target.value);
+                    setQtr(''); 
+                  }
+                  setIsManualYear(false);
+                }
+              }}
+              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
+            />
+          ) : (
+            <select 
+              value={filterYear} 
+              onChange={(e) => {
+                if (e.target.value === 'manual') setIsManualYear(true);
+                else handleYearChange(e);
+              }} 
+              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px]"
             >
-              + New
-            </button>
-          </div>
-          <div className="p-[14px_16px] flex flex-col flex-1">
-            <div className="grid grid-cols-3 gap-[8px] mb-[12px]">
-              <div className="bg-[#FAF8F4] rounded-[10px] p-[11px] text-center border border-[#E2DDD4]">
-                <div className="text-[24px] font-[800] text-[#0D2B55]">{submissions.length}</div>
-                <div className="text-[10px] text-[#6b7280] mt-[3px] font-[600]">Submitted</div>
-              </div>
-              <div className="bg-[#FAF8F4] rounded-[10px] p-[11px] text-center border border-[#E2DDD4]">
-                <div className="text-[24px] font-[800] text-[#1E40AF]">{drafts.length}</div>
-                <div className="text-[10px] text-[#6b7280] mt-[3px] font-[600]">Drafts</div>
-              </div>
-              <div className="bg-[#FAF8F4] rounded-[10px] p-[11px] text-center border border-[#E2DDD4]">
-                <div className="text-[24px] font-[800] text-[#065F46]">{approved}</div>
-                <div className="text-[10px] text-[#6b7280] mt-[3px] font-[600]">Approved</div>
-              </div>
-            </div>
-            
-            <div className="text-[11px] font-[700] text-[#6b7280] uppercase tracking-[.06em] mb-[7px]">Recent Activity</div>
-            
-            <div className="flex flex-col gap-[6px] flex-1">
-              {recentActivity.length === 0 ? (
-                <div className="text-center p-[18px] text-[#6b7280] text-[12px] bg-[#FAF8F4] rounded-[8px]">
-                  No activity for this period &mdash; start by creating an appraisal
-                </div>
-              ) : (
-                recentActivity.map((a, i) => (
-                  <div key={i} className="flex justify-between items-center p-[8px_12px] bg-[#FAF8F4] rounded-[8px] border border-[#E2DDD4]/50">
-                    <div>
-                      <div className="text-[12px] font-[600] text-[#0f1923]">
-                        {a.employeeId?.personalDetails?.firstName} {a.employeeId?.personalDetails?.lastName}
-                      </div>
-                      <div className="text-[10px] text-[#6b7280] mt-[1px]">Updated {new Date(a.updatedAt || a.createdAt).toLocaleDateString()}</div>
-                    </div>
-                    <span className="text-[10px] font-[600] bg-[#E2DDD4]/40 text-[#0f1923] px-[6px] py-[2px] rounded-md border border-[#E2DDD4]">
-                      {a.workflow?.status?.replace(/_/g, ' ') || 'UNKNOWN'}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+              {yearOptions.map(y => (
+                 <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+            </select>
+          )}
 
-            <div className="mt-[10px] flex gap-[8px] pt-[4px]">
-              <button 
-                className="flex-1 p-[8px] text-[12px] font-[600] bg-white text-[#0D2B55] border-[1.5px] border-[#E2DDD4] rounded-[8px] cursor-pointer hover:border-[#0D2B55] transition-colors"
-                onClick={() => router.push('/dashboard/manager/submissions')}
-              >
-                View Submissions
-              </button>
-              <button 
-                className="flex-1 p-[8px] text-[12px] font-[600] bg-white text-[#0D2B55] border-[1.5px] border-[#E2DDD4] rounded-[8px] cursor-pointer hover:border-[#0D2B55] transition-colors"
-                onClick={() => router.push('/dashboard/manager/drafts')}
-              >
-                View Drafts
-              </button>
-            </div>
-          </div>
+          <select 
+            value={qtr} 
+            onChange={e => setQtr(e.target.value)} 
+            disabled={!filterYear || quartersForSelectedYear.length === 0}
+            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[130px] ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
+          >
+            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
+            {quartersForSelectedYear.map(q => (
+               <option key={q._id} value={q._id}>{q.name}</option>
+            ))}
+          </select>
         </div>
 
-        {/* Dynamic DB Deadlines */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden min-w-0">
-          <div className="p-[13px_16px] border-b border-[#E2DDD4] flex items-center gap-[9px]">
-            <div className="w-[28px] h-[28px] rounded-[7px] bg-[#FFF7ED] flex items-center justify-center text-[13px] shrink-0">&#128197;</div>
-            <div>
-              <div className="text-[13px] font-[700] text-[#0D2B55]">Live Appraisal Deadlines</div>
-              <div className="text-[11px] text-[#6b7280]">All quarters &middot; Submit before deadline date</div>
-            </div>
-          </div>
-          <div className="p-[14px_16px]">
-            <table className="w-full border-collapse text-[12px]">
-              <thead>
+        {/* Appraisal Status */}
+        <SearchableDropdown 
+          value={statusFilter}
+          onChange={setStatusFilter}
+          placeholder="Appraisal Status"
+          widthClass="w-[200px]"
+          options={[
+            { value: 'SUBMITTED_TO_HR', label: 'Submitted to HR' },
+            { value: 'WITH_CEO', label: 'With CEO/ Pending to CEO' },
+            { value: 'APPROVED', label: 'CEO Approved' },
+            { value: 'ACKNOWLEDGED', label: 'Emp. Acknowledged' },
+            { value: 'NOT_STARTED', label: 'Not started' },
+            { value: 'NOT_APPROVED', label: 'Rejected by CEO/ Not Approve by CEO' },
+            { value: 'DRAFT', label: 'Saved in Draft' },
+          ]}
+        />
+
+        {/* All Office Locations */}
+        <SearchableDropdown 
+          value={officeFilter}
+          onChange={setOfficeFilter}
+          placeholder="All Office Locations"
+          widthClass="w-[180px]"
+          options={availableOffices.map(o => ({ value: o, label: o }))}
+        />
+
+        {/* All Line Managers */}
+        <SearchableDropdown 
+          value={mgrFilter}
+          onChange={setMgrFilter}
+          placeholder="All Line Managers"
+          widthClass="w-[190px]"
+          options={managerList.map(m => ({ value: m.id, label: m.name }))}
+        />
+        
+        {/* All Company */}
+        <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
+          <option value="">All Company</option>
+          {companyCodes.map(code => (
+             <option key={`co-${code}`} value={code}>{code}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Main Table */}
+      <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[900px]">
+            <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.06em]">
+              <tr>
+                <th className="p-[12px_16px]">Employee</th>
+                <th className="p-[12px_16px] text-[#C9A84C]">Job Title</th>
+                <th className="p-[12px_16px] text-center">Co.</th>
+                <th className="p-[12px_16px] text-center">Quarter</th>
+                <th className="p-[12px_16px] text-center">IPRF</th>
+                <th className="p-[12px_16px] text-center">Pro-Rata</th>
+                <th className="p-[12px_16px] text-center">Award %</th>
+                <th className="p-[12px_16px] text-center">Status</th>
+                <th className="p-[12px_16px] text-center">Detail</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E2DDD4] text-[13px]">
+              {loading ? (
                 <tr>
-                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Quarter</th>
-                  <th className="text-left text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Year</th>
-                  <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Deadline</th>
-                  <th className="text-center text-[10px] font-[700] text-[#6b7280] uppercase tracking-[.06em] pb-[8px] border-b border-[#E2DDD4]">Status</th>
+                  <td colSpan="9" className="p-[48px] text-center text-[#6b7280] font-[600] animate-pulse">
+                    Loading Appraisals Database...
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {dbQuarters.length === 0 ? (
-                  <tr><td colSpan="4" className="text-center p-4 text-gray-500">No timeline data available.</td></tr>
-                ) : (
-                  dbQuarters.filter(q => q.year.toString() === selectedYear.toString()).map(q => {
-                    const now = new Date();
-                    const exp = now > new Date(q.endDate);
-                    const isActive = q._id === activeQuarter?._id;
-                    const isLocked = q.isLocked || (exp && !q.forceUnlock);
-                    
-                    let bgRow = '';
-                    let textClass = 'text-[#6b7280]';
-                    let statusBadge = <span className="bg-[#E2DDD4] text-[#6b7280] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">Upcoming</span>;
-                    
-                    if (isLocked) {
-                      bgRow = 'bg-[#F0FDF4]';
-                      textClass = 'text-[#065F46]';
-                      statusBadge = <span className="bg-[#D1FAE5] text-[#065F46] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#10003; Locked</span>;
-                    } else if (isActive || q.forceUnlock) {
-                      bgRow = 'bg-[#FFFBEB] outline outline-[1.5px] outline-[#FDE68A] outline-offset-[-1px] rounded-[6px]';
-                      textClass = 'text-[#92400E]';
-                      statusBadge = <span className="bg-[#FEF3C7] text-[#92400E] text-[11px] font-[700] p-[2px_10px] rounded-full whitespace-nowrap">&#9200; {q.forceUnlock && exp ? 'Override' : 'Active'}</span>;
-                    }
+              ) : filteredData.length === 0 ? (
+                <tr>
+                  <td colSpan="9" className="p-[48px] text-center text-[#6b7280]">
+                    <div className="text-[36px] mb-[12px] opacity-70">&#128269;</div>
+                    <div className="text-[15px] font-[700] text-[#0D2B55] mb-[6px]">No matches found</div>
+                    <div className="text-[13px]">Try adjusting your search or filters to find what you're looking for.</div>
+                  </td>
+                </tr>
+              ) : (
+                currentItems.map((a, i) => {
+                  const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`.trim() || 'Unknown';
+                  const init1 = a.employeeId?.personalDetails?.firstName?.[0] || '';
+                  const init2 = a.employeeId?.personalDetails?.lastName?.[0] || '';
+                  const coCode = a.employeeId?.companyCode || 'FSM';
+                  const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
+                  
+                  const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
+                  const qtrNameFull = getQuarterName(appQuarterId);
+                  
+                  const iprf = a.calculatedResults?.finalIprfScore || 0;
+                  const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
+                  const proRataValue = prMonths / 12;
+                  
+                  // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
+                  const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
+                  const qKey = qMatch ? qMatch[0].toUpperCase() : null;
+                  const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
 
-                    return (
-                      <tr key={q._id} className={bgRow}>
-                        <td className={`p-[9px_8px] font-[700] ${textClass} rounded-l-[6px]`}>{q.name}</td>
-                        <td className="p-[9px_8px] text-[#0f1923]">{q.year}</td>
-                        <td className={`p-[9px_8px] text-center font-[700] ${textClass}`}>{formatDateTime(q.endDate, true)}</td>
-                        <td className="p-[9px_8px] text-center rounded-r-[6px]">{statusBadge}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-            <div className="mt-[12px] bg-[#0D2B55] rounded-[9px] p-[10px_14px] flex items-center justify-between">
-              <span className="text-[12px] text-white/60">{activeQuarter ? `${activeQuarter.name} closes in` : 'System Status'}</span>
-              <span className="text-[14px] font-[700] text-[#e8c96a]">{daysRemainingText}</span>
+                  let awardDisplay = '—';
+                  if (liveCp !== null && iprf > 0) {
+                    // Calculation: %Award = CP * IPRF rating
+                    const finalAw = liveCp * iprf;
+                    awardDisplay = `${finalAw.toFixed(2)}%`;
+                  }
+
+                  return (
+                    <tr key={a._id} className={`${a.isMissing ? 'bg-red-50/30' : i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'} hover:bg-[#FAF8F4] transition-colors`}>
+                      <td className="p-[12px_16px] whitespace-nowrap">
+                        <div className="flex items-center gap-[9px]">
+                          <div className="w-[30px] h-[30px] rounded-[6px] bg-[#E2DDD4] text-[#0f1923] font-[800] flex items-center justify-center text-[11px]">
+                            {init1}{init2}
+                          </div>
+                          <div>
+                            <div className="font-[600] text-[#0D2B55]">{empName}</div>
+                            {!a.isMissing && a.updatedAt && (
+                               <div className="text-[10px] text-[#6b7280]">
+                                 {new Date(a.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                               </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-[12px] text-[#0f1923]">
+                        {jobTitle}
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center">
+                        <span className="bg-[#EFF6FF] text-[#0369A1] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#BFDBFE]">
+                          {coCode}
+                        </span>
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center">
+                        <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#FDE68A]">
+                          {qtrNameFull}
+                        </span>
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center">
+                        {a.isMissing ? (
+                           <span className="text-[#6b7280] font-bold">—</span>
+                        ) : iprf > 0 ? (
+                          <span className={`px-[8px] py-[4px] rounded-[6px] text-[11px] font-[800] border ${iprfStyle(iprf)}`}>
+                            {iprf.toFixed(1)} ({iprfLabel(iprf)})
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-[800] text-[#6b7280">—</span>
+                        )}
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center font-[600] text-[#0D2B55]">
+                        {proRataValue.toFixed(3)}
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center font-[700] text-[#059669]">
+                        {a.isMissing ? '—' : awardDisplay}
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center">
+                        <StatusTag st={a.workflow?.status} />
+                      </td>
+                      <td className="p-[12px_16px] whitespace-nowrap text-center">
+                        {a.isMissing ? (
+                           <span className="text-[10px] font-bold text-red-400 italic">No Data</span>
+                        ) : (
+                         <button 
+                            onClick={() => {
+                              setSelectedAppraisal(a);
+                              setExpandedComment(null);
+                            }}
+                            className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
+                          >
+                            View
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        
+        {/* Table Pagination Footer */}
+        {filteredData.length > itemsPerPage && (
+          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
+            <div className="text-[12px] text-[#6b7280] font-[600]">
+              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filteredData.length)}</span> of <span className="text-[#0f1923]">{filteredData.length}</span> entries
+            </div>
+            
+            <div className="flex items-center gap-[4px]">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-[14px] h-[14px]" />
+              </button>
+              
+              <div className="flex gap-[4px] px-[4px]">
+                {getPageNumbers().map((number, index) => (
+                  <button
+                    key={index}
+                    onClick={() => number !== '...' && setCurrentPage(number)}
+                    disabled={number === '...'}
+                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
+                      number === currentPage 
+                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
+                        : number === '...' 
+                          ? 'bg-transparent text-[#6b7280] cursor-default'
+                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-[14px] h-[14px]" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Read-Only Audit View Modal */}
+      {selectedAppraisal && !selectedAppraisal.isMissing && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
+            
+            <div className="p-[20px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] relative">
+              <h2 className="text-[18px] font-[800] text-[#0D2B55]">&#128269; Appraisal Audit View</h2>
+              <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">&times;</button>
+            </div>
+            
+            <div className="p-[24px] overflow-y-auto custom-scrollbar">
+              
+              <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
+                <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
+                  {selectedAppraisal.employeeId?.personalDetails?.firstName?.[0] || ''}{selectedAppraisal.employeeId?.personalDetails?.lastName?.[0] || ''}
+                </div>
+                <div>
+                  <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
+                    {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
+                  </h3>
+                  <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
+                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; ID: {selectedAppraisal.employeeId?.employeeId}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-[12px] mb-[24px]">
+                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
+                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Final IPRF</div>
+                  <div className="text-[22px] font-[800] text-[#1E40AF]">{selectedAppraisal.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0'}</div>
+                </div>
+                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
+                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
+                  <div className="text-[22px] font-[800] text-[#059669]">
+                    {(() => {
+                      const iprf = selectedAppraisal.calculatedResults?.finalIprfScore || 0;
+                      
+                      const appQuarterId = selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter;
+                      const qtrNameFull = getQuarterName(appQuarterId);
+                      const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
+                      const qKey = qMatch ? qMatch[0].toUpperCase() : null;
+                      const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
+
+                      let displayAward = '—';
+                      if (liveCp !== null && iprf > 0) {
+                        // Calculation: %Award = CP * IPRF rating
+                        const finalAw = liveCp * iprf;
+                        displayAward = `${finalAw.toFixed(2)}%`;
+                      }
+                      return displayAward;
+                    })()}
+                  </div>
+                </div>
+                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
+                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>
+                  <div className="text-[18px] font-[800] text-[#0f1923] truncate">
+                    {getQuarterName(selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter)}
+                  </div>
+                </div>
+                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
+                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Company</div>
+                  <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.employeeId?.companyCode || 'FSM'}</div>
+                </div>
+              </div>
+
+              <h4 className="text-[12px] font-[800] text-[#0D2B55] mb-[12px] uppercase tracking-widest">Criteria Breakdown</h4>
+              
+              {(() => {
+                const parsedComments = parseComments(selectedAppraisal.narrative?.generalComments);
+                const hasParsedComments = Object.keys(parsedComments).length > 0;
+                
+                return (
+                  <>
+                    <div className="bg-white border border-[#E2DDD4] rounded-[10px] overflow-hidden mb-[24px]">
+                      {Object.entries(CRIT_NAMES).map(([key, name]) => {
+                        const rating = selectedAppraisal.scores?.[key]?.rating;
+                        const color = rating === 0.0 ? 'text-[#991B1B]' : rating === 0.7 ? 'text-[#92400E]' : rating === 1.0 ? 'text-[#065F46]' : rating === 1.3 ? 'text-[#1E40AF]' : 'text-[#6b7280]';
+                        const comment = parsedComments[key];
+                        const isExpanded = expandedComment === key;
+                        
+                        return (
+                          <div key={key} className="border-b border-[#E2DDD4] last:border-0">
+                            <div 
+                              className="flex justify-between items-center p-[10px_16px] cursor-pointer hover:bg-slate-50 transition-colors"
+                              onClick={() => setExpandedComment(isExpanded ? null : key)}
+                            >
+                              <div className="font-[500] text-[#0f1923] text-[13px] flex items-center gap-2">
+                                {name}
+                                {comment && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
+                              </div>
+                              <div className="flex items-center gap-3 text-right">
+                                <span className={`font-[800] ${color} text-[13px]`}>{rating !== undefined ? rating.toFixed(1) : '—'}</span>
+                                <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </div>
+                            {isExpanded && comment && (
+                              <div className="p-[0_16px_12px_16px] text-[12px] text-[#6b7280] italic leading-[1.6] animate-in fade-in slide-in-from-top-1">
+                                <span className="font-[700] not-italic text-[#0D2B55] text-[10px] uppercase tracking-widest block mb-[2px]">Manager Justification:</span>
+                                "{comment}"
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-col gap-[12px]">
+                      {selectedAppraisal.narrative?.epJustification && (
+                        <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] rounded-[10px] p-[16px]">
+                          <div className="text-[11px] font-[800] text-[#92400E] uppercase tracking-[.06em] mb-[6px] flex items-center gap-[6px]">
+                            <span>⭐</span> EP Justification
+                          </div>
+                          <div className="text-[13px] text-[#92400E] leading-relaxed font-[500] whitespace-pre-wrap">
+                            {selectedAppraisal.narrative.epJustification}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedAppraisal.narrative?.generalComments && !hasParsedComments && (
+                        <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px]">
+                          <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
+                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
+                            "{selectedAppraisal.narrative.generalComments}"
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedAppraisal.narrative?.hrComments && (
+                        <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
+                          <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
+                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
+                            "{selectedAppraisal.narrative.hrComments}"
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+              
+              <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
+                <StatusTag st={selectedAppraisal.workflow?.status} />
+                <div className="text-[11px] text-[#6b7280] font-mono font-[600]">REF: {selectedAppraisal.appraisalRef || selectedAppraisal._id}</div>
+              </div>
             </div>
           </div>
         </div>
-
-      </div>
-
-      {/* Full Width Bottom Chart */}
-      <div className="mt-6">
-         <StipCategoryChart scope="team" />
-      </div>
+      )}
 
     </div>
   );
