@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Search, Filter, AlertTriangle, ShieldCheck, FileText, ChevronLeft, ChevronRight, Loader2, Clock, User, Activity, Download, Calendar } from 'lucide-react';
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 export default function SystemAuditTrail() {
   const [logs, setLogs] = useState([]);
@@ -35,21 +34,13 @@ export default function SystemAuditTrail() {
   
   const formatDateForInput = (date) => date.toISOString().split('T')[0];
 
-  // 🚨 UPGRADE: Split into persistent filters
-  const [filterCategory, setFilterCategory] = usePersistentFilter('audit_category', 'ALL');
-  const [filterSeverity, setFilterSeverity] = usePersistentFilter('audit_severity', 'ALL');
-  const [filterSearch, setFilterSearch] = usePersistentFilter('audit_search', '');
-  const [filterStartDate, setFilterStartDate] = usePersistentFilter('audit_start', formatDateForInput(sixMonthsAgo));
-  const [filterEndDate, setFilterEndDate] = usePersistentFilter('audit_end', formatDateForInput(today));
-
-  // Synthesize back into the original object structure to prevent breaking existing logic
-  const filters = {
-    category: filterCategory,
-    severity: filterSeverity,
-    search: filterSearch,
-    startDate: filterStartDate,
-    endDate: filterEndDate
-  };
+  const [filters, setFilters] = useState({
+    category: 'ALL',
+    severity: 'ALL',
+    search: '',
+    startDate: formatDateForInput(sixMonthsAgo),
+    endDate: formatDateForInput(today)
+  });
 
   const fetchLogs = async () => {
     try {
@@ -203,7 +194,7 @@ export default function SystemAuditTrail() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input 
             type="text" placeholder="Search action or details..." 
-            value={filterSearch} onChange={(e) => { setFilterSearch(e.target.value); setPage(1); }}
+            value={filters.search} onChange={(e) => { setFilters({...filters, search: e.target.value}); setPage(1); }}
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-[#0D2B55] transition-colors"
           />
         </div>
@@ -218,17 +209,17 @@ export default function SystemAuditTrail() {
                 type="date" 
                 min={formatDateForInput(sixMonthsAgo)} 
                 max={formatDateForInput(today)}
-                value={filterStartDate} 
-                onChange={(e) => { setFilterStartDate(e.target.value); setPage(1); }}
+                value={filters.startDate} 
+                onChange={(e) => { setFilters({...filters, startDate: e.target.value}); setPage(1); }}
                 className="bg-transparent text-xs font-bold text-gray-700 outline-none w-[110px]"
               />
               <span className="text-gray-400 text-xs">to</span>
               <input 
                 type="date" 
-                min={filterStartDate} 
+                min={filters.startDate} 
                 max={formatDateForInput(today)}
-                value={filterEndDate} 
-                onChange={(e) => { setFilterEndDate(e.target.value); setPage(1); }}
+                value={filters.endDate} 
+                onChange={(e) => { setFilters({...filters, endDate: e.target.value}); setPage(1); }}
                 className="bg-transparent text-xs font-bold text-gray-700 outline-none w-[110px]"
               />
             </div>
@@ -237,8 +228,8 @@ export default function SystemAuditTrail() {
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2">
             <Filter className="w-3 h-3 text-gray-400 ml-1" />
             <select 
-              value={filterSeverity} 
-              onChange={(e) => { setFilterSeverity(e.target.value); setPage(1); }}
+              value={filters.severity} 
+              onChange={(e) => { setFilters({...filters, severity: e.target.value}); setPage(1); }}
               className="py-2 bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer border-none focus:ring-0"
             >
               <option value="ALL">All Severities</option>
@@ -251,8 +242,8 @@ export default function SystemAuditTrail() {
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2">
             <FileText className="w-3 h-3 text-gray-400 ml-1" />
             <select 
-              value={filterCategory} 
-              onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
+              value={filters.category} 
+              onChange={(e) => { setFilters({...filters, category: e.target.value}); setPage(1); }}
               className="py-2 bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer border-none focus:ring-0 w-[140px]"
             >
               <option value="ALL">All Categories</option>

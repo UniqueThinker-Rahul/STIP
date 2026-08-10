@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, Server, Power, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const getInitials = (name) => {
   if (!name) return '';
@@ -47,10 +46,10 @@ export default function ICTStaffDataManagement() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const [search, setSearch] = usePersistentFilter('ict_staff_search', '');
-  const [coFilter, setCoFilter] = usePersistentFilter('ict_staff_co', '');
-  const [roleFilter, setRoleFilter] = usePersistentFilter('ict_staff_role', '');
-  const [accessFilter, setAccessFilter] = usePersistentFilter('ict_staff_access', '');
+  const [search, setSearch] = useState('');
+  const [coFilter, setCoFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [accessFilter, setAccessFilter] = useState('');
   
   const [editingStaff, setEditingStaff] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');

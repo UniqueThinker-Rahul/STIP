@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, AlertTriangle, Check, Save, RotateCcw, X, Users, Power, User, Crown, ClipboardList, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import api from '../../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 // --- SYSTEM PERMISSION SCHEMA MATCHING REFERENCE IMAGE ---
 const PANELS_DATA = [

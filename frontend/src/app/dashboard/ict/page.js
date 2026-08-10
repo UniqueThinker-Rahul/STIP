@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
 import { Server, Database, Mail, Shield, FileText } from 'lucide-react';
+import usePersistentFilter from '../../../hooks/usePersistentFilter';
 
 // Fallback colors for dynamically generated company badges
 const BADGE_COLORS = [
@@ -15,28 +16,91 @@ const BADGE_COLORS = [
   'bg-[#CCFBF1] text-[#115E59]'  // Teal
 ];
 
+const QUARTERS = [
+  { val: 'Q1', month: 3, label: 'Q1 (Jan-Mar)' },
+  { val: 'Q2', month: 6, label: 'Q2 (Apr-Jun)' },
+  { val: 'Q3', month: 9, label: 'Q3 (Jul-Sep)' },
+  { val: 'Q4', month: 12, label: 'Q4 (Oct-Dec)' }
+];
+
 export default function ICTDashboard() {
   const router = useRouter();
 
+  // Core System States
   const [staff, setStaff] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Dynamic States
+  // Dynamic Dashboard States
   const [companyCodes, setCompanyCodes] = useState([]);
   const [auditLogCountToday, setAuditLogCountToday] = useState(0); 
   const [activeQuarterName, setActiveQuarterName] = useState('Loading...');
   const [formulaConfig, setFormulaConfig] = useState(null);
   const [roleCounts, setRoleCounts] = useState({ LM: 0, HR: 0, CEO: 0, Staff: 0, ICT: 0 });
 
+  // -------------------------------------------------------------
+  // Dynamic Real-time Year & Quarterly Scorecard Filters Setup
+  // -------------------------------------------------------------
+  const realTimeCurrentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth(); // 0 - 11
+  const defaultQuarter = `Q${Math.floor(currentMonth / 3) + 1}`; // Q1, Q2, Q3, or Q4
+
+  // Year Options: Rule (Current Year - 3 years to Current Year + 1 year)
+  const yearOptions = [
+    realTimeCurrentYear - 3, 
+    realTimeCurrentYear - 2, 
+    realTimeCurrentYear - 1, 
+    realTimeCurrentYear, 
+    realTimeCurrentYear + 1
+  ];
+
+  const [selectedYear, setSelectedYear] = usePersistentFilter('ict_dash_year', realTimeCurrentYear.toString());
+  const [selectedQuarter, setSelectedQuarter] = usePersistentFilter('ict_dash_qtr', defaultQuarter);
+  const [isManualYear, setIsManualYear] = useState(false);
+  
+  const [quarterlyMetrics, setQuarterlyMetrics] = useState(null);
+  const [quarterLoading, setQuarterLoading] = useState(false);
+
+  // -------------------------------------------------------------
+  // Fetch Dynamic Quarterly Scorecard Status (Matches Control Page)
+  // -------------------------------------------------------------
+  const fetchQuarterlyScorecardStatus = useCallback(async (year, quarter) => {
+    try {
+      setQuarterLoading(true);
+      const targetMonth = QUARTERS.find(q => q.val === quarter)?.month || 3;
+      
+      const [qscRes, metricsRes] = await Promise.all([
+        api.get(`/quarterly-scorecards/${year}`).catch(() => ({ data: { data: [] } })),
+        api.get(`/company-metrics/${year}/${targetMonth}`).catch(() => ({ data: { data: null } }))
+      ]);
+      
+      const list = qscRes.data?.data || [];
+      const match = list.find(item => String(item.quarter).toUpperCase() === quarter) || {};
+      const cMetrics = metricsRes.data?.data || {};
+
+      setQuarterlyMetrics({
+        ...match,
+        ...cMetrics,
+        locked: match.locked || cMetrics.locked || false,
+        lockedBy: match.lockedBy || cMetrics.lockedBy || null
+      });
+      
+    } catch (error) {
+      console.error(`Failed to load scorecard status for ${quarter} ${year}`, error);
+      setQuarterlyMetrics(null);
+    } finally {
+      setQuarterLoading(false);
+    }
+  }, []);
+
+  // Fetch initial dashboard metrics (Staff, Logs, Configs)
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [usersRes, metricsRes, auditRes, configRes, quarterRes, formulaRes] = await Promise.all([
+        const [usersRes, auditRes, configRes, quarterRes, formulaRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
-          api.get(`/company-metrics/${new Date().getFullYear()}`).catch(() => ({ data: { data: null } })),
-          api.get('/audit?limit=500').catch(() => ({ data: { data: [] } })), // Fetch logs
+          api.get('/audit?limit=500').catch(() => ({ data: { data: [] } })),
           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })), 
           api.get('/quarters').catch(() => ({ data: { data: [] } })),
           api.get('/settings/formula').catch(() => ({ data: { data: null } }))
@@ -44,10 +108,9 @@ export default function ICTDashboard() {
 
         const fetchedStaff = usersRes.data?.data || [];
         setStaff(fetchedStaff);
-        setMetrics(metricsRes.data?.data || null);
         setFormulaConfig(formulaRes.data?.data?.formula || null);
 
-        // 🚨 UPGRADE: Calculate exact role counts dynamically
+        // Calculate exact role counts dynamically
         let lm = 0, hr = 0, ceo = 0, staffCount = 0, ict = 0;
         fetchedStaff.forEach(u => {
            if (u.employmentDetails?.isActive === false) return;
@@ -60,7 +123,7 @@ export default function ICTDashboard() {
         });
         setRoleCounts({ LM: lm, HR: hr, CEO: ceo, Staff: staffCount, ICT: ict });
 
-        // 🚨 UPGRADE: Filter audit logs for TODAY only
+        // Filter audit logs for TODAY only
         const allLogs = auditRes.data?.data || [];
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
@@ -71,7 +134,7 @@ export default function ICTDashboard() {
         });
         setAuditLogCountToday(todayLogs.length);
 
-        // 🚨 UPGRADE: Dynamically resolve active quarter
+        // Dynamically resolve active quarter
         const quarters = quarterRes.data?.data || [];
         const now = new Date();
         const activeQ = quarters.find(q => {
@@ -79,6 +142,7 @@ export default function ICTDashboard() {
           const end = new Date(q.endDate); end.setHours(23,59,59,999);
           return now >= start && now <= end && !q.isLocked;
         });
+
         if (activeQ) {
           setActiveQuarterName(`${activeQ.name} (${activeQ.year})`);
         } else {
@@ -89,7 +153,6 @@ export default function ICTDashboard() {
         if (configRes.data?.data?.companyCodes && configRes.data.data.companyCodes.length > 0) {
           setCompanyCodes(configRes.data.data.companyCodes);
         } else {
-          // Fallback just in case the DB is completely empty
           setCompanyCodes(['FSM', 'CDU', 'NAR', 'GUM']);
         }
 
@@ -101,12 +164,25 @@ export default function ICTDashboard() {
     };
 
     fetchDashboardData();
-  }, []);
+  }, [realTimeCurrentYear]);
 
-  const activeUsers = staff.filter(s => s.employmentDetails?.isActive !== false).length; 
+  // Re-fetch quarterly scorecard when selected year or quarter changes
+  useEffect(() => {
+    if (selectedYear && selectedQuarter) {
+      fetchQuarterlyScorecardStatus(selectedYear, selectedQuarter);
+    }
+  }, [selectedYear, selectedQuarter, fetchQuarterlyScorecardStatus]);
 
-  const scorecardLocked = metrics?.locked || false;
-  const lockedBy = metrics?.lockedBy ? `${metrics.lockedBy.personalDetails?.firstName} ${metrics.lockedBy.personalDetails?.lastName}` : 'CEO';
+  const activeUsers = staff.filter(s => s.employmentDetails?.isActive !== false).length;
+
+  // Quarterly Scorecard Status derived values
+  const scorecardLocked = quarterlyMetrics?.locked || false;
+  
+  const lockedBy = quarterlyMetrics?.lockedBy 
+    ? (typeof quarterlyMetrics.lockedBy === 'object' 
+        ? `${quarterlyMetrics.lockedBy.personalDetails?.firstName || ''} ${quarterlyMetrics.lockedBy.personalDetails?.lastName || ''}`.trim() 
+        : 'CEO') 
+    : 'CEO';
 
   const epCapPercentage = formulaConfig?.epCapPercent || 5.0;
   const maxEpAllowed = Math.floor(activeUsers * (epCapPercentage / 100));
@@ -119,22 +195,73 @@ export default function ICTDashboard() {
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
       {/* Header */}
-      <div className="mb-[20px] flex justify-between items-end">
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
             &#128187; ICT Admin Dashboard
           </div>
-          <div className="text-[13px] text-[#6b7280]">System administration & STIP platform monitoring — CY{new Date().getFullYear()}</div>
+          <div className="text-[13px] text-[#6b7280]">
+            System administration & STIP platform monitoring — CY{realTimeCurrentYear}
+          </div>
         </div>
-        <div className="flex gap-[10px]">
+        
+        {/* 🚨 UPGRADED: Filters moved to the top header area next to buttons */}
+        <div className="flex flex-wrap items-center gap-[10px]">
+          <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+            <select 
+              value={selectedQuarter} 
+              onChange={(e) => setSelectedQuarter(e.target.value)}
+              className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+            >
+              {QUARTERS.map(q => (
+                 <option key={q.val} value={q.val}>{q.label}</option>
+              ))}
+            </select>
+            
+            <span className="text-[#E2DDD4]">|</span>
+            
+            {isManualYear ? (
+              <input 
+                type="number" 
+                autoFocus
+                defaultValue={selectedYear}
+                onBlur={(e) => {
+                  if (e.target.value) setSelectedYear(e.target.value);
+                  setIsManualYear(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value) setSelectedYear(e.target.value);
+                    setIsManualYear(false);
+                  }
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+              />
+            ) : (
+              <select 
+                value={selectedYear} 
+                onChange={(e) => {
+                  if (e.target.value === 'manual') setIsManualYear(true);
+                  else setSelectedYear(e.target.value);
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
+              >
+                {yearOptions.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+              </select>
+            )}
+          </div>
+          
           <button 
-            className="bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm"
-            onClick={() => router.push('/dashboard/ict/scorecard')}
+            className="bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm whitespace-nowrap flex items-center gap-[6px]"
+            onClick={() => router.push(`/dashboard/ict/scorecard?year=${selectedYear}&quarter=${selectedQuarter}`)}
           >
             &#128274; Scorecard Control
           </button>
           <button 
-            className="bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm"
+            className="bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm whitespace-nowrap flex items-center gap-[6px]"
             onClick={() => router.push('/dashboard/ict/audit')}
           >
             &#128203; View Audit Trail
@@ -145,13 +272,13 @@ export default function ICTDashboard() {
       {/* Row 1: Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[16px] mb-[24px]">
         
+        {/* Total Staff Card */}
         <div className="bg-[#0D2B55] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-white/50 mb-[4px]">Total Staff</div>
             <div className="text-[32px] font-[800] text-[#e8c96a] leading-none mb-[6px]">{staff.length}</div>
             <div className="text-[12px] font-[600] text-white/40">Registered in Database</div>
           </div>
-          {/* Dynamic Map for Company Code Badges with Auto-Scroll */}
           <div className="flex gap-[6px] mt-[14px] overflow-x-auto pb-1 custom-scrollbar whitespace-nowrap">
             {companyCodes.map((code, index) => {
               const count = staff.filter(s => s.companyCode === code).length || 0;
@@ -165,6 +292,7 @@ export default function ICTDashboard() {
           </div>
         </div>
 
+        {/* Active Users Card */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Active Users</div>
@@ -180,26 +308,43 @@ export default function ICTDashboard() {
           </div>
         </div>
 
+        {/* ========================================================= */}
+        {/* 🚨 UPDATED SECTION: QUARTERLY SCORECARD STATUS CARD      */}
+        {/* ========================================================= */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
-            <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Scorecard Status</div>
-            <div className={`text-[28px] font-[800] leading-none mb-[6px] ${scorecardLocked ? 'text-[#059669]' : 'text-[#D97706]'}`}>
-              {scorecardLocked ? 'Locked' : 'Unlocked'}
+            <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">
+              Scorecard Status
             </div>
-            <div className="text-[12px] font-[600] text-[#6b7280]">
-              {scorecardLocked ? `Locked by ${lockedBy}` : 'KPA scores editable by CEO'}
-            </div>
+
+            {/* Scorecard Status Indicator */}
+            {quarterLoading ? (
+              <div className="text-[26px] font-[800] leading-none mb-[6px] text-slate-300 animate-pulse">
+                Checking...
+              </div>
+            ) : (
+              <>
+                <div className={`text-[32px] font-[800] leading-none mb-[6px] ${scorecardLocked ? 'text-[#059669]' : 'text-[#D97706]'}`}>
+                  {scorecardLocked ? 'Locked' : 'Unlocked'}
+                </div>
+                <div className="text-[12px] font-[600] text-[#6b7280] truncate">
+                  {scorecardLocked ? `Locked by ${lockedBy}` : `Editable by CEO (${selectedQuarter} ${selectedYear})`}
+                </div>
+              </>
+            )}
           </div>
+
           <div className="mt-[14px]">
             <button 
               className="bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[12px] py-[6px] rounded-[6px] text-[11px] font-[700] transition-colors"
-              onClick={() => router.push('/dashboard/ict/scorecard')}
+              onClick={() => router.push(`/dashboard/ict/scorecard?year=${selectedYear}&quarter=${selectedQuarter}`)}
             >
-              &#128274; Manage
+              &#128274; Manage {selectedQuarter}
             </button>
           </div>
         </div>
 
+        {/* Audit Events Today Card */}
         <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">Audit Events Today</div>
@@ -230,7 +375,9 @@ export default function ICTDashboard() {
                 <div className="text-[12px] font-[500] text-[#6b7280]">STIP portal component status</div>
               </div>
             </div>
-            <span className="bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-[10px] py-[4px] rounded-[6px] text-[11px] font-[700]">All Systems Operational</span>
+            <span className="bg-[#D1FAE5] text-[#065F46] border border-[#A7F3D0] px-[10px] py-[4px] rounded-[6px] text-[11px] font-[700]">
+              All Systems Operational
+            </span>
           </div>
           
           <div className="p-[20px]">
@@ -306,7 +453,7 @@ export default function ICTDashboard() {
             <div className="p-[20px] flex flex-col gap-[10px]">
               <button 
                 className="w-full bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px]"
-                onClick={() => router.push('/dashboard/ict/scorecard')}
+                onClick={() => router.push(`/dashboard/ict/scorecard?year=${selectedYear}&quarter=${selectedQuarter}`)}
               >
                 &#128274; Scorecard Lock / Unlock
               </button>
@@ -338,10 +485,10 @@ export default function ICTDashboard() {
             </div>
             <div className="p-[20px]">
               <div className="text-[12px] text-[#6b7280] leading-[1.8]">
-                &#128274; <strong className="text-[#0D2B55] font-[800]">Scorecard Lock:</strong> <span>{scorecardLocked ? `Locked — ${lockedBy}` : 'Unlocked — editable by CEO'}</span><br/>
+                &#128274; <strong className="text-[#0D2B55] font-[800]">Selected Scorecard:</strong> <span>{selectedQuarter} {selectedYear} ({scorecardLocked ? `Locked by ${lockedBy}` : 'Unlocked — editable by CEO'})</span><br/>
                 &#11088; <strong className="text-[#0D2B55] font-[800]">EP Cap:</strong> Max {maxEpAllowed} employees ({epCapPercentage}% of {activeUsers})<br/>
                 &#128197; <strong className="text-[#0D2B55] font-[800]">Active Quarter:</strong> {activeQuarterName}<br/>
-                &#127919; <strong className="text-[#0D2B55] font-[800]">CP%:</strong> <span>{metrics?.cpFactor ? `${(metrics.cpFactor * 100).toFixed(2)}%` : 'Not configured'}</span><br/>
+                &#127919; <strong className="text-[#0D2B55] font-[800]">CP%:</strong> <span>{metrics?.cpPct ? `${(metrics.cpPct).toFixed(2)}%` : 'Not configured'}</span><br/>
               </div>
             </div>
           </div>

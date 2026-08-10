@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart2, CheckSquare, DollarSign, Building, Star, ClipboardList, Users, Network, Lock, Info, Loader2, FileText, Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 // Import PDF Libraries
 import jsPDF from 'jspdf';
@@ -11,7 +10,7 @@ import autoTable from 'jspdf-autotable';
 
 export default function ICTReportsPage() {
   const [quarters, setQuarters] = useState([]);
-  const [selectedQuarterId, setSelectedQuarterId] = usePersistentFilter('ict_reports_qtr', '');
+  const [selectedQuarterId, setSelectedQuarterId] = useState('');
   
   // Track exactly which button is loading
   const [exportingState, setExportingState] = useState({ key: null, format: null }); 
@@ -24,14 +23,8 @@ export default function ICTReportsPage() {
         const res = await api.get('/quarters').catch(() => ({ data: { data: [] } }));
         const fetchedQuarters = res.data?.data || [];
         setQuarters(fetchedQuarters);
-        
         if (fetchedQuarters.length > 0) {
-          setSelectedQuarterId((prev) => {
-            if (!prev || !fetchedQuarters.some(q => q._id === prev)) {
-              return fetchedQuarters[0]._id;
-            }
-            return prev;
-          });
+          setSelectedQuarterId(fetchedQuarters[0]._id);
         }
       } catch (err) {
         console.error("Failed to load quarters", err);

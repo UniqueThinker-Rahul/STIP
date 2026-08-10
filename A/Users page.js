@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../lib/api';
 import { Server, Database, Mail, Shield, FileText } from 'lucide-react';
+import usePersistentFilter from '../../../hooks/usePersistentFilter';
 
 // Fallback colors for dynamically generated company badges
 const BADGE_COLORS = [
@@ -13,6 +14,13 @@ const BADGE_COLORS = [
   'bg-[#EDE9FE] text-[#4C1D95]', // Purple
   'bg-[#FCE7F3] text-[#9D174D]', // Pink
   'bg-[#CCFBF1] text-[#115E59]'  // Teal
+];
+
+const QUARTERS = [
+  { val: 'Q1', month: 3, label: 'Q1 (Jan-Mar)' },
+  { val: 'Q2', month: 6, label: 'Q2 (Apr-Jun)' },
+  { val: 'Q3', month: 9, label: 'Q3 (Jul-Sep)' },
+  { val: 'Q4', month: 12, label: 'Q4 (Oct-Dec)' }
 ];
 
 export default function ICTDashboard() {
@@ -38,27 +46,45 @@ export default function ICTDashboard() {
   const defaultQuarter = `Q${Math.floor(currentMonth / 3) + 1}`; // Q1, Q2, Q3, or Q4
 
   // Year Options: Rule (Current Year - 3 years to Current Year + 1 year)
-  const yearOptions = Array.from({ length: 5 }, (_, i) => realTimeCurrentYear - 3 + i);
+  const yearOptions = [
+    realTimeCurrentYear - 3, 
+    realTimeCurrentYear - 2, 
+    realTimeCurrentYear - 1, 
+    realTimeCurrentYear, 
+    realTimeCurrentYear + 1
+  ];
 
-  const [selectedYear, setSelectedYear] = useState(realTimeCurrentYear);
-  const [selectedQuarter, setSelectedQuarter] = useState(defaultQuarter);
+  const [selectedYear, setSelectedYear] = usePersistentFilter('ict_dash_year', realTimeCurrentYear.toString());
+  const [selectedQuarter, setSelectedQuarter] = usePersistentFilter('ict_dash_qtr', defaultQuarter);
   const [isManualYear, setIsManualYear] = useState(false);
+  
   const [quarterlyMetrics, setQuarterlyMetrics] = useState(null);
   const [quarterLoading, setQuarterLoading] = useState(false);
 
   // -------------------------------------------------------------
-  // Fetch Dynamic Quarterly Scorecard Status
+  // Fetch Dynamic Quarterly Scorecard Status (Matches Control Page)
   // -------------------------------------------------------------
   const fetchQuarterlyScorecardStatus = useCallback(async (year, quarter) => {
     try {
       setQuarterLoading(true);
-      // Try fetching specific quarter & year scorecard status dynamically
-      const response = await api
-        .get(`/company-metrics/${year}`, { params: { quarter } })
-        .catch(() => api.get('/company-metrics', { params: { year, quarter } }))
-        .catch(() => ({ data: { data: null } }));
+      const targetMonth = QUARTERS.find(q => q.val === quarter)?.month || 3;
+      
+      const [qscRes, metricsRes] = await Promise.all([
+        api.get(`/quarterly-scorecards/${year}`).catch(() => ({ data: { data: [] } })),
+        api.get(`/company-metrics/${year}/${targetMonth}`).catch(() => ({ data: { data: null } }))
+      ]);
+      
+      const list = qscRes.data?.data || [];
+      const match = list.find(item => String(item.quarter).toUpperCase() === quarter) || {};
+      const cMetrics = metricsRes.data?.data || {};
 
-      setQuarterlyMetrics(response.data?.data || null);
+      setQuarterlyMetrics({
+        ...match,
+        ...cMetrics,
+        locked: match.locked || cMetrics.locked || false,
+        lockedBy: match.lockedBy || cMetrics.lockedBy || null
+      });
+      
     } catch (error) {
       console.error(`Failed to load scorecard status for ${quarter} ${year}`, error);
       setQuarterlyMetrics(null);
@@ -67,14 +93,13 @@ export default function ICTDashboard() {
     }
   }, []);
 
-  // Fetch initial dashboard metrics
+  // Fetch initial dashboard metrics (Staff, Logs, Configs)
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [usersRes, metricsRes, auditRes, configRes, quarterRes, formulaRes] = await Promise.all([
+        const [usersRes, auditRes, configRes, quarterRes, formulaRes] = await Promise.all([
           api.get('/users').catch(() => ({ data: { data: [] } })),
-          api.get(`/company-metrics/${realTimeCurrentYear}`).catch(() => ({ data: { data: null } })),
           api.get('/audit?limit=500').catch(() => ({ data: { data: [] } })),
           api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })), 
           api.get('/quarters').catch(() => ({ data: { data: [] } })),
@@ -83,7 +108,6 @@ export default function ICTDashboard() {
 
         const fetchedStaff = usersRes.data?.data || [];
         setStaff(fetchedStaff);
-        setMetrics(metricsRes.data?.data || null);
         setFormulaConfig(formulaRes.data?.data?.formula || null);
 
         // Calculate exact role counts dynamically
@@ -152,10 +176,12 @@ export default function ICTDashboard() {
   const activeUsers = staff.filter(s => s.employmentDetails?.isActive !== false).length;
 
   // Quarterly Scorecard Status derived values
-  const currentScorecardData = quarterlyMetrics || metrics;
-  const scorecardLocked = currentScorecardData?.locked || false;
-  const lockedBy = currentScorecardData?.lockedBy
-    ? `${currentScorecardData.lockedBy.personalDetails?.firstName || ''} ${currentScorecardData.lockedBy.personalDetails?.lastName || ''}`.trim()
+  const scorecardLocked = quarterlyMetrics?.locked || false;
+  
+  const lockedBy = quarterlyMetrics?.lockedBy 
+    ? (typeof quarterlyMetrics.lockedBy === 'object' 
+        ? `${quarterlyMetrics.lockedBy.personalDetails?.firstName || ''} ${quarterlyMetrics.lockedBy.personalDetails?.lastName || ''}`.trim() 
+        : 'CEO') 
     : 'CEO';
 
   const epCapPercentage = formulaConfig?.epCapPercent || 5.0;
@@ -169,7 +195,7 @@ export default function ICTDashboard() {
     <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
       {/* Header */}
-      <div className="mb-[20px] flex justify-between items-end">
+      <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
             &#128187; ICT Admin Dashboard
@@ -178,15 +204,64 @@ export default function ICTDashboard() {
             System administration & STIP platform monitoring — CY{realTimeCurrentYear}
           </div>
         </div>
-        <div className="flex gap-[10px]">
+        
+        {/* 🚨 UPGRADED: Filters moved to the top header area next to buttons */}
+        <div className="flex flex-wrap items-center gap-[10px]">
+          <div className="flex items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+            <select 
+              value={selectedQuarter} 
+              onChange={(e) => setSelectedQuarter(e.target.value)}
+              className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+            >
+              {QUARTERS.map(q => (
+                 <option key={q.val} value={q.val}>{q.label}</option>
+              ))}
+            </select>
+            
+            <span className="text-[#E2DDD4]">|</span>
+            
+            {isManualYear ? (
+              <input 
+                type="number" 
+                autoFocus
+                defaultValue={selectedYear}
+                onBlur={(e) => {
+                  if (e.target.value) setSelectedYear(e.target.value);
+                  setIsManualYear(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value) setSelectedYear(e.target.value);
+                    setIsManualYear(false);
+                  }
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+              />
+            ) : (
+              <select 
+                value={selectedYear} 
+                onChange={(e) => {
+                  if (e.target.value === 'manual') setIsManualYear(true);
+                  else setSelectedYear(e.target.value);
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
+              >
+                {yearOptions.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+              </select>
+            )}
+          </div>
+          
           <button 
-            className="bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm"
+            className="bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm whitespace-nowrap flex items-center gap-[6px]"
             onClick={() => router.push(`/dashboard/ict/scorecard?year=${selectedYear}&quarter=${selectedQuarter}`)}
           >
             &#128274; Scorecard Control
           </button>
           <button 
-            className="bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm"
+            className="bg-[#0D2B55] hover:bg-[#1a3d6e] text-white px-[16px] py-[8px] rounded-[8px] text-[12px] font-[700] transition-colors shadow-sm whitespace-nowrap flex items-center gap-[6px]"
             onClick={() => router.push('/dashboard/ict/audit')}
           >
             &#128203; View Audit Trail
@@ -236,99 +311,35 @@ export default function ICTDashboard() {
         {/* ========================================================= */}
         {/* 🚨 UPDATED SECTION: QUARTERLY SCORECARD STATUS CARD      */}
         {/* ========================================================= */}
-        <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[16px_20px] shadow-sm flex flex-col justify-between">
+        <div className="bg-white border border-[#E2DDD4] rounded-[14px] p-[20px] shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex justify-between items-center mb-[10px]">
-              <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280]">
-                Scorecard Status
-              </div>
-              <span className="text-[10px] bg-[#0D2B55]/10 text-[#0D2B55] px-[6px] py-[2px] rounded font-[700]">
-                Quarterly
-              </span>
-            </div>
-
-            {/* Quarter & Year Filters Header */}
-            <div className="grid grid-cols-2 gap-[8px] mb-[12px]">
-              {/* Quarter Filter Dropdown */}
-              <div>
-                <label className="block text-[10px] font-[700] uppercase text-[#6b7280] mb-[2px]">
-                  Quarter
-                </label>
-                <select
-                  value={selectedQuarter}
-                  onChange={(e) => setSelectedQuarter(e.target.value)}
-                  className="w-full bg-[#FAF8F4] border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded-[6px] px-[6px] py-[4px] focus:outline-none focus:border-[#0D2B55]"
-                >
-                  <option value="Q1">Q1 (Jan-Mar)</option>
-                  <option value="Q2">Q2 (Apr-Jun)</option>
-                  <option value="Q3">Q3 (Jul-Sep)</option>
-                  <option value="Q4">Q4 (Oct-Dec)</option>
-                </select>
-              </div>
-
-              {/* Year Filter (Dropdown + Manual Input Option) */}
-              <div>
-                <div className="flex justify-between items-center mb-[2px]">
-                  <label className="text-[10px] font-[700] uppercase text-[#6b7280]">
-                    Year
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setIsManualYear(!isManualYear)}
-                    className="text-[9px] font-[700] text-[#1E40AF] hover:underline"
-                    title="Toggle manual year entry"
-                  >
-                    {isManualYear ? 'List' : 'Manual'}
-                  </button>
-                </div>
-
-                {isManualYear ? (
-                  <input
-                    type="number"
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(Number(e.target.value))}
-                    placeholder="YYYY"
-                    className="w-full bg-[#FAF8F4] border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded-[6px] px-[6px] py-[4px] focus:outline-none focus:border-[#0D2B55]"
-                  />
-                ) : (
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(Number(e.target.value))}
-                    className="w-full bg-[#FAF8F4] border border-[#E2DDD4] text-[#0D2B55] text-[11px] font-[700] rounded-[6px] px-[6px] py-[4px] focus:outline-none focus:border-[#0D2B55]"
-                  >
-                    {yearOptions.map((yr) => (
-                      <option key={yr} value={yr}>
-                        {yr} {yr === realTimeCurrentYear ? '(Current)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+            <div className="text-[11px] font-[700] uppercase tracking-widest text-[#6b7280] mb-[4px]">
+              Scorecard Status
             </div>
 
             {/* Scorecard Status Indicator */}
             {quarterLoading ? (
-              <div className="text-[13px] font-[600] text-slate-400 animate-pulse my-2">
-                Checking {selectedQuarter} {selectedYear}...
+              <div className="text-[26px] font-[800] leading-none mb-[6px] text-slate-300 animate-pulse">
+                Checking...
               </div>
             ) : (
-              <div>
-                <div className={`text-[26px] font-[800] leading-none mb-[4px] ${scorecardLocked ? 'text-[#059669]' : 'text-[#D97706]'}`}>
+              <>
+                <div className={`text-[32px] font-[800] leading-none mb-[6px] ${scorecardLocked ? 'text-[#059669]' : 'text-[#D97706]'}`}>
                   {scorecardLocked ? 'Locked' : 'Unlocked'}
                 </div>
-                <div className="text-[11px] font-[600] text-[#6b7280] truncate">
+                <div className="text-[12px] font-[600] text-[#6b7280] truncate">
                   {scorecardLocked ? `Locked by ${lockedBy}` : `Editable by CEO (${selectedQuarter} ${selectedYear})`}
                 </div>
-              </div>
+              </>
             )}
           </div>
 
-          <div className="mt-[12px]">
+          <div className="mt-[14px]">
             <button 
-              className="w-full bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[12px] py-[6px] rounded-[6px] text-[11px] font-[700] transition-colors flex items-center justify-center gap-[4px]"
+              className="bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] border border-[#FDE68A] px-[12px] py-[6px] rounded-[6px] text-[11px] font-[700] transition-colors"
               onClick={() => router.push(`/dashboard/ict/scorecard?year=${selectedYear}&quarter=${selectedQuarter}`)}
             >
-              &#128274; Manage {selectedQuarter} {selectedYear}
+              &#128274; Manage {selectedQuarter}
             </button>
           </div>
         </div>
@@ -477,7 +488,7 @@ export default function ICTDashboard() {
                 &#128274; <strong className="text-[#0D2B55] font-[800]">Selected Scorecard:</strong> <span>{selectedQuarter} {selectedYear} ({scorecardLocked ? `Locked by ${lockedBy}` : 'Unlocked — editable by CEO'})</span><br/>
                 &#11088; <strong className="text-[#0D2B55] font-[800]">EP Cap:</strong> Max {maxEpAllowed} employees ({epCapPercentage}% of {activeUsers})<br/>
                 &#128197; <strong className="text-[#0D2B55] font-[800]">Active Quarter:</strong> {activeQuarterName}<br/>
-                &#127919; <strong className="text-[#0D2B55] font-[800]">CP%:</strong> <span>{metrics?.cpFactor ? `${(metrics.cpFactor * 100).toFixed(2)}%` : 'Not configured'}</span><br/>
+                &#127919; <strong className="text-[#0D2B55] font-[800]">CP%:</strong> <span>{metrics?.cpPct ? `${(metrics.cpPct).toFixed(2)}%` : 'Not configured'}</span><br/>
               </div>
             </div>
           </div>

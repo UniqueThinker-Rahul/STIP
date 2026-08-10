@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const QUARTERS = [
   { val: 'Q1', month: 3, label: 'Quarter 1 (Q1)' },
@@ -26,9 +25,9 @@ export default function ICTScorecardControl() {
   const currentYearStr = currentYearNum.toString();
   const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [selectedYear, setSelectedYear] = usePersistentFilter('ict_scorecard_year', currentYearStr);
+  const [selectedYear, setSelectedYear] = useState(currentYearStr);
   const [isManualYear, setIsManualYear] = useState(false);
-  const [selectedQuarter, setSelectedQuarter] = usePersistentFilter('ict_scorecard_qtr', 'Q1');
+  const [selectedQuarter, setSelectedQuarter] = useState('Q2');
   
   const [revertInput, setRevertInput] = useState('');
 
