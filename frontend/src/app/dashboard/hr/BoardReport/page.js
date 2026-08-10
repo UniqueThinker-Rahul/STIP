@@ -443,9 +443,9 @@ export default function BoardReportPage() {
   const [years, setYears] = useState([currentYear - 2, currentYear - 1, currentYear, currentYear + 1]);
   const [offices, setOffices] = useState(["All"]);
   
-  const [year, setYear] = useState(currentYear.toString());
-  const [quarter, setQuarter] = useState("");
-  const [office, setOffice] = useState("All");
+  const [year, setYear] = usePersistentFilter('board_rep_year', currentYear.toString());
+  const [quarter, setQuarter] = usePersistentFilter('board_rep_qtr', '');
+  const [office, setOffice] = usePersistentFilter('board_rep_office', 'All');
   
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -457,11 +457,11 @@ export default function BoardReportPage() {
 
   const [stationLocations, setStationLocations] = useState([]);
   
-  const [selectedTopStation, setSelectedTopStation] = useState("All");
+  const [selectedTopStation, setSelectedTopStation] = usePersistentFilter('board_rep_top_station', 'All');
 
-  const [selectedAppraisedStation, setSelectedAppraisedStation] = useState("");
-  const [selectedMissingStation, setSelectedMissingStation] = useState("");
-
+  const [selectedAppraisedStation, setSelectedAppraisedStation] = usePersistentFilter('board_rep_appr_station', '');
+  const [selectedMissingStation, setSelectedMissingStation] = usePersistentFilter('board_rep_miss_station', '');
+  
   // 🚨 UPGRADE: Added master memory state so we can filter perfectly without relying on backend constraints
   const [allAppraisals, setAllAppraisals] = useState([]);
   const [allUsers, setAllUsers] = useState([]);

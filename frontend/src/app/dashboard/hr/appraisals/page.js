@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
 import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const CRIT_NAMES = {
   deliveredResults: 'Delivered Expected Results',
@@ -105,14 +106,14 @@ export default function CEOAllAppraisals() {
   
   const currentYearStr = new Date().getFullYear().toString();
   
-  const [search, setSearch] = useState('');
-  const [filterYear, setFilterYear] = useState(currentYearStr); 
+  const [search, setSearch] = usePersistentFilter('all_app_search', '');
+  const [filterYear, setFilterYear] = usePersistentFilter('all_app_year', currentYearStr); 
   const [isManualYear, setIsManualYear] = useState(false);
-  const [qtr, setQtr] = useState('');
-  const [co, setCo] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [mgrFilter, setMgrFilter] = useState('');
-  const [officeFilter, setOfficeFilter] = useState('');
+  const [qtr, setQtr] = usePersistentFilter('all_app_qtr', '');
+  const [co, setCo] = usePersistentFilter('all_app_co', '');
+  const [statusFilter, setStatusFilter] = usePersistentFilter('all_app_status', '');
+  const [mgrFilter, setMgrFilter] = usePersistentFilter('all_app_mgr', '');
+  const [officeFilter, setOfficeFilter] = usePersistentFilter('all_app_office', '');
   
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
   const [expandedComment, setExpandedComment] = useState(null);
@@ -238,6 +239,9 @@ export default function CEOAllAppraisals() {
   }, [filterYear]);
 
   useEffect(() => {
+    // 🚨 UPGRADE: Guard clause prevents the system from wiping out the persistent qtr filter on initial mount
+    if (dbQuarters.length === 0) return;
+
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
     if (qtrsForSelectedYear.length > 0) {
       const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));

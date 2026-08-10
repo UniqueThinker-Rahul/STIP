@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Calculator, ChevronDown, ChevronUp, Info, AlertTriangle, Clock, Check, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
 import api from '../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 // 🚨 BUG FIX: Mapped IDs perfectly to match the backend DB schema ('deliveredResults' and 'behaviors')
 const CRITERIA = [
@@ -37,9 +38,65 @@ export default function CEOApproveAppraisals() {
   const currentYearStr = currentYearNum.toString();
   const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [filterYear, setFilterYear] = useState(currentYearStr);
-  const [isManualYear, setIsManualYear] = useState(false); // 🚨 NEW: State for manual year entry
-  const [qtr, setQtr] = useState('');
+  const [filterYear, setFilterYear] = usePersistentFilter('ceo_approve_year', currentYearStr);
+  const [isManualYear, setIsManualYear] = useState(false);
+  const [qtr, setQtr] = usePersistentFilter('ceo_approve_qtr', '');
+
+  // 🚨 UPGRADE: Keyboard shortcuts for Approve (Shift + Enter) and Reject (Space + Enter)
+  useEffect(() => {
+    const keys = new Set();
+    
+    const handleKeyDown = (e) => {
+      // 🚨 FIX: Ignore shortcuts if user is typing in a textarea or input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      keys.add(e.code);
+      
+      const isShiftEnter = e.shiftKey && e.code === 'Enter';
+      const isSpaceEnter = keys.has('Space') && e.code === 'Enter';
+      
+      if (isShiftEnter || isSpaceEnter) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        let btn = null;
+        if (isShiftEnter) {
+          const actionBtn = document.getElementById('action-approve-btn');
+          const modalBtn = document.getElementById('modal-approve-btn');
+          btn = (actionBtn && !actionBtn.disabled) ? actionBtn : ((modalBtn && !modalBtn.disabled) ? modalBtn : null);
+        } else if (isSpaceEnter) {
+          const actionBtn = document.getElementById('action-reject-btn');
+          const modalBtn = document.getElementById('modal-reject-btn');
+          btn = (actionBtn && !actionBtn.disabled) ? actionBtn : ((modalBtn && !modalBtn.disabled) ? modalBtn : null);
+        }
+
+        if (btn) {
+          // 🚨 FIX: Dispatch clean MouseEvent to prevent 'Shift + Click' opening a new window
+          btn.dispatchEvent(new MouseEvent('click', {
+            view: window,
+            bubbles: true,
+            cancelable: true,
+            shiftKey: false, // Force browser to ignore the physical shift key
+            ctrlKey: false,
+            metaKey: false,
+            altKey: false
+          }));
+        }
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      keys.delete(e.code);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
   
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -80,10 +137,20 @@ export default function CEOApproveAppraisals() {
 
   // 🚨 NEW: Automatically sync and default to Q1 of the selected year
   useEffect(() => {
+    // Guard clause to prevent persistent filter from resetting on initial mount
+    if (dbQuarters.length === 0) return;
+
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
     if (qtrsForSelectedYear.length > 0) {
       const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
-      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+      
+      // Only overwrite if no quarter is set, or if the saved quarter doesn't belong to this year
+      setQtr((prev) => {
+        if (!prev || !qtrsForSelectedYear.some(q => q._id === prev)) {
+          return q1 ? q1._id : qtrsForSelectedYear[0]._id;
+        }
+        return prev;
+      });
     } else {
       setQtr('');
     }
@@ -468,7 +535,8 @@ export default function CEOApproveAppraisals() {
       </div>
 
       <div className="mt-[16px] p-[14px_16px] bg-[#DBEAFE] border border-[#BFDBFE] rounded-[14px] text-[12px] text-[#1E40AF] leading-[1.6]">
-        &#8505; <strong>How it works:</strong> HR Manager submits appraisals to CEO &rarr; They appear here &rarr; CEO clicks Approve or Not Approve &rarr; If Not Approved, mandatory comment required &rarr; HR notified by email with CEO comments
+        &#8505; <strong>How it works:</strong> HR Manager submits appraisals to CEO &rarr; They appear here &rarr; CEO clicks Approve or Not Approve &rarr; If Not Approved, mandatory comment required &rarr; HR notified by email with CEO comments.<br/>
+        <strong>Keyboard Shortcuts:</strong> When viewing an appraisal modal, press <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">Shift + Enter</kbd> to Quick-Approve, or <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">Space + Enter</kbd> to Reject.
       </div>
 
       {/* 🚨 NEW: Dedicated Appraisal Details Popup Modal */}
@@ -634,6 +702,7 @@ export default function CEOApproveAppraisals() {
             {/* Modal Footer (Action Shortcuts) */}
             <div className="p-[16px_24px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex justify-end gap-[12px] rounded-b-[16px]">
                <button 
+                  id="modal-reject-btn"
                   onClick={() => {
                     closeDetailsModal();
                     openActionModal(
@@ -644,10 +713,12 @@ export default function CEOApproveAppraisals() {
                     );
                   }}
                   className="px-[16px] py-[8px] bg-white border border-[#DC2626] text-[#DC2626] font-[800] text-[12px] rounded-[8px] hover:bg-[#FEF2F2] transition-colors"
+                  title="Shortcut: Space + Enter"
                >
                  Reject Appraisal
                </button>
                <button 
+                  id="modal-approve-btn"
                   onClick={() => {
                     closeDetailsModal();
                     openActionModal(
@@ -658,6 +729,7 @@ export default function CEOApproveAppraisals() {
                     );
                   }}
                   className="px-[16px] py-[8px] bg-[#059669] text-white font-[800] text-[12px] rounded-[8px] hover:bg-[#047857] shadow-sm transition-colors"
+                  title="Shortcut: Shift + Enter"
                >
                  Approve Appraisal
                </button>
@@ -735,6 +807,7 @@ export default function CEOApproveAppraisals() {
                       Cancel
                     </button>
                     <button 
+                      id={actionModal.type === 'approve' ? 'action-approve-btn' : 'action-reject-btn'}
                       onClick={actionModal.type === 'approve' ? handleApprove : handleReject} 
                       className={`p-[12px_20px] rounded-[10px] text-[13px] font-[800] text-white shadow-md flex items-center justify-center min-w-[140px] transition-colors ${
                         actionModal.type === 'approve' 
@@ -742,6 +815,7 @@ export default function CEOApproveAppraisals() {
                           : 'bg-[#DC2626] hover:bg-[#B91C1C]'
                       }`}
                       disabled={isProcessing}
+                      title={actionModal.type === 'approve' ? 'Shortcut: Shift + Enter' : 'Shortcut: Space + Enter'}
                     >
                       {isProcessing ? 'Processing...' : actionModal.type === 'approve' ? 'Yes, Approve' : 'Submit Rejection'}
                     </button>

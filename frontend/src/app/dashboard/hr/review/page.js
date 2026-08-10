@@ -5,6 +5,7 @@ import api from '../../../../lib/api';
 import { useRouter } from 'next/navigation';
 import { Check, AlertTriangle, Calculator, ChevronDown, Info, Clock, ChevronUp, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const CRITERIA = [
   { id: 'deliveredResults', short: 'Results', name: "Delivered Expected Results", wt: 0.30, pct: "30%", desc: "Did the employee deliver the expected results of their position in 2025/2026?" },
@@ -111,14 +112,14 @@ export default function ReviewAppraisals() {
   const currentYearStr = currentYearNum.toString();
   const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [filterYear, setFilterYear] = useState(currentYearStr);
+  const [filterYear, setFilterYear] = usePersistentFilter('hr_review_year', currentYearStr);
   const [isManualYear, setIsManualYear] = useState(false);
-  const [qtr, setQtr] = useState('');
+  const [qtr, setQtr] = usePersistentFilter('hr_review_qtr', '');
   
-  const [search, setSearch] = useState('');
-  const [co, setCo] = useState('');
-  const [mgrFilter, setMgrFilter] = useState('');
-  const [officeFilter, setOfficeFilter] = useState('');
+  const [search, setSearch] = usePersistentFilter('hr_review_search', '');
+  const [co, setCo] = usePersistentFilter('hr_review_co', '');
+  const [mgrFilter, setMgrFilter] = usePersistentFilter('hr_review_mgr', '');
+  const [officeFilter, setOfficeFilter] = usePersistentFilter('hr_review_office', '');
 
   const [dbQuarters, setDbQuarters] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -197,10 +198,17 @@ export default function ReviewAppraisals() {
 
   // 🚨 NEW: Automatically default Quarter to Q1 of the selected year
   useEffect(() => {
+    // Guard clause to prevent persistent filter from resetting on initial mount
+    if (dbQuarters.length === 0) return;
+
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
     if (qtrsForSelectedYear.length > 0) {
       const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
-      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+      
+      // Only overwrite if no quarter is set, or if the saved quarter doesn't belong to this year
+      if (!qtr || !qtrsForSelectedYear.some(q => q._id === qtr)) {
+        setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+      }
     } else {
       setQtr('');
     }

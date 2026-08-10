@@ -1,7 +1,7 @@
 // 🚨 GLOBAL NETWORK FIX: Forces Node.js to use IPv4 for all outbound connections.
 // This permanently prevents the Railway ENETUNREACH IPv6 timeout error.
-const dns = require('dns');
-dns.setDefaultResultOrder('ipv4first');
+// const dns = require('dns');
+// dns.setDefaultResultOrder('ipv4first');
 
 require('dotenv').config();
 const express = require('express');
@@ -204,7 +204,7 @@ const PORT = process.env.PORT || 5000;
 // 🚀 UPGRADED: Added Connection Pooling to prevent database timeouts
 mongoose.connect(process.env.MONGO_URI, {
   maxPoolSize: 50, // Allows 50 concurrent database operations instead of the default 5
-  serverSelectionTimeoutMS: 5000 
+  serverSelectionTimeoutMS: 30000
 })
   .then(() => {
     console.log('✅ Connected to MongoDB Atlas Cloud Production Ready.');

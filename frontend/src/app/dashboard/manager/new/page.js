@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Save, Send, AlertTriangle, ChevronDown, Check, Loader2, User, Info, Calendar, Calculator, Search, MessageSquare, ShieldCheck, X } from 'lucide-react';
 import api from '../../../../lib/api'; 
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const CRITERIA = [
   { 
@@ -131,11 +132,12 @@ function NewAppraisalForm() {
   const [dbQuarters, setDbQuarters] = useState([]);
   const [activeQuarterId, setActiveQuarterId] = useState('');
   
-  const [filterYear, setFilterYear] = useState('');
+  const [filterYear, setFilterYear] = usePersistentFilter('new_app_year', '');
+  const [filterQuarter, setFilterQuarter] = usePersistentFilter('new_app_qtr', '');
   const [isManualYear, setIsManualYear] = useState(false);
 
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [formData, setFormData] = useState({ title: '', quarter: '', epJustification: '', extraComment: '' });
+  const [formData, setFormData] = useState({ title: '', epJustification: '', extraComment: '' });
   
   const [criterionComments, setCriterionComments] = useState({
     expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: ''
@@ -287,8 +289,8 @@ function NewAppraisalForm() {
         
         if (defaultQ) {
           setActiveQuarterId(defaultQ._id);
-          setFilterYear(defaultQ.year?.toString() || new Date().getFullYear().toString());
-          setFormData(prev => ({ ...prev, quarter: defaultQ._id }));
+          setFilterYear(prev => prev || defaultQ.year?.toString() || new Date().getFullYear().toString());
+          setFilterQuarter(prev => prev || defaultQ._id);
         }
 
         if (draftId) {
@@ -306,10 +308,10 @@ function NewAppraisalForm() {
 
             setFormData({
               title: emp?.employmentDetails?.jobTitle || '',
-              quarter: qId,
               epJustification: draftData.narrative?.epJustification || '',
               extraComment: parsedDftComments.extraComment || ''
             });
+            setFilterQuarter(qId);
 
             if (matchedQ) {
               setFilterYear(matchedQ.year?.toString() || new Date().getFullYear().toString());
@@ -374,7 +376,7 @@ function NewAppraisalForm() {
     }
 
     setQuarterStatuses(newStatuses);
-  }, [selectedStaffId, draftId, team, dbQuarters, teamSubmissionsMap, formData.quarter]);
+  }, [selectedStaffId, draftId, team, dbQuarters, teamSubmissionsMap, filterQuarter]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -422,11 +424,11 @@ function NewAppraisalForm() {
   
   const currentQtrStatus = draftId 
       ? 'draft' 
-      : quarterStatuses[formData.quarter] || (teamSubmissionsMap[selectedStaffId] && teamSubmissionsMap[selectedStaffId][formData.quarter]) || 'missing';
+      : quarterStatuses[filterQuarter] || (teamSubmissionsMap[selectedStaffId] && teamSubmissionsMap[selectedStaffId][filterQuarter]) || 'missing';
       
   const isAlreadySubmitted = currentQtrStatus === 'submitted';
   
-  const currentQObj = dbQuarters.find(q => q._id === formData.quarter);
+  const currentQObj = dbQuarters.find(q => q._id === filterQuarter);
   const isExpired = currentQObj ? new Date() > new Date(currentQObj.endDate) : false;
   const isFuture = currentQObj ? new Date() < new Date(currentQObj.startDate) : false;
   const isCurrentQuarterLocked = isAlreadySubmitted || (currentQObj && (currentQObj.isLocked || (isExpired && !currentQObj.forceUnlock) || isFuture));
@@ -446,11 +448,7 @@ function NewAppraisalForm() {
       const y = e.target.value;
       setFilterYear(y);
       const firstQOfYear = dbQuarters.find(q => q.year?.toString() === y);
-      if (firstQOfYear) {
-          setFormData(prev => ({ ...prev, quarter: firstQOfYear._id }));
-      } else {
-          setFormData(prev => ({ ...prev, quarter: '' }));
-      }
+      setFilterQuarter(firstQOfYear ? firstQOfYear._id : '');
   };
 
   const isCriterionComplete = (critId) => {
@@ -476,7 +474,8 @@ function NewAppraisalForm() {
     setSelectedStaffId('');
     setScores({ expectedResults: null, initiative: null, safeWorking: null, jobCompetence: null, dependability: null, adaptability: null });
     setCriterionComments({ expectedResults: '', initiative: '', safeWorking: '', jobCompetence: '', dependability: '', adaptability: '' });
-    setFormData({ title: '', quarter: activeQuarterId, epJustification: '', extraComment: '' });
+    setFormData({ title: '', epJustification: '', extraComment: '' });
+    setFilterQuarter(activeQuarterId);
     setRejectionReason('');
     if (draftId) router.replace('/dashboard/manager/new'); 
   };
@@ -550,7 +549,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
       const payload = {
         employeeId: selectedStaffId,
         reviewYear: currentQObj?.year || new Date().getFullYear(),
-        appraisalQuarter: formData.quarter, 
+        appraisalQuarter: filterQuarter, 
         period: { 
           year: currentQObj?.year || new Date().getFullYear(), 
           quarter: currentQObj?.name ? (currentQObj.name.substring(0, 2).toUpperCase() || 'Q1') : 'Q1' 
@@ -609,7 +608,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
              if (draftId && fieldKey === 'emp') return; 
              if (isCurrentQuarterLocked && fieldKey === 'title') return; 
              
-             if (fieldKey === 'emp' && (!filterYear || !formData.quarter)) {
+             if (fieldKey === 'emp' && (!filterYear || !filterQuarter)) {
                  showDialog('alert', 'Selection Required', 'Please select an Appraisal Quarter and Year from the top filters before selecting a staff member.');
                  return;
              }
@@ -651,7 +650,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                   
                   let statusTag = null;
                   if (fieldKey === 'emp') {
-                    const exactStatus = teamExactStatusMap[val]?.[formData.quarter];
+                    const exactStatus = teamExactStatusMap[val]?.[filterQuarter];
                     
                     if (!exactStatus) {
                       statusTag = <span className="bg-gray-100 text-gray-500 border border-gray-200 px-2 py-0.5 rounded-[4px] text-[9px] font-[800] uppercase tracking-wider ml-2 shrink-0">Not Yet Started</span>;
@@ -708,7 +707,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
               onBlur={(e) => {
                 if (e.target.value) {
                   setFilterYear(e.target.value);
-                  setFormData(prev => ({...prev, quarter: ''}));
+                  setFilterQuarter('');
                 }
                 setIsManualYear(false);
               }}
@@ -716,7 +715,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                 if (e.key === 'Enter') {
                   if (e.target.value) {
                     setFilterYear(e.target.value);
-                    setFormData(prev => ({...prev, quarter: ''}));
+                    setFilterQuarter('');
                   }
                   setIsManualYear(false);
                 }
@@ -731,7 +730,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                 else {
                   setFilterYear(e.target.value);
                   const firstQOfYear = dbQuarters.find(q => q.year?.toString() === e.target.value);
-                  setFormData(prev => ({ ...prev, quarter: firstQOfYear ? firstQOfYear._id : '' }));
+                  setFilterQuarter(firstQOfYear ? firstQOfYear._id : '');
                 }
               }} 
               className="py-[6px] px-[10px] bg-slate-50 border border-[#E2DDD4] rounded-[6px] text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[90px]"
@@ -745,8 +744,8 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
           )}
 
           <select 
-            value={formData.quarter} 
-            onChange={e => setFormData({...formData, quarter: e.target.value})}
+            value={filterQuarter} 
+            onChange={e => setFilterQuarter(e.target.value)}
             className="py-[6px] px-[10px] bg-slate-50 border border-[#E2DDD4] rounded-[6px] text-[12px] font-[700] text-[#0f1923] outline-none cursor-pointer min-w-[130px]"
           >
             {dbQuarters.filter(q => q.year?.toString() === filterYear).length === 0 ? (
@@ -834,7 +833,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
 
           {selectedStaffId && (
             <>
-              {quarterStatuses[formData.quarter] === 'reopened' && rejectionReason && (
+              {quarterStatuses[filterQuarter] === 'reopened' && rejectionReason && (
                 <div className="mb-4 bg-red-50 border-l-4 border-red-500 rounded-xl p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
                   <div className="flex items-center gap-2 mb-2">
                     <AlertTriangle className="w-5 h-5 text-red-600" />
@@ -1106,7 +1105,7 @@ ${criterionComments.expectedResults || (scores.expectedResults === 1.0 ? 'No com
                   </div>
                 )}
                 
-                {/* 🚨 ADDED: General / Extra Comments Box at the bottom */}
+                {/* General / Extra Comments Box at the bottom */}
                 <div className="mx-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
                    <div className="flex items-center gap-2 mb-2">
                      <MessageSquare className="w-4 h-4 text-slate-500" />

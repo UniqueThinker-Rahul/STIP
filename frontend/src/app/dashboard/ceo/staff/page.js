@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 export default function AllStaff() {
   const [staffList, setStaffList] = useState([]);
@@ -11,8 +12,8 @@ export default function AllStaff() {
   const [companyCodes, setCompanyCodes] = useState([]);
   
   // Filters
-  const [search, setSearch] = useState('');
-  const [co, setCo] = useState('');
+  const [search, setSearch] = usePersistentFilter('ceo_allstaff_search', '');
+  const [co, setCo] = usePersistentFilter('ceo_allstaff_co', '');
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);

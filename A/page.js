@@ -1,1005 +1,548 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import api from '../../../../lib/api';
-import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 
-const CRIT_NAMES = {
-  deliveredResults: 'Delivered Expected Results',
-  behaviors: 'Demonstrated Initiative',
-  safeWorking: 'Demonstrated Safe Working',
-  jobCompetence: 'Job Competence',
-  dependability: 'Dependability',
-  adaptability: 'Adaptability'
-};
+const QUARTERS = [
+  { val: 'Q1', month: 3, label: 'Quarter 1 (Q1)' },
+  { val: 'Q2', month: 6, label: 'Quarter 2 (Q2)' },
+  { val: 'Q3', month: 9, label: 'Quarter 3 (Q3)' },
+  { val: 'Q4', month: 12, label: 'Quarter 4 (Q4)' }
+];
 
-// --- CUSTOM SEARCHABLE DROPDOWN COMPONENT ---
-const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const wrapperRef = useRef(null);
+export default function ICTScorecardControl() {
+  const router = useRouter();
 
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [wrapperRef]);
-
-  const filteredOptions = options.filter(opt => 
-    opt.label.toLowerCase().includes(query.toLowerCase())
-  );
-
-  const selectedOption = options.find(opt => opt.value === value);
-
-  return (
-    <div ref={wrapperRef} className={`relative ${widthClass}`}>
-      <div 
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full py-[10px] px-[12px] bg-white border rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer flex justify-between items-center transition-colors ${isOpen ? 'border-[#0D2B55] ring-2 ring-[#0D2B55]/10' : 'border-[#E2DDD4]'}`}
-      >
-        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
-        <ChevronDown className={`w-[14px] h-[14px] text-[#6b7280] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </div>
-
-      {isOpen && (
-        <div className="absolute z-50 top-[calc(100%+4px)] left-0 w-full bg-white border border-[#E2DDD4] rounded-[8px] shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="p-[8px] border-b border-[#E2DDD4] bg-[#FAF8F4]">
-            <div className="relative">
-              <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[12px] h-[12px] text-[#6b7280]" />
-              <input 
-                type="text"
-                autoFocus
-                placeholder="Search..."
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                className="w-full pl-[26px] pr-[8px] py-[6px] text-[12px] border border-[#E2DDD4] rounded-[6px] outline-none focus:border-[#0D2B55]"
-              />
-            </div>
-          </div>
-          
-          <div className="max-h-[170px] overflow-y-auto custom-scrollbar">
-            <div 
-              onClick={() => { onChange(''); setIsOpen(false); setQuery(''); }}
-              className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors ${value === '' ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#6b7280] hover:bg-[#FAF8F4]'}`}
-            >
-              {placeholder}
-            </div>
-            
-            {filteredOptions.length === 0 ? (
-              <div className="px-[12px] py-[10px] text-[12px] text-[#6b7280] text-center italic">No matches found</div>
-            ) : (
-              filteredOptions.map((opt) => (
-                <div 
-                  key={opt.value}
-                  onClick={() => { onChange(opt.value); setIsOpen(false); setQuery(''); }}
-                  className={`px-[12px] py-[10px] text-[12px] cursor-pointer transition-colors truncate ${value === opt.value ? 'bg-[#EFF6FF] text-[#1E40AF] font-[700]' : 'text-[#0f1923] hover:bg-[#FAF8F4]'}`}
-                >
-                  {opt.label}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-// ----------------------------------------------
-
-export default function CEOAllAppraisals() {
-  const [appraisals, setAppraisals] = useState([]);
-  const [staff, setStaff] = useState([]); 
+  const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [confirmModal, setConfirmModal] = useState({ open: false, type: '' });
+  const [isProcessing, setIsProcessing] = useState(false);
   
-  // 🚨 UPGRADE: Now holding a dictionary of LIVE CP scores for ALL quarters
-  const [quarterCPs, setQuarterCPs] = useState({});
-  
-  const [dbQuarters, setDbQuarters] = useState([]);
-  const [companyCodes, setCompanyCodes] = useState([]);
-  const [managerList, setManagerList] = useState([]);
-  const [availableOffices, setAvailableOffices] = useState([]);
-  
-  const currentYearStr = new Date().getFullYear().toString();
-  
-  const [search, setSearch] = useState('');
-  const [filterYear, setFilterYear] = useState(currentYearStr); 
+  const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: '' });
+
+  const currentYearNum = new Date().getFullYear();
+  const currentYearStr = currentYearNum.toString();
+  const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
+
+  const [selectedYear, setSelectedYear] = useState(currentYearStr);
   const [isManualYear, setIsManualYear] = useState(false);
-  const [qtr, setQtr] = useState('');
-  const [co, setCo] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [mgrFilter, setMgrFilter] = useState('');
-  const [officeFilter, setOfficeFilter] = useState('');
+  const [selectedQuarter, setSelectedQuarter] = useState('Q2');
   
-  const [selectedAppraisal, setSelectedAppraisal] = useState(null);
-  const [expandedComment, setExpandedComment] = useState(null);
+  const [revertInput, setRevertInput] = useState('');
 
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
-
-  const fetchData = async () => {
+  const fetchMetrics = async () => {
     try {
       setLoading(true);
+      const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
       
-      const [appRes, qtrRes, configRes, usersRes] = await Promise.all([
-        api.get('/appraisals').catch(() => ({ data: { data: [] } })),
-        api.get('/quarters').catch(() => ({ data: { data: [] } })),
-        api.get('/config/dropdowns').catch(() => ({ data: { data: {} } })),
-        api.get('/users').catch(() => ({ data: { data: [] } }))
+      const [qscRes, metricsRes] = await Promise.all([
+        api.get(`/quarterly-scorecards/${selectedYear}`).catch(() => ({ data: { data: [] } })),
+        api.get(`/company-metrics/${selectedYear}/${targetMonth}`).catch(() => ({ data: { data: null } }))
       ]);
-
-      const allApps = appRes.data?.data || [];
-      setAppraisals(allApps);
-
-      const allUsers = usersRes.data?.data || [];
-      setStaff(allUsers);
-
-      const extractedOffices = allUsers
-          .map(u => u?.employmentDetails?.officeLocation)
-          .filter(location => location && typeof location === 'string' && location.trim() !== '');
-      const uniqueOffices = [...new Set(extractedOffices)].sort();
-      setAvailableOffices(uniqueOffices);
-
-      const uniqueManagers = new Map();
       
-      allApps.forEach(a => {
-        if (a.managerId) {
-          const mId = a.managerId._id || a.managerId;
-          const fName = a.managerId.personalDetails?.firstName || '';
-          const lName = a.managerId.personalDetails?.lastName || '';
-          if (fName || lName) uniqueManagers.set(mId, `${fName} ${lName}`.trim());
-        }
-      });
+      const list = qscRes.data?.data || [];
+      const match = list.find(item => item.quarter === selectedQuarter) || {};
+      const cMetrics = metricsRes.data?.data || {};
 
-      allUsers.forEach(u => {
-        const mgr = u.employmentDetails?.reportingTo;
-        if (mgr) {
-          const mId = mgr._id || mgr;
-          if (mgr.personalDetails) {
-            uniqueManagers.set(mId, `${mgr.personalDetails.firstName} ${mgr.personalDetails.lastName}`.trim());
-          } else {
-            const foundMgr = allUsers.find(staffMember => staffMember._id === mId);
-            if (foundMgr) {
-              uniqueManagers.set(mId, `${foundMgr.personalDetails?.firstName} ${foundMgr.personalDetails?.lastName}`.trim());
-            }
-          }
-        }
+      setMetrics({
+        ...match,
+        ...cMetrics,
+        locked: match.locked || cMetrics.locked || false,
+        requireAcknowledgment: cMetrics.requireAcknowledgment !== undefined ? cMetrics.requireAcknowledgment : (match.requireAcknowledgment !== undefined ? match.requireAcknowledgment : true)
       });
       
-      const mgrArray = Array.from(uniqueManagers, ([id, name]) => ({ id, name }));
-      mgrArray.sort((a, b) => a.name.localeCompare(b.name));
-      setManagerList(mgrArray);
-
-      const fetchedQuarters = qtrRes.data?.data || [];
-      setDbQuarters(fetchedQuarters);
-
-      const configData = configRes.data?.data || {};
-      setCompanyCodes(configData.companyCodes || []);
-
     } catch (error) {
-      console.error('Failed to fetch appraisals:', error);
+      console.error('Failed to load metrics status', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchMetrics();
+  }, [selectedYear, selectedQuarter]);
 
-  // 🚨 UPGRADE: Fetch ALL metrics for the selected year and calculate true CP dynamically
-  useEffect(() => {
-    const fetchAllYearMetrics = async () => {
-      if (!filterYear) return;
+  const handleLockAction = async () => {
+    try {
+      setIsProcessing(true);
+      const newLockState = confirmModal.type === 'lock';
       
-      const newCps = {};
-      const months = { Q1: 3, Q2: 6, Q3: 9, Q4: 12 };
+      const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
+      
+      await Promise.all([
+        api.post(`/quarterly-scorecards/${selectedYear}/${selectedQuarter}`, {
+          locked: newLockState
+        }),
+        api.post('/company-metrics', {
+          reviewYear: selectedYear,
+          reviewMonth: targetMonth,
+          locked: newLockState
+        })
+      ]);
 
-      await Promise.all(Object.entries(months).map(async ([qName, month]) => {
-        try {
-          const res = await api.get(`/company-metrics/${filterYear}/${month}`);
-          const mData = res.data?.data;
-          
-          if (mData) {
-            const kpaActuals = [
-              mData.financialResilience,
-              mData.operationalEffectiveness,
-              mData.humanCapital,
-              mData.safetyEnvironment,
-              mData.reputationalCapital
-            ];
-            
-            const anyKpaEntered = kpaActuals.some(v => v !== null && v !== undefined);
-            
-            if (anyKpaEntered) {
-              const calcBscRaw = kpaActuals.reduce((sum, val, idx) => {
-                const maxPts = [120, 400, 230, 110, 27][idx];
-                const pts = ((val || 0) / 100) * maxPts;
-                return sum + Number(pts.toFixed(1)); 
-              }, 0);
-              const rawCp = calcBscRaw / 100;
-              newCps[qName] = Math.round((rawCp + Number.EPSILON) * 100) / 100;
-            } else if (mData.cpPct !== undefined && mData.cpPct !== null) {
-              newCps[qName] = mData.cpPct;
-            }
-          }
-        } catch (e) {
-          // If a quarter isn't created yet, ignore
-        }
-      }));
+      setConfirmModal({ open: false, type: '' });
+      await fetchMetrics();
       
-      setQuarterCPs(newCps);
-    };
-    
-    fetchAllYearMetrics();
-  }, [filterYear]);
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Successful', 
+        message: `Scorecard for ${selectedQuarter} ${selectedYear} successfully ${newLockState ? 'locked' : 'unlocked'}.`, 
+        type: 'success' 
+      });
 
-  useEffect(() => {
-    const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
-    if (qtrsForSelectedYear.length > 0) {
-      const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
-      const defaultQtr = q1 ? q1._id : qtrsForSelectedYear[0]._id;
+    } catch (error) {
+      setConfirmModal({ open: false, type: '' });
       
-      if (!qtr || !qtrsForSelectedYear.some(q => q._id === qtr)) {
-        setQtr(defaultQtr);
-      }
-    } else {
-      setQtr('');
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Failed', 
+        message: 'Failed to update scorecard lock status.', 
+        type: 'error' 
+      });
+      console.error(error);
+    } finally {
+      setIsProcessing(false);
     }
-  }, [dbQuarters, filterYear]); 
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, filterYear, qtr, statusFilter, co, mgrFilter, officeFilter]);
-
-  const handleYearChange = (e) => {
-    setFilterYear(e.target.value);
-    setQtr(''); 
   };
 
-  const getManagerInfo = (mgrRaw) => {
-    if (!mgrRaw) return { id: null, name: 'Unassigned' };
-    if (mgrRaw._id && mgrRaw.personalDetails) {
-      return { id: mgrRaw._id, name: `${mgrRaw.personalDetails.firstName} ${mgrRaw.personalDetails.lastName}`.trim() };
+  const requireAck = metrics?.requireAcknowledgment !== false; 
+
+  const handleAckToggle = async () => {
+    try {
+      setIsProcessing(true);
+      const newState = !requireAck; 
+      
+      setMetrics(prev => prev ? { ...prev, requireAcknowledgment: newState } : { requireAcknowledgment: newState });
+      
+      const targetMonth = QUARTERS.find(q => q.val === selectedQuarter).month;
+      await Promise.all([
+        api.post(`/quarterly-scorecards/${selectedYear}/${selectedQuarter}`, {
+          requireAcknowledgment: newState
+        }),
+        api.post('/company-metrics', {
+          reviewYear: selectedYear,
+          reviewMonth: targetMonth,
+          requireAcknowledgment: newState
+        })
+      ]);
+
+      await fetchMetrics();
+
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Successful', 
+        message: `Employee Acknowledgment is now ${newState ? 'REQUIRED' : 'DISABLED'} for ${selectedQuarter} ${selectedYear}.`, 
+        type: 'success' 
+      });
+
+    } catch (error) {
+      setMetrics(prev => prev ? { ...prev, requireAcknowledgment: !newState } : prev);
+      
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Failed', 
+        message: 'Failed to update acknowledgment status.', 
+        type: 'error' 
+      });
+      console.error(error);
+    } finally {
+      setIsProcessing(false);
     }
-    const mId = mgrRaw._id || mgrRaw;
-    const found = staff.find(s => s._id === mId);
-    if (found) {
-       return { id: mId, name: `${found.personalDetails?.firstName} ${found.personalDetails?.lastName}`.trim() };
-    }
-    return { id: mId, name: 'Unknown Manager' };
   };
 
-  let dataToFilter = [...appraisals];
+  const handleRevertAck = async () => {
+    if (!revertInput) return;
+    try {
+      setIsProcessing(true);
+      
+      const res = await api.get('/appraisals').catch(() => ({ data: { data: [] } }));
+      const allApps = res.data?.data || [];
+      
+      const quarterApps = allApps.filter(a => {
+        const appYear = a.reviewYear || a.appraisalQuarter?.year || a.period?.year;
+        
+        // 🚨 UPGRADE: Safely normalize the quarter name string (e.g. "Quarter 1 (Q1)" strictly becomes "Q1")
+        const appQtrRaw = a.appraisalQuarter?.name || a.period?.quarter || a.quarter?.name || '';
+        const qMatch = String(appQtrRaw).match(/Q?([1-4])/i) || String(appQtrRaw).match(/([1-4])/);
+        const appQtr = qMatch ? `Q${qMatch[1]}` : appQtrRaw;
 
-  if (qtr) {
-    const qtrAppraisals = appraisals.filter(a => {
-      const appQId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
-      return appQId === qtr;
-    });
-    
-    const submittedEmpIds = new Set(qtrAppraisals.map(a => a.employeeId?._id || a.employeeId));
+        const isAck = a.workflow?.status === 'ACKNOWLEDGED' || a.status === 'ACKNOWLEDGED';
+        return appYear?.toString() === selectedYear.toString() && appQtr === selectedQuarter && isAck;
+      });
 
-    staff.forEach(emp => {
-      if (!submittedEmpIds.has(emp._id)) {
-        dataToFilter.push({
-          _id: `missing-${emp._id}-${qtr}`,
-          isMissing: true,
-          employeeId: emp,
-          managerId: emp.employmentDetails?.reportingTo,
-          appraisalQuarter: qtr,
-          workflow: { status: 'NOT_STARTED' },
-          calculatedResults: null,
-          updatedAt: null,
-          createdAt: null
+      let targets = [];
+      const inputClean = revertInput.trim().toUpperCase();
+      
+      if (inputClean === 'ALL') {
+        targets = quarterApps;
+      } else {
+        targets = quarterApps.filter(a => {
+          const empId = a.employeeId?.employeeId ? String(a.employeeId.employeeId).toUpperCase() : '';
+          return empId === inputClean;
         });
       }
-    });
-  }
 
-  const filteredData = dataToFilter.filter(a => {
-    const emp = a.employeeId?.personalDetails;
-    const empName = `${emp?.firstName || ''} ${emp?.lastName || ''}`.toLowerCase();
-    const empIdStr = (a.employeeId?.employeeId || '').toLowerCase();
-    
-    const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
-    const mgrInfo = getManagerInfo(a.managerId);
-
-    const matchesSearch = search === '' || empName.includes(search.toLowerCase()) || empIdStr.includes(search.toLowerCase());
-    const matchesQtr = qtr === '' || appQuarterId === qtr;
-    
-    const appYear = a.reviewYear || a.appraisalQuarter?.year;
-    const matchesYear = filterYear === '' || (appYear && appYear.toString() === filterYear) || matchesQtr;
-
-    const matchesCo = co === '' || a.employeeId?.companyCode === co;
-    const matchesMgr = mgrFilter === '' || mgrInfo.id === mgrFilter;
-    const matchesOffice = officeFilter === '' || a.employeeId?.employmentDetails?.officeLocation === officeFilter;
-    
-    let matchesStatus = true;
-    if (statusFilter !== '') {
-      const st = a.workflow?.status;
-      if (statusFilter === 'NOT_STARTED') {
-        matchesStatus = a.isMissing || ['NOT_STARTED'].includes(st);
-      } else if (statusFilter === 'DRAFT') {
-        matchesStatus = ['DRAFT', 'REOPENED'].includes(st);
-      } else if (statusFilter === 'SUBMITTED_TO_HR') {
-        matchesStatus = ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(st);
-      } else if (statusFilter === 'WITH_CEO') {
-        matchesStatus = ['WITH_CEO'].includes(st);
-      } else if (statusFilter === 'APPROVED') {
-        matchesStatus = ['APPROVED'].includes(st);
-      } else if (statusFilter === 'NOT_APPROVED') {
-        matchesStatus = ['NOT_APPROVED'].includes(st);
-      } else if (statusFilter === 'ACKNOWLEDGED') {
-        matchesStatus = ['ACKNOWLEDGED'].includes(st);
+      if (targets.length === 0) {
+        setAlertModal({ 
+          show: true, 
+          title: 'No Records Found', 
+          message: `Could not find any ACKNOWLEDGED appraisals for '${inputClean}' in ${selectedQuarter} ${selectedYear}.`, 
+          type: 'warning' 
+        });
+        setIsProcessing(false);
+        return;
       }
-    }
-    
-    return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
-  }).sort((a, b) => {
-    const ceoStatuses = ['WITH_CEO', 'APPROVED', 'ACKNOWLEDGED'];
-    const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
-    const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
 
-    if (isACeo !== isBCeo) {
-      return isBCeo - isACeo; 
-    }
-
-    const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-    const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-    return dateB - dateA; 
-  });
-
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
-
-  const getQuarterName = (qId) => {
-    if (!qId) return 'N/A';
-    const match = dbQuarters.find(q => q._id === qId);
-    return match ? `${match.name} (${match.year})` : (typeof qId === 'string' && qId.length <= 2 ? qId : 'Old Data');
-  };
-
-  const quartersForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
-  quartersForSelectedYear.sort((a, b) => a.name.localeCompare(b.name));
-
-  const selectedYearNum = parseInt(filterYear) || new Date().getFullYear();
-  const yearOptions = [
-    selectedYearNum - 3,
-    selectedYearNum - 2,
-    selectedYearNum - 1,
-    selectedYearNum,
-    selectedYearNum + 1
-  ];
-
-  const iprfStyle = (f) => {
-    if (f >= 1.3) return 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]';
-    if (f >= 1.0) return 'bg-[#D1FAE5] text-[#065F46] border-[#A7F3D0]';
-    if (f >= 0.7) return 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]';
-    return 'bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]';
-  };
-
-  const iprfLabel = (f) => {
-    if (f >= 1.3) return 'EP'; 
-    if (f >= 1.0) return 'E';
-    if (f >= 0.7) return 'NI'; 
-    return 'LS'; 
-  };
-
-  const StatusTag = ({ st }) => {
-    if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
-    switch(st) {
-      case 'NOT_STARTED': 
-        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Not started</span>;
-      case 'DRAFT':
-      case 'REOPENED':
-        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">Saved in Draft</span>;
-      case 'SUBMITTED':
-      case 'APPROVED_BY_HR': 
-      case 'UNDER_HR_REVIEW':
-        return <span className="bg-[#DBEAFE] text-[#1E40AF] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#BFDBFE] whitespace-nowrap">Submitted to HR</span>;
-      case 'WITH_CEO': 
-        return <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FDE68A] whitespace-nowrap">With CEO</span>;
-      case 'APPROVED': 
-        return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
-      case 'NOT_APPROVED': 
-        return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Rejected by CEO</span>;
-      case 'ACKNOWLEDGED':
-        return <span className="bg-[#F0FDF4] text-[#15803D] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[800] border border-[#BBF7D0] whitespace-nowrap flex items-center gap-[4px]"><span className="text-[10px]">✓</span> Acknowledged</span>;
-      default: 
-        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
-    }
-  };
-
-  const handleDownloadReport = () => {
-    let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Pro-Rata,Award %,Status,Last Updated Date & Time\n";
-    
-    filteredData.forEach(a => {
-      const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
-      const empId = `"${a.employeeId?.employeeId || ''}"`;
-      const jobTitle = `"${a.employeeId?.employmentDetails?.jobTitle || ''}"`;
-      const office = `"${a.employeeId?.employmentDetails?.officeLocation || 'Unassigned'}"`;
-      const coCode = `"${a.employeeId?.companyCode || 'FSM'}"`;
-      const mgrInfo = getManagerInfo(a.managerId);
-      const mgrName = `"${mgrInfo.name}"`;
-      
-      const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
-      const qtrNameFull = getQuarterName(appQuarterId);
-      const qtrName = `"${qtrNameFull}"`;
-      
-      const iprf = a.calculatedResults?.finalIprfScore || 0;
-      const score = `"${a.isMissing ? 'N/A' : iprf.toFixed(1)}"`;
-      
-      const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
-      const proRataValue = prMonths / 12;
-      const proRataStr = `"${proRataValue.toFixed(3)}"`;
-
-      // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
-      const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
-      const qKey = qMatch ? qMatch[0].toUpperCase() : null;
-      const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
-
-      let awardDisplay = '—';
-      if (liveCp !== null && iprf > 0) {
-        // Calculation: %Award = CP * IPRF rating
-        const finalAw = liveCp * iprf;
-        awardDisplay = `"${finalAw.toFixed(2)}%"`;
-      }
-      
-      let statusRaw = a.workflow?.status;
-      let statusText = 'UNKNOWN';
-      if (a.isMissing || ['NOT_STARTED'].includes(statusRaw)) statusText = 'Not started';
-      else if (['DRAFT', 'REOPENED'].includes(statusRaw)) statusText = 'Saved in Draft';
-      else if (['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(statusRaw)) statusText = 'Submitted to HR';
-      else if (statusRaw === 'WITH_CEO') statusText = 'With CEO/ Pending to CEO';
-      else if (statusRaw === 'APPROVED') statusText = 'CEO Approved';
-      else if (statusRaw === 'NOT_APPROVED') statusText = 'Rejected by CEO/ Not Approve by CEO';
-      else if (statusRaw === 'ACKNOWLEDGED') statusText = 'Emp. Acknowledged';
-      const status = `"${statusText}"`;
-      
-      const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
-
-      csvContent += `${empName},${empId},${jobTitle},${office},${coCode},${mgrName},${qtrName},${score},${proRataStr},${awardDisplay},${status},${updated}\n`;
-    });
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `CEO_Appraisals_Report_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const getPageNumbers = () => {
-    let pages = [];
-    if (totalPages <= 5) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      if (currentPage <= 3) {
-        pages = [1, 2, 3, 4, '...', totalPages];
-      } else if (currentPage >= totalPages - 2) {
-        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
-      } else {
-        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
-      }
-    }
-    return pages;
-  };
-
-  const parseComments = (combinedString) => {
-    if (!combinedString) return {};
-    const comments = {};
-    
-    const labels = [
-      { key: 'jobCompetence', matches: ['Job Competence:'] },
-      { key: 'behaviors', matches: ['Behaviors & Initiative:', 'Demonstrated Initiative:'] },
-      { key: 'dependability', matches: ['Dependability:'] },
-      { key: 'adaptability', matches: ['Adaptability:'] },
-      { key: 'safeWorking', matches: ['Safe Working:', 'Demonstrated Safe Working:'] },
-      { key: 'deliveredResults', matches: ['Delivered Expected Results:', 'Delivered Results:'] }
-    ];
-
-    let foundLabels = [];
-    labels.forEach(labelDef => {
-      let bestIdx = -1;
-      let bestMatch = '';
-      for (const matchStr of labelDef.matches) {
-        const idx = combinedString.indexOf(matchStr);
-        if (idx !== -1) {
-          bestIdx = idx;
-          bestMatch = matchStr;
-          break;
+      let successCount = 0;
+      for (const app of targets) {
+        try {
+          // Attempt dedicated reset route first
+          try {
+             await api.patch(`/appraisals/${app._id}/reset-ack`);
+          } catch (err) {
+             // Fallback to standard PUT update to revert status to APPROVED
+             await api.put(`/appraisals/${app._id}`, {
+               ...app,
+               status: 'APPROVED',
+               workflow: { ...(app.workflow || {}), status: 'APPROVED' },
+               acknowledgedAt: null
+             });
+          }
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to revert appraisal ${app._id}`, e);
         }
       }
-      if (bestIdx !== -1) {
-        foundLabels.push({ key: labelDef.key, index: bestIdx, match: bestMatch });
-      }
-    });
-
-    foundLabels.sort((a, b) => a.index - b.index);
-
-    foundLabels.forEach((label, i) => {
-      const start = label.index + label.match.length;
-      if (i + 1 < foundLabels.length) {
-        const nextLabelIdx = foundLabels[i + 1].index;
-        let content = combinedString.substring(start, nextLabelIdx);
-        content = content.replace(/\s*\d+\.\s*$/, ''); 
-        comments[label.key] = content.trim();
-      } else {
-        comments[label.key] = combinedString.substring(start).trim();
-      }
-    });
-
-    return comments;
+      
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Successful', 
+        message: `Successfully reverted ${successCount} appraisal(s) back to APPROVED status for ${inputClean}. The employee(s) can now acknowledge them again.`, 
+        type: 'success' 
+      });
+      
+      setRevertInput(''); 
+    } catch (error) {
+      setAlertModal({ 
+        show: true, 
+        title: 'Action Failed', 
+        message: 'Failed to process revert request. Please check network connection.', 
+        type: 'error' 
+      });
+      console.error(error);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
+  const scorecardLocked = metrics?.locked || false;
+  const lockedBy = metrics?.lockedBy ? (typeof metrics.lockedBy === 'object' ? `${metrics.lockedBy.personalDetails?.firstName || ''} ${metrics.lockedBy.personalDetails?.lastName || ''}`.trim() : 'CEO') : 'CEO';
+  const lockedAt = metrics?.lockedAt ? new Date(metrics.lockedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+  
+  const cpPct = metrics ? (metrics.cpPct !== undefined && metrics.cpPct !== null 
+    ? `${metrics.cpPct.toFixed(2)}%` 
+    : (metrics.actuals ? 'Data entered' : 'Not entered')) : 'Not entered';
+
+  const ts = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
   return (
-    <div className="max-w-6xl mx-auto pb-[60px] font-sans">
+    <div className="max-w-[1200px] mx-auto pb-[60px] font-sans">
       
       {/* Header */}
       <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-            &#128196; All Appraisals
+            &#128274; Scorecard Lock Control
           </div>
-          <div className="text-[13px] text-[#6b7280]">Full read-only view of every appraisal — all staff, all quarters</div>
+          <div className="text-[13px] text-[#6b7280]">
+            ICT Admin — Only ICT can unlock the CEO scorecard after a Board-approved unlock request
+          </div>
         </div>
-        
-        <div className="flex gap-[8px]">
-          <button onClick={fetchData} className="text-[13px] font-[700] text-[#0D2B55] bg-white border border-[#E2DDD4] py-[10px] px-[16px] rounded-[8px] hover:bg-slate-50 transition-colors shadow-sm">
-            &#8635; Refresh
-          </button>
-          <button 
-            onClick={handleDownloadReport} 
-            disabled={loading || filteredData.length === 0}
-            className="py-[10px] px-[16px] bg-[#059669] hover:bg-[#047857] text-white rounded-[8px] text-[13px] font-[700] transition-colors flex items-center gap-[6px] shadow-sm disabled:opacity-50"
-          >
-            &#11015; Download Filtered Report
-          </button>
-        </div>
-      </div>
 
-      {/* Filter Bar */}
-      <div className="bg-white rounded-[14px] border border-[#E2DDD4] shadow-sm p-[16px] mb-[20px] flex flex-wrap gap-[12px]">
-        
-        <div className="flex-1 min-w-[200px] relative">
-          <input 
-            type="text" 
-            placeholder="Search staff name or ID..." 
-            value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-[36px] pr-[16px] py-[10px] bg-[#FAF8F4] border border-[#E2DDD4] rounded-[8px] text-[13px] outline-none focus:border-[#0D2B55] transition-colors"
-          />
-          <span className="absolute left-[12px] top-[10px] text-[#6b7280] text-[16px] leading-none">&#128269;</span>
-        </div>
-        
-        <div className="flex gap-[6px]">
-          {isManualYear ? (
-            <input 
-              type="number" 
-              autoFocus
-              defaultValue={filterYear}
-              onBlur={(e) => {
-                if (e.target.value) {
-                  setFilterYear(e.target.value);
-                  setQtr(''); 
-                }
-                setIsManualYear(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+        <div className="flex flex-wrap items-center gap-[6px] bg-white border border-[#E2DDD4] p-[4px] rounded-[8px] shadow-sm">
+           <select 
+             value={selectedQuarter} 
+             onChange={(e) => setSelectedQuarter(e.target.value)}
+             className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px]"
+           >
+              {QUARTERS.map(q => (
+                 <option key={q.val} value={q.val}>{q.label}</option>
+              ))}
+           </select>
+           
+           <span className="text-[#E2DDD4]">|</span>
+           
+           {isManualYear ? (
+              <input 
+                type="number" 
+                autoFocus
+                defaultValue={selectedYear}
+                onBlur={(e) => {
                   if (e.target.value) {
-                    setFilterYear(e.target.value);
-                    setQtr(''); 
+                    setSelectedYear(e.target.value);
                   }
                   setIsManualYear(false);
-                }
-              }}
-              className="py-[10px] px-[12px] bg-white border border-[#0D2B55] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none w-[105px] shadow-sm"
-            />
-          ) : (
-            <select 
-              value={filterYear} 
-              onChange={(e) => {
-                if (e.target.value === 'manual') setIsManualYear(true);
-                else handleYearChange(e);
-              }} 
-              className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] font-[700] text-[#0D2B55] outline-none cursor-pointer w-[105px]"
-            >
-              {yearOptions.map(y => (
-                 <option key={y} value={y}>{y}</option>
-              ))}
-              <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
-            </select>
-          )}
-
-          <select 
-            value={qtr} 
-            onChange={e => setQtr(e.target.value)} 
-            disabled={!filterYear || quartersForSelectedYear.length === 0}
-            className={`py-[10px] px-[12px] border rounded-[8px] text-[13px] outline-none transition-colors w-[130px] ${filterYear ? 'bg-white border-[#E2DDD4] text-[#0f1923] cursor-pointer' : 'bg-slate-50 border-[#E2DDD4] text-[#94a3b8] cursor-not-allowed'}`}
-          >
-            {quartersForSelectedYear.length === 0 && <option value="">No Quarters</option>}
-            {quartersForSelectedYear.map(q => (
-               <option key={q._id} value={q._id}>{q.name}</option>
-            ))}
-          </select>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value) {
+                      setSelectedYear(e.target.value);
+                    }
+                    setIsManualYear(false);
+                  }
+                }}
+                className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none p-[6px_8px] w-[80px]"
+              />
+           ) : (
+             <select 
+               value={selectedYear} 
+               onChange={(e) => {
+                 if (e.target.value === 'manual') setIsManualYear(true);
+                 else setSelectedYear(e.target.value);
+               }}
+               className="bg-transparent text-[12px] font-[700] text-[#0D2B55] outline-none cursor-pointer p-[6px_8px] pr-[12px]"
+             >
+                {yearOptions.map(y => (
+                   <option key={y} value={y}>{y}</option>
+                ))}
+                <option value="manual" className="font-bold text-[#1E40AF]">Enter Manually...</option>
+             </select>
+           )}
         </div>
-
-        {/* Appraisal Status */}
-        <SearchableDropdown 
-          value={statusFilter}
-          onChange={setStatusFilter}
-          placeholder="Appraisal Status"
-          widthClass="w-[200px]"
-          options={[
-            { value: 'SUBMITTED_TO_HR', label: 'Submitted to HR' },
-            { value: 'WITH_CEO', label: 'With CEO/ Pending to CEO' },
-            { value: 'APPROVED', label: 'CEO Approved' },
-            { value: 'ACKNOWLEDGED', label: 'Emp. Acknowledged' },
-            { value: 'NOT_STARTED', label: 'Not started' },
-            { value: 'NOT_APPROVED', label: 'Rejected by CEO/ Not Approve by CEO' },
-            { value: 'DRAFT', label: 'Saved in Draft' },
-          ]}
-        />
-
-        {/* All Office Locations */}
-        <SearchableDropdown 
-          value={officeFilter}
-          onChange={setOfficeFilter}
-          placeholder="All Office Locations"
-          widthClass="w-[180px]"
-          options={availableOffices.map(o => ({ value: o, label: o }))}
-        />
-
-        {/* All Line Managers */}
-        <SearchableDropdown 
-          value={mgrFilter}
-          onChange={setMgrFilter}
-          placeholder="All Line Managers"
-          widthClass="w-[190px]"
-          options={managerList.map(m => ({ value: m.id, label: m.name }))}
-        />
-        
-        {/* All Company */}
-        <select value={co} onChange={e => setCo(e.target.value)} className="py-[10px] px-[12px] bg-white border border-[#E2DDD4] rounded-[8px] text-[13px] text-[#0f1923] outline-none cursor-pointer w-[120px]">
-          <option value="">All Company</option>
-          {companyCodes.map(code => (
-             <option key={`co-${code}`} value={code}>{code}</option>
-          ))}
-        </select>
       </div>
 
-      {/* Main Table */}
-      <div className="bg-white border border-[#E2DDD4] rounded-[14px] overflow-hidden shadow-sm flex flex-col">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
-            <thead className="bg-[#FAF8F4] border-b border-[#E2DDD4] text-[10px] font-[800] text-[#6b7280] uppercase tracking-[.06em]">
-              <tr>
-                <th className="p-[12px_16px]">Employee</th>
-                <th className="p-[12px_16px] text-[#C9A84C]">Job Title</th>
-                <th className="p-[12px_16px] text-center">Co.</th>
-                <th className="p-[12px_16px] text-center">Quarter</th>
-                <th className="p-[12px_16px] text-center">IPRF</th>
-                <th className="p-[12px_16px] text-center">Pro-Rata</th>
-                <th className="p-[12px_16px] text-center">Award %</th>
-                <th className="p-[12px_16px] text-center">Status</th>
-                <th className="p-[12px_16px] text-center">Detail</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#E2DDD4] text-[13px]">
-              {loading ? (
-                <tr>
-                  <td colSpan="9" className="p-[48px] text-center text-[#6b7280] font-[600] animate-pulse">
-                    Loading Appraisals Database...
-                  </td>
-                </tr>
-              ) : filteredData.length === 0 ? (
-                <tr>
-                  <td colSpan="9" className="p-[48px] text-center text-[#6b7280]">
-                    <div className="text-[36px] mb-[12px] opacity-70">&#128269;</div>
-                    <div className="text-[15px] font-[700] text-[#0D2B55] mb-[6px]">No matches found</div>
-                    <div className="text-[13px]">Try adjusting your search or filters to find what you're looking for.</div>
-                  </td>
-                </tr>
-              ) : (
-                currentItems.map((a, i) => {
-                  const empName = `${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}`.trim() || 'Unknown';
-                  const init1 = a.employeeId?.personalDetails?.firstName?.[0] || '';
-                  const init2 = a.employeeId?.personalDetails?.lastName?.[0] || '';
-                  const coCode = a.employeeId?.companyCode || 'FSM';
-                  const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
-                  
-                  const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
-                  const qtrNameFull = getQuarterName(appQuarterId);
-                  
-                  const iprf = a.calculatedResults?.finalIprfScore || 0;
-                  const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
-                  const proRataValue = prMonths / 12;
-                  
-                  // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
-                  const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
-                  const qKey = qMatch ? qMatch[0].toUpperCase() : null;
-                  const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
-
-                  let awardDisplay = '—';
-                  if (liveCp !== null && iprf > 0) {
-                    // Calculation: %Award = CP * IPRF rating
-                    const finalAw = liveCp * iprf;
-                    awardDisplay = `${finalAw.toFixed(2)}%`;
-                  }
-
-                  return (
-                    <tr key={a._id} className={`${a.isMissing ? 'bg-red-50/30' : i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'} hover:bg-[#FAF8F4] transition-colors`}>
-                      <td className="p-[12px_16px] whitespace-nowrap">
-                        <div className="flex items-center gap-[9px]">
-                          <div className="w-[30px] h-[30px] rounded-[6px] bg-[#E2DDD4] text-[#0f1923] font-[800] flex items-center justify-center text-[11px]">
-                            {init1}{init2}
-                          </div>
-                          <div>
-                            <div className="font-[600] text-[#0D2B55]">{empName}</div>
-                            {!a.isMissing && a.updatedAt && (
-                               <div className="text-[10px] text-[#6b7280]">
-                                 {new Date(a.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                               </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-[12px] text-[#0f1923]">
-                        {jobTitle}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <span className="bg-[#EFF6FF] text-[#0369A1] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#BFDBFE]">
-                          {coCode}
-                        </span>
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[4px] text-[10px] font-[800] border border-[#FDE68A]">
-                          {qtrNameFull}
-                        </span>
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        {a.isMissing ? (
-                           <span className="text-[#6b7280] font-bold">—</span>
-                        ) : iprf > 0 ? (
-                          <span className={`px-[8px] py-[4px] rounded-[6px] text-[11px] font-[800] border ${iprfStyle(iprf)}`}>
-                            {iprf.toFixed(1)} ({iprfLabel(iprf)})
-                          </span>
-                        ) : (
-                          <span className="text-[11px] font-[800] text-[#6b7280">—</span>
-                        )}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center font-[600] text-[#0D2B55]">
-                        {proRataValue.toFixed(3)}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center font-[700] text-[#059669]">
-                        {a.isMissing ? '—' : awardDisplay}
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <StatusTag st={a.workflow?.status} />
-                      </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        {a.isMissing ? (
-                           <span className="text-[10px] font-bold text-red-400 italic">No Data</span>
-                        ) : (
-                         <button 
-                            onClick={() => {
-                              setSelectedAppraisal(a);
-                              setExpandedComment(null);
-                            }}
-                            className="bg-white hover:bg-[#FAF8F4] text-[#0f1923] border border-[#E2DDD4] px-[12px] py-[5px] text-[11px] font-[700] rounded-[6px] transition-colors shadow-sm"
-                          >
-                            View
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] text-[#92400E] rounded-[10px] p-[12px_16px] text-[13px] mb-[20px] shadow-sm flex items-start gap-[10px]">
+        <span className="text-[16px] leading-none mt-[2px]">&#9888;</span> 
+        <div className="leading-[1.6]">
+          <strong className="font-[800]">ICT Admin Responsibility:</strong> The scorecard lock protects Board-approved KPA figures. Only unlock after written authorisation from both the CEO and Board Secretary. All actions are logged in the audit trail.
         </div>
-        
-        {/* Table Pagination Footer */}
-        {filteredData.length > itemsPerPage && (
-          <div className="p-[12px_16px] border-t border-[#E2DDD4] bg-[#FAF8F4] flex items-center justify-between mt-auto">
-            <div className="text-[12px] text-[#6b7280] font-[600]">
-              Showing <span className="text-[#0f1923]">{indexOfFirstItem + 1}</span> to <span className="text-[#0f1923]">{Math.min(indexOfLastItem, filteredData.length)}</span> of <span className="text-[#0f1923]">{filteredData.length}</span> entries
-            </div>
-            
-            <div className="flex items-center gap-[4px]">
-              <button 
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-[14px] h-[14px]" />
-              </button>
-              
-              <div className="flex gap-[4px] px-[4px]">
-                {getPageNumbers().map((number, index) => (
-                  <button
-                    key={index}
-                    onClick={() => number !== '...' && setCurrentPage(number)}
-                    disabled={number === '...'}
-                    className={`w-[28px] h-[28px] text-[12px] font-[700] rounded-[6px] transition-colors ${
-                      number === currentPage 
-                        ? 'bg-[#0D2B55] text-white border border-[#0D2B55]' 
-                        : number === '...' 
-                          ? 'bg-transparent text-[#6b7280] cursor-default'
-                          : 'bg-white border border-[#E2DDD4] text-[#475569] hover:bg-slate-50 hover:text-[#0D2B55]'
-                    }`}
-                  >
-                    {number}
-                  </button>
-                ))}
-              </div>
+      </div>
 
-              <button 
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="p-[6px] rounded-[6px] border border-[#E2DDD4] text-[#6b7280] bg-white hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-[14px] h-[14px]" />
-              </button>
+      <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col mb-[20px]">
+        <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex justify-between items-center">
+          <div className="flex items-center gap-[12px]">
+            <div className="w-[36px] h-[36px] rounded-[8px] bg-[#FEF3C7] flex items-center justify-center text-[16px]">&#128274;</div>
+            <div>
+              <div className="text-[15px] font-[800] text-[#0D2B55]">Current Scorecard Status</div>
+              <div className="text-[12px] font-[500] text-[#6b7280]">
+                Viewing status for {selectedQuarter} {selectedYear}
+              </div>
             </div>
           </div>
-        )}
+          <span 
+            className={`px-[12px] py-[6px] rounded-[6px] text-[11px] font-[800] border ${scorecardLocked ? 'bg-[#D1FAE5] text-[#065F46] border-[#A7F3D0]' : 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]'}`}
+          >
+            {scorecardLocked ? '🔒 Locked' : '🔓 Unlocked'}
+          </span>
+        </div>
+        
+        <div className="p-[24px]">
+          {loading ? (
+            <div className="py-[40px] text-center text-slate-500 font-[600] animate-pulse">Checking status...</div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-[30px]">
+              
+              {/* Status Details */}
+              <div className="flex flex-col text-[13px]">
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Lock Status</span>
+                  <span className={`font-[800] ${scorecardLocked ? 'text-[#059669]' : 'text-[#92400E]'}`}>{scorecardLocked ? 'Locked' : 'Unlocked'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Employee Acknowledgment</span>
+                  <span className={`font-[800] ${requireAck ? 'text-[#059669]' : 'text-[#6b7280]'}`}>{requireAck ? 'Required' : 'Disabled'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Locked By</span>
+                  <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedBy : '—'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Locked At</span>
+                  <span className="font-[700] text-[#0f1923]">{scorecardLocked ? lockedAt : '—'}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px] border-b border-[#E2DDD4]">
+                  <span className="text-[#6b7280] font-[600]">Calculated Value Status</span>
+                  <span className="font-[800] text-[#0D2B55]">{cpPct}</span>
+                </div>
+                <div className="flex justify-between items-center py-[12px]">
+                  <span className="text-[#6b7280] font-[600]">Last System Sync</span>
+                  <span className="font-[700] text-[#6b7280] text-[11px] bg-[#FAF8F4] border border-[#E2DDD4] px-[8px] py-[3px] rounded-[4px]">{ts}</span>
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div>
+                <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
+                  <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">ICT Lock Controls</div>
+                  <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
+                    The scorecard is locked by the CEO after Board approval. ICT can reset this lock if formally authorised. This action is irreversible unless ICT performs another reset.
+                  </div>
+                  <div className="flex flex-col gap-[10px]">
+                    <button 
+                      className="w-full bg-[#DC2626] hover:bg-[#B91C1C] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => setConfirmModal({ open: true, type: 'unlock' })}
+                      disabled={!scorecardLocked || isProcessing}
+                    >
+                      &#128275; Reset Lock (Unlock)
+                    </button>
+                    <button 
+                      className="w-full bg-[#059669] hover:bg-[#047857] text-white font-[800] text-[13px] py-[10px] rounded-[8px] transition-colors flex items-center justify-center gap-[6px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => setConfirmModal({ open: true, type: 'lock' })}
+                      disabled={scorecardLocked || isProcessing}
+                    >
+                      &#128274; Force Lock
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
+                  <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">Employee Acknowledgment Control</div>
+                  <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
+                    Toggle whether employees are required to formally acknowledge their appraisal scores for this cycle. If disabled, the acknowledgment section will be completely hidden on the staff dashboard.
+                  </div>
+                  
+                  <div className="flex items-center justify-between pt-[10px] border-t border-[#E2DDD4]">
+                    <div>
+                      <div className="text-[13px] font-[800] text-[#0D2B55]">Require Acknowledgment</div>
+                      <div className="text-[11px] text-[#6b7280] font-[600] mt-[2px]">Currently <strong className={requireAck ? "text-[#059669]" : "text-[#991B1B]"}>{requireAck ? 'Enabled' : 'Disabled'}</strong></div>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={handleAckToggle} 
+                      disabled={isProcessing}
+                      className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors focus:outline-none shadow-inner disabled:opacity-50 ${requireAck ? 'bg-[#059669]' : 'bg-[#E2DDD4]'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-md ${requireAck ? 'translate-x-7' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="bg-[#FAF8F4] border border-[#E2DDD4] rounded-[12px] p-[20px] mb-[16px]">
+                  <div className="text-[13px] font-[800] text-[#0D2B55] mb-[8px]">Revert Employee Acknowledgment</div>
+                  <div className="text-[12px] text-[#6b7280] leading-[1.6] mb-[16px]">
+                    Enter an Employee ID (e.g., <strong>369, 000, 111</strong>) or type <strong>ALL</strong> to revert acknowledged appraisals back to APPROVED for {selectedQuarter} {selectedYear}. This allows them to acknowledge again.
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-[8px]">
+                    <input 
+                      type="text" 
+                      placeholder="Emp ID or 'ALL'"
+                      value={revertInput}
+                      onChange={(e) => setRevertInput(e.target.value)}
+                      className="flex-1 text-[13px] px-[12px] py-[10px] border border-[#E2DDD4] rounded-[8px] outline-none focus:border-[#0D2B55]"
+                      disabled={isProcessing}
+                    />
+                    <button 
+                      onClick={handleRevertAck}
+                      disabled={isProcessing || !revertInput}
+                      className="bg-[#D97706] hover:bg-[#B45309] text-white px-[16px] py-[10px] rounded-[8px] text-[13px] font-[800] transition-colors disabled:opacity-50 shadow-sm whitespace-nowrap"
+                    >
+                      {isProcessing ? 'Processing...' : 'Revert'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-[#FEF2F2] border border-[#FECACA] text-[#991B1B] rounded-[8px] p-[10px_12px] text-[11px] leading-[1.5]">
+                  &#128683; <strong className="font-[800]">Unlock requires:</strong> Written CEO authorisation + Board Secretary approval + ICT audit entry
+                </div>
+              </div>
+              
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Read-Only Audit View Modal */}
-      {selectedAppraisal && !selectedAppraisal.isMissing && (
-        <div className="fixed inset-0 bg-[#0D2B55]/65 backdrop-blur-sm z-[200] flex items-center justify-center p-[20px] animate-in fade-in duration-200">
-          <div className="bg-white rounded-[16px] w-full max-w-[700px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden slide-in-from-bottom-4">
-            
-            <div className="p-[20px_24px] border-b border-[#E2DDD4] flex justify-between items-center bg-[#FAF8F4] relative">
-              <h2 className="text-[18px] font-[800] text-[#0D2B55]">&#128269; Appraisal Audit View</h2>
-              <button onClick={() => setSelectedAppraisal(null)} className="absolute top-[16px] right-[16px] w-[30px] h-[30px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:border-[#0D2B55] hover:text-[#0D2B55] transition-colors">&times;</button>
+      <div className="bg-white border border-[#E2DDD4] rounded-[14px] shadow-sm overflow-hidden flex flex-col">
+        <div className="p-[16px_20px] border-b border-[#E2DDD4] bg-[#FAF8F4] flex items-center gap-[10px]">
+          <div className="w-[30px] h-[30px] rounded-[8px] bg-[#FFF7ED] flex items-center justify-center text-[14px]">&#128218;</div>
+          <div>
+            <div className="text-[14px] font-[800] text-[#0D2B55]">Official Unlock Procedure</div>
+            <div className="text-[11px] text-[#6b7280]">Must be followed exactly — all steps are audited</div>
+          </div>
+        </div>
+        <div className="p-[20px]">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[16px]">
+            <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-[10px] p-[16px] text-center">
+              <div className="text-[28px] mb-[10px]">1&#65039;&#8419;</div>
+              <div className="text-[13px] font-[800] text-[#991B1B] mb-[6px]">CEO Request</div>
+              <div className="text-[11px] text-[#991B1B]/80 font-[500] leading-[1.5]">CEO submits written unlock request with reason and Board authorisation reference</div>
             </div>
-            
-            <div className="p-[24px] overflow-y-auto custom-scrollbar">
-              
-              <div className="flex items-center gap-[16px] mb-[24px] pb-[20px] border-b border-[#E2DDD4]">
-                <div className="w-[56px] h-[56px] rounded-full bg-gradient-to-br from-[#1a3d6e] to-[#2a527f] text-white flex items-center justify-center text-[20px] font-[800] shadow-sm">
-                  {selectedAppraisal.employeeId?.personalDetails?.firstName?.[0] || ''}{selectedAppraisal.employeeId?.personalDetails?.lastName?.[0] || ''}
-                </div>
-                <div>
-                  <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
-                    {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
-                  </h3>
-                  <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
-                    {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; ID: {selectedAppraisal.employeeId?.employeeId}
-                  </div>
-                </div>
+            <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-[10px] p-[16px] text-center">
+              <div className="text-[28px] mb-[10px]">2&#65039;&#8419;</div>
+              <div className="text-[13px] font-[800] text-[#92400E] mb-[6px]">Board Approval</div>
+              <div className="text-[11px] text-[#92400E]/80 font-[500] leading-[1.5]">Board Secretary confirms approval in writing with reference number</div>
+            </div>
+            <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-[10px] p-[16px] text-center">
+              <div className="text-[28px] mb-[10px]">3&#65039;&#8419;</div>
+              <div className="text-[13px] font-[800] text-[#1E40AF] mb-[6px]">ICT Unlocks</div>
+              <div className="text-[11px] text-[#1E40AF]/80 font-[500] leading-[1.5]">ICT Manager resets lock with Board reference logged in audit trail</div>
+            </div>
+            <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-[10px] p-[16px] text-center">
+              <div className="text-[28px] mb-[10px]">4&#65039;&#8419;</div>
+              <div className="text-[13px] font-[800] text-[#065F46] mb-[6px]">CEO Re-enters & Locks</div>
+              <div className="text-[11px] text-[#065F46]/80 font-[500] leading-[1.5]">CEO updates KPA scores and re-locks. All changes logged.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirmation Modal */}
+      {confirmModal.open && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[100] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[460px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
+            <div className={`p-[16px_22px] flex justify-between items-center ${confirmModal.type === 'unlock' ? 'bg-[#DC2626]' : 'bg-[#059669]'}`}>
+              <div className="text-[15px] font-[800] text-white flex items-center gap-[8px]">
+                <span className="text-[18px]">⚠</span> Confirm {confirmModal.type === 'unlock' ? 'Unlock' : 'Lock'}
               </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-[12px] mb-[24px]">
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Final IPRF</div>
-                  <div className="text-[22px] font-[800] text-[#1E40AF]">{selectedAppraisal.calculatedResults?.finalIprfScore?.toFixed(1) || '0.0'}</div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
-                  <div className="text-[22px] font-[800] text-[#059669]">
-                    {(() => {
-                      const iprf = selectedAppraisal.calculatedResults?.finalIprfScore || 0;
-                      
-                      const appQuarterId = selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter;
-                      const qtrNameFull = getQuarterName(appQuarterId);
-                      const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
-                      const qKey = qMatch ? qMatch[0].toUpperCase() : null;
-                      const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
-
-                      let displayAward = '—';
-                      if (liveCp !== null && iprf > 0) {
-                        // Calculation: %Award = CP * IPRF rating
-                        const finalAw = liveCp * iprf;
-                        displayAward = `${finalAw.toFixed(2)}%`;
-                      }
-                      return displayAward;
-                    })()}
-                  </div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Period</div>
-                  <div className="text-[18px] font-[800] text-[#0f1923] truncate">
-                    {getQuarterName(selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter)}
-                  </div>
-                </div>
-                <div className="bg-[#FAF8F4] p-[12px_16px] rounded-[10px] border border-[#E2DDD4]">
-                  <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">Company</div>
-                  <div className="text-[22px] font-[800] text-[#0f1923]">{selectedAppraisal.employeeId?.companyCode || 'FSM'}</div>
-                </div>
+              <button onClick={() => !isProcessing && setConfirmModal({ open: false, type: '' })} className="bg-white/10 text-white w-[30px] h-[30px] rounded-[8px] flex items-center justify-center hover:bg-white/20 transition-colors">&times;</button>
+            </div>
+            <div className="p-[30px_22px] text-center">
+              <div className="text-[48px] mb-[16px] leading-none">{confirmModal.type === 'unlock' ? '🔓' : '🔒'}</div>
+              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{confirmModal.type === 'unlock' ? 'Reset Scorecard Lock?' : 'Force Scorecard Lock?'}</div>
+              <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
+                {confirmModal.type === 'unlock' 
+                  ? `This will open the scorecard for ${selectedQuarter} ${selectedYear} for the CEO to make edits. You must verify that you have written Board approval before proceeding.`
+                  : `This will permanently lock the scorecard for ${selectedQuarter} ${selectedYear}. Are you sure you want to force this lock manually?`}
               </div>
-
-              <h4 className="text-[12px] font-[800] text-[#0D2B55] mb-[12px] uppercase tracking-widest">Criteria Breakdown</h4>
-              
-              {(() => {
-                const parsedComments = parseComments(selectedAppraisal.narrative?.generalComments);
-                const hasParsedComments = Object.keys(parsedComments).length > 0;
-                
-                return (
-                  <>
-                    <div className="bg-white border border-[#E2DDD4] rounded-[10px] overflow-hidden mb-[24px]">
-                      {Object.entries(CRIT_NAMES).map(([key, name]) => {
-                        const rating = selectedAppraisal.scores?.[key]?.rating;
-                        const color = rating === 0.0 ? 'text-[#991B1B]' : rating === 0.7 ? 'text-[#92400E]' : rating === 1.0 ? 'text-[#065F46]' : rating === 1.3 ? 'text-[#1E40AF]' : 'text-[#6b7280]';
-                        const comment = parsedComments[key];
-                        const isExpanded = expandedComment === key;
-                        
-                        return (
-                          <div key={key} className="border-b border-[#E2DDD4] last:border-0">
-                            <div 
-                              className="flex justify-between items-center p-[10px_16px] cursor-pointer hover:bg-slate-50 transition-colors"
-                              onClick={() => setExpandedComment(isExpanded ? null : key)}
-                            >
-                              <div className="font-[500] text-[#0f1923] text-[13px] flex items-center gap-2">
-                                {name}
-                                {comment && <MessageSquare className="w-3.5 h-3.5 text-blue-500" />}
-                              </div>
-                              <div className="flex items-center gap-3 text-right">
-                                <span className={`font-[800] ${color} text-[13px]`}>{rating !== undefined ? rating.toFixed(1) : '—'}</span>
-                                <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                              </div>
-                            </div>
-                            {isExpanded && comment && (
-                              <div className="p-[0_16px_12px_16px] text-[12px] text-[#6b7280] italic leading-[1.6] animate-in fade-in slide-in-from-top-1">
-                                <span className="font-[700] not-italic text-[#0D2B55] text-[10px] uppercase tracking-widest block mb-[2px]">Manager Justification:</span>
-                                "{comment}"
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="flex flex-col gap-[12px]">
-                      {selectedAppraisal.narrative?.epJustification && (
-                        <div className="bg-[#FFFBEB] border-[1.5px] border-[#FDE68A] rounded-[10px] p-[16px]">
-                          <div className="text-[11px] font-[800] text-[#92400E] uppercase tracking-[.06em] mb-[6px] flex items-center gap-[6px]">
-                            <span>⭐</span> EP Justification
-                          </div>
-                          <div className="text-[13px] text-[#92400E] leading-relaxed font-[500] whitespace-pre-wrap">
-                            {selectedAppraisal.narrative.epJustification}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {selectedAppraisal.narrative?.generalComments && !hasParsedComments && (
-                        <div className="bg-[#F8FAFC] border border-[#E0E7FF] rounded-[10px] p-[16px]">
-                          <div className="text-[11px] font-[800] text-[#0369A1] uppercase tracking-[.06em] mb-[6px]">Manager Comments</div>
-                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
-                            "{selectedAppraisal.narrative.generalComments}"
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedAppraisal.narrative?.hrComments && (
-                        <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-[10px] p-[16px]">
-                          <div className="text-[11px] font-[800] text-[#6B21A8] uppercase tracking-[.06em] mb-[6px]">HR / Admin Notes</div>
-                          <div className="text-[13px] text-[#0f1923] leading-relaxed italic whitespace-pre-wrap">
-                            "{selectedAppraisal.narrative.hrComments}"
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                );
-              })()}
-              
-              <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
-                <StatusTag st={selectedAppraisal.workflow?.status} />
-                <div className="text-[11px] text-[#6b7280] font-mono font-[600]">REF: {selectedAppraisal.appraisalRef || selectedAppraisal._id}</div>
+              <div className="flex gap-[12px] justify-center">
+                <button 
+                  onClick={() => setConfirmModal({ open: false, type: '' })} 
+                  className="p-[12px_20px] rounded-[10px] text-[13px] font-[800] text-[#0f1923] bg-white border-[2px] border-[#E2DDD4] hover:border-[#0D2B55] transition-colors"
+                  disabled={isProcessing}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleLockAction} 
+                  className={`p-[12px_20px] rounded-[10px] text-[13px] font-[800] text-white shadow-md flex items-center justify-center min-w-[120px] transition-colors ${confirmModal.type === 'unlock' ? 'bg-[#DC2626] hover:bg-[#B91C1C]' : 'bg-[#059669] hover:bg-[#047857]'}`}
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? 'Processing...' : (confirmModal.type === 'unlock' ? 'Yes, Unlock' : 'Yes, Lock')}
+                </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Universal Success/Error Modal */}
+      {alertModal.show && (
+        <div className="fixed inset-0 bg-[#0D2B55]/65 z-[200] flex items-center justify-center p-[20px] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[16px] w-full max-w-[400px] shadow-2xl overflow-hidden slide-in-from-bottom-4">
+            <div className="p-[30px_22px] text-center">
+              <div className="text-[48px] mb-[16px] leading-none">
+                {alertModal.type === 'error' ? '❌' : alertModal.type === 'warning' ? '⚠️' : '✅'}
+              </div>
+              <div className="text-[18px] font-[800] text-[#0D2B55] mb-[12px]">{alertModal.title}</div>
+              <div className="text-[13px] text-[#6b7280] mb-[24px] leading-relaxed px-[10px]">
+                {alertModal.message}
+              </div>
+              <button 
+                onClick={() => setAlertModal({ show: false, title: '', message: '', type: '' })} 
+                className="w-full p-[12px] rounded-[10px] text-[13px] font-[800] text-white bg-[#0D2B55] hover:bg-[#1a3d6e] transition-colors shadow-md"
+              >
+                Acknowledge
+              </button>
             </div>
           </div>
         </div>

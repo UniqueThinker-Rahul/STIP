@@ -48,6 +48,10 @@ export default function Header({ setIsOpen, user }) {
 
   const handleLogout = async () => {
     try {
+      // Clear sticky filters and local data on logout
+      if (typeof window !== 'undefined') {
+        window.localStorage.clear();
+      }
       await api.post('/auth/logout'); 
     } catch (error) {
       console.error('Logout error', error);
@@ -57,6 +61,7 @@ export default function Header({ setIsOpen, user }) {
       router.push('/');
     }
   };
+  
 
   // Close dropdowns on click outside
   useEffect(() => {

@@ -3,18 +3,19 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Loader2, Info, Lock } from 'lucide-react';
 import api from '../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export default function Reports() {
   const [quarters, setQuarters] = useState([]);
-  const [selectedQuarterId, setSelectedQuarterId] = useState('');
+  const [selectedQuarterId, setSelectedQuarterId] = usePersistentFilter('reports_qtr_id', '');
   const [activeQuarterData, setActiveQuarterData] = useState(null);
   
   // 🚨 NEW: States for the new Office Station filter
   const [officeLocations, setOfficeLocations] = useState([]);
-  const [selectedOffice, setSelectedOffice] = useState('');
+  const [selectedOffice, setSelectedOffice] = usePersistentFilter('reports_office_loc', '');
 
   const [loading, setLoading] = useState(true);
   const [exportingState, setExportingState] = useState({ key: null, format: null }); 
@@ -31,9 +32,15 @@ export default function Reports() {
         
         const fetchedQuarters = res.data?.data || [];
         setQuarters(fetchedQuarters);
+        
+        // Guard clause: Only set default if no persistent quarter is selected or if the saved one doesn't exist
         if (fetchedQuarters.length > 0) {
-          setSelectedQuarterId(fetchedQuarters[0]._id);
-          setActiveQuarterData(fetchedQuarters[0]);
+          setSelectedQuarterId((prev) => {
+            if (!prev || !fetchedQuarters.some(q => q._id === prev)) {
+              return fetchedQuarters[0]._id;
+            }
+            return prev;
+          });
         }
 
         // 🚨 UPGRADE: Dynamically fetch all unique office stations from the database

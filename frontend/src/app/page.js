@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import api from '../lib/api'; 
@@ -19,6 +19,13 @@ export default function UnifiedLogin() {
 
   // 🚨 UPGRADED: Dynamic Current Year Calculation
   const currentYear = new Date().getFullYear();
+
+  // Wipe all old filters when the login page loads
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.clear();
+    }
+  }, []);
 
   const selectRole = (roleId, roleName) => {
     setError('');

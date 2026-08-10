@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Eye, X, MessageSquare, ChevronDown } from 'lucide-react';
 import api from '../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const getInitials = (name) => {
   if (!name) return '';
@@ -29,8 +30,8 @@ export default function Drafts() {
   const currentYearStr = currentYearNum.toString();
   const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [selectedYear, setSelectedYear] = useState(currentYearStr);
-  const [selectedQuarterName, setSelectedQuarterName] = useState('');
+  const [selectedYear, setSelectedYear] = usePersistentFilter('drafts_year', currentYearStr);
+  const [selectedQuarterName, setSelectedQuarterName] = usePersistentFilter('drafts_qtr', '');
   const [isManualYear, setIsManualYear] = useState(false);
   const [dbQuarters, setDbQuarters] = useState([]);
 
@@ -108,6 +109,8 @@ export default function Drafts() {
 
   // 🚨 UPGRADED: Safely bind dropdown options to DB availability AND existing drafts
   useEffect(() => {
+    if (dbQuarters.length === 0 && drafts.length === 0) return;
+
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
     const dbQs = qtrsForSelectedYear.map(q => {
       const m = String(q.name).match(/Q?([1-4])/i);
@@ -126,24 +129,27 @@ export default function Drafts() {
     const availableQs = [...new Set([...dbQs, ...draftQs])].sort();
 
     if (availableQs.length > 0) {
-      if (!selectedQuarterName || !availableQs.includes(selectedQuarterName)) {
-        // Find active quarter in DB
-        const now = new Date();
-        let active = qtrsForSelectedYear.find(q => {
-          const start = new Date(q.startDate); start.setHours(0,0,0,0);
-          const end = new Date(q.endDate); end.setHours(23,59,59,999);
-          return now >= start && now <= end && !q.isLocked;
-        });
-        
-        const activeNameMatch = active ? String(active.name).match(/Q?([1-4])/i) : null;
-        const mappedActiveName = activeNameMatch ? `Q${activeNameMatch[1]}` : (active ? active.name : null);
+      setSelectedQuarterName((prev) => {
+        if (!prev || !availableQs.includes(prev)) {
+          // Find active quarter in DB
+          const now = new Date();
+          let active = qtrsForSelectedYear.find(q => {
+            const start = new Date(q.startDate); start.setHours(0,0,0,0);
+            const end = new Date(q.endDate); end.setHours(23,59,59,999);
+            return now >= start && now <= end && !q.isLocked;
+          });
+          
+          const activeNameMatch = active ? String(active.name).match(/Q?([1-4])/i) : null;
+          const mappedActiveName = activeNameMatch ? `Q${activeNameMatch[1]}` : (active ? active.name : null);
 
-        setSelectedQuarterName(mappedActiveName || availableQs[availableQs.length - 1]);
-      }
+          return mappedActiveName || availableQs[availableQs.length - 1];
+        }
+        return prev;
+      });
     } else {
       setSelectedQuarterName('');
     }
-  }, [dbQuarters, drafts, selectedYear, selectedQuarterName]);
+  }, [dbQuarters, drafts, selectedYear]);
 
   const deleteDraft = async (id) => {
     if (confirm('Are you sure you want to delete this draft?')) {

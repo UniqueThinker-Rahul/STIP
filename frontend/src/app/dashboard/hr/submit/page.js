@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../../../lib/api';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 export default function SubmitToCEO() {
   const [appraisals, setAppraisals] = useState([]);
@@ -15,9 +16,9 @@ export default function SubmitToCEO() {
   const currentYearStr = currentYearNum.toString();
   const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [filterYear, setFilterYear] = useState(currentYearStr);
+ const [filterYear, setFilterYear] = usePersistentFilter('ceo_submit_year', currentYearStr);
   const [isManualYear, setIsManualYear] = useState(false);
-  const [qtr, setQtr] = useState('');
+  const [qtr, setQtr] = usePersistentFilter('ceo_submit_qtr', '');
   
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -60,10 +61,17 @@ export default function SubmitToCEO() {
 
   // 🚨 NEW: Automatically sync and default to Q1 of the selected year
   useEffect(() => {
+    // Guard clause to prevent persistent filter from resetting on initial mount
+    if (dbQuarters.length === 0) return;
+
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
     if (qtrsForSelectedYear.length > 0) {
       const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
-      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+      
+      // Only overwrite if no quarter is set, or if the saved quarter doesn't belong to this year
+      if (!qtr || !qtrsForSelectedYear.some(q => q._id === qtr)) {
+        setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
+      }
     } else {
       setQtr('');
     }

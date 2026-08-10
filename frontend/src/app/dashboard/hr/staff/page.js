@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X, Edit2, Shield, Trash2, Check, Download, ChevronDown, RotateCcw, Trash, Users, AlertTriangle, Eye, ChevronLeft, ChevronRight, CheckSquare, Loader2 } from "lucide-react";
 import api from '../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const getInitials = (name) => {
   if (!name) return '';
@@ -135,10 +136,10 @@ export default function StaffManagement() {
   
   const [loading, setLoading] = useState(true);
 
-  const [search, setSearch] = useState('');
-  const [coFilter, setCoFilter] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-  const [managerFilter, setManagerFilter] = useState('');
+  const [search, setSearch] = usePersistentFilter('staff_mgr_search', '');
+  const [coFilter, setCoFilter] = usePersistentFilter('staff_mgr_co', '');
+  const [roleFilter, setRoleFilter] = usePersistentFilter('staff_mgr_role', '');
+  const [managerFilter, setManagerFilter] = usePersistentFilter('staff_mgr_manager', '');
   
   const [editingStaff, setEditingStaff] = useState(null);
   const [viewingStaff, setViewingStaff] = useState(null);

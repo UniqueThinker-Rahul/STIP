@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../../../lib/api';
 import { Search, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Calendar, Eye, X, Download } from 'lucide-react';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 // Map backend API score keys to readable labels (Added for parsing comments)
 const SCORE_LABELS = {
@@ -97,8 +98,8 @@ export default function MySubmissions() {
   
   const [team, setTeam] = useState([]);
   const [quarters, setQuarters] = useState([]);
-  const [selectedQuarterId, setSelectedQuarterId] = useState('');
-  const [reportType, setReportType] = useState('ALL'); 
+  const [selectedQuarterId, setSelectedQuarterId] = usePersistentFilter('mysub_qtr_id', '');
+  const [reportType, setReportType] = usePersistentFilter('mysub_report_type', 'ALL'); 
 
   const [selectedAppraisal, setSelectedAppraisal] = useState(null);
   const [expandedComment, setExpandedComment] = useState(null);
@@ -133,8 +134,12 @@ export default function MySubmissions() {
           return now >= start && now <= end;
         });
         
-        if (activeQ) setSelectedQuarterId(activeQ._id);
-        else if (activeQuarters.length > 0) setSelectedQuarterId(activeQuarters[0]._id);
+        setSelectedQuarterId((prev) => {
+          if (!prev || !activeQuarters.some(q => q._id === prev)) {
+            return activeQ ? activeQ._id : (activeQuarters.length > 0 ? activeQuarters[0]._id : '');
+          }
+          return prev;
+        });
 
       } catch (error) {
         console.error('Failed to load submissions context', error);

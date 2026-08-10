@@ -107,6 +107,7 @@ export default function CEODashboard() {
   }, []);
 
   useEffect(() => {
+    // Guard clause to prevent persistent filter from resetting on initial mount
     if (dbQuarters.length === 0) return;
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === selectedYear.toString());
     
@@ -116,13 +117,16 @@ export default function CEODashboard() {
         return m ? `Q${m[1]}` : q.name;
       }))].sort();
       
-      if (!selectedQuarter || !availableQs.includes(selectedQuarter)) {
-        setSelectedQuarter(availableQs[availableQs.length - 1]);
-      }
+      setSelectedQuarter((prev) => {
+        if (!prev || !availableQs.includes(prev)) {
+          return availableQs[availableQs.length - 1];
+        }
+        return prev;
+      });
     } else {
       setSelectedQuarter('');
     }
-  }, [dbQuarters, selectedYear, selectedQuarter, setSelectedQuarter]);
+  }, [dbQuarters, selectedYear]);
 
   useEffect(() => {
     const fetchDynamicMetrics = async () => {
