@@ -42,25 +42,10 @@ export default function CEOApproveAppraisals() {
   const [isManualYear, setIsManualYear] = useState(false);
   const [qtr, setQtr] = usePersistentFilter('ceo_approve_qtr', '');
 
-  // 🚨 UPGRADE: Keyboard shortcuts for View First (R), Approve (A), Reject (D), Submit (Enter), and Cancel (Esc)
+  // 🚨 UPGRADE: Keyboard shortcuts for View First (R), Approve (A), and Reject (D)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // 1. Handle Escape globally (Allows closing modals even if cursor is inside a textarea)
-      if (e.code === 'Escape') {
-        const cancelBtnAction = document.getElementById('action-cancel-btn');
-        const closeBtnDetails = document.getElementById('details-close-btn');
-        if (cancelBtnAction) {
-            e.preventDefault();
-            cancelBtnAction.click();
-            return;
-        } else if (closeBtnDetails) {
-            e.preventDefault();
-            closeBtnDetails.click();
-            return;
-        }
-      }
-
-      // 🚨 FIX: Ignore other shortcuts if user is typing in a textarea or input
+      // 🚨 FIX: Ignore shortcuts if user is typing in a textarea or input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
       // Ensure modifier keys are not pressed to prevent blocking browser defaults (like Ctrl+R)
@@ -69,7 +54,6 @@ export default function CEOApproveAppraisals() {
       const isKeyR = e.code === 'KeyR' || e.key.toLowerCase() === 'r';
       const isKeyA = e.code === 'KeyA' || e.key.toLowerCase() === 'a';
       const isKeyD = e.code === 'KeyD' || e.key.toLowerCase() === 'd';
-      const isEnter = e.code === 'Enter';
 
       if (isKeyR) {
         const viewBtn = document.getElementById('view-btn-0');
@@ -80,7 +64,7 @@ export default function CEOApproveAppraisals() {
         }
       }
 
-      if (isKeyA || isKeyD || isEnter) {
+      if (isKeyA || isKeyD) {
         let btn = null;
         if (isKeyA) {
           const actionBtn = document.getElementById('action-approve-btn');
@@ -90,11 +74,6 @@ export default function CEOApproveAppraisals() {
           const actionBtn = document.getElementById('action-reject-btn');
           const modalBtn = document.getElementById('modal-reject-btn');
           btn = (actionBtn && !actionBtn.disabled) ? actionBtn : ((modalBtn && !modalBtn.disabled) ? modalBtn : null);
-        } else if (isEnter) {
-          // Trigger final confirmation Action Modal buttons on Enter
-          const actionApprove = document.getElementById('action-approve-btn');
-          const actionReject = document.getElementById('action-reject-btn');
-          btn = (actionApprove && !actionApprove.disabled) ? actionApprove : ((actionReject && !actionReject.disabled) ? actionReject : null);
         }
 
         if (btn) {
@@ -322,7 +301,7 @@ export default function CEOApproveAppraisals() {
       <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px]">
-            &#10003; Appraisals Pending CEO Approval
+            &#10003; Approve Appraisals
           </div>
           <div className="text-[13px] text-[#6b7280]">
             Appraisals submitted by HR Manager &mdash; awaiting CEO decision. Click the eye icon or profile to view full details.
@@ -556,7 +535,7 @@ export default function CEOApproveAppraisals() {
 
       <div className="mt-[16px] p-[14px_16px] bg-[#DBEAFE] border border-[#BFDBFE] rounded-[14px] text-[12px] text-[#1E40AF] leading-[1.6]">
         &#8505; <strong>How it works:</strong> HR Manager submits appraisals to CEO &rarr; They appear here &rarr; CEO clicks Approve or Not Approve &rarr; If Not Approved, mandatory comment required &rarr; HR notified by email with CEO comments.<br/>
-        <strong>Keyboard Shortcuts:</strong> Press <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">R</kbd> to view the first appraisal. Use <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">A</kbd> to Approve or <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">D</kbd> to Reject. In confirmation popups, press <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">Enter</kbd> to Submit and <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">Esc</kbd> to Cancel.
+        <strong>Keyboard Shortcuts:</strong> Press <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">R</kbd> to view the first appraisal on the page. In modals, press <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">A</kbd> to Approve, or <kbd className="bg-white/50 px-[4px] py-[1px] rounded-[4px] border border-[#BFDBFE] font-mono text-[11px]">D</kbd> to Reject.
       </div>
 
       {/* 🚨 NEW: Dedicated Appraisal Details Popup Modal */}
@@ -575,10 +554,8 @@ export default function CEOApproveAppraisals() {
                 </div>
               </div>
               <button 
-                id="details-close-btn"
                 onClick={closeDetailsModal}
                 className="w-[32px] h-[32px] rounded-full bg-white border border-[#E2DDD4] flex items-center justify-center text-[#6b7280] hover:bg-slate-100 hover:text-[#0D2B55] transition-colors"
-                title="Shortcut: Esc"
               >
                 &times;
               </button>
@@ -822,11 +799,9 @@ export default function CEOApproveAppraisals() {
 
                   <div className="flex gap-[12px] justify-center">
                     <button 
-                      id="action-cancel-btn"
                       onClick={() => setActionModal({ show: false, type: '', id: null, name: '' })} 
                       className="p-[12px_20px] rounded-[10px] text-[13px] font-[800] text-[#0f1923] bg-white border-[2px] border-[#E2DDD4] hover:border-[#0D2B55] transition-colors"
                       disabled={isProcessing}
-                      title="Shortcut: Esc"
                     >
                       Cancel
                     </button>
@@ -839,7 +814,7 @@ export default function CEOApproveAppraisals() {
                           : 'bg-[#DC2626] hover:bg-[#B91C1C]'
                       }`}
                       disabled={isProcessing}
-                      title={actionModal.type === 'approve' ? 'Shortcut: Enter or A' : 'Shortcut: Enter or D'}
+                      title={actionModal.type === 'approve' ? 'Shortcut: A' : 'Shortcut: D'}
                     >
                       {isProcessing ? 'Processing...' : actionModal.type === 'approve' ? 'Yes, Approve' : 'Submit Rejection'}
                     </button>

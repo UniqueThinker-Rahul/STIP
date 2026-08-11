@@ -53,7 +53,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Appraisals',
         items: [
-          { name: 'Approve Appraisals', href: '/dashboard/ceo/approve', icon: CheckCircle },
+          { name: 'Awaiting Appraisals', href: '/dashboard/ceo/approve', icon: CheckCircle },
           { name: 'All Appraisals', href: '/dashboard/ceo/appraisals', icon: FileText }
         ]
       },

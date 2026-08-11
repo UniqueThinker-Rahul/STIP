@@ -552,7 +552,7 @@ export default function CEOAllAppraisals() {
       <div className="mb-[20px] flex flex-col md:flex-row justify-between items-start md:items-end gap-[12px]">
         <div>
           <div className="text-[20px] font-[700] text-[#0D2B55] mb-[3px] flex items-center gap-[8px]">
-            &#128196; All Appraisals Awaiting CEO Approval
+            &#128196; All Appraisals
           </div>
           <div className="text-[13px] text-[#6b7280]">Full read-only view of every appraisal — all staff, all quarters</div>
         </div>
