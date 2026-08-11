@@ -79,22 +79,19 @@ export default function EmployeeDashboard() {
     if (qtrsForSelectedYear.length > 0) {
       const availableQs = [...new Set(qtrsForSelectedYear.map(q => q.name))].sort();
       
-      setSelectedQuarterName((prev) => {
-        if (!prev || !availableQs.includes(prev)) {
-          const now = new Date();
-          let active = qtrsForSelectedYear.find(q => {
-            const start = new Date(q.startDate); start.setHours(0,0,0,0);
-            const end = new Date(q.endDate); end.setHours(23,59,59,999);
-            return now >= start && now <= end;
-          });
-          return active ? active.name : availableQs[availableQs.length - 1];
-        }
-        return prev;
-      });
+      if (!selectedQuarterName || !availableQs.includes(selectedQuarterName)) {
+        const now = new Date();
+        let active = qtrsForSelectedYear.find(q => {
+          const start = new Date(q.startDate); start.setHours(0,0,0,0);
+          const end = new Date(q.endDate); end.setHours(23,59,59,999);
+          return now >= start && now <= end;
+        });
+        setSelectedQuarterName(active ? active.name : availableQs[availableQs.length - 1]);
+      }
     } else {
       setSelectedQuarterName('');
     }
-  }, [allQuarters, selectedYear]);
+  }, [allQuarters, selectedYear, selectedQuarterName, setSelectedQuarterName]);
 
   // 3. Dynamic Metrics Fetch based on persistent filters
   useEffect(() => {

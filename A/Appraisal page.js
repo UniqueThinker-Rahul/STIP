@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import api from '../../../../lib/api';
-import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 const CRIT_NAMES = {
   deliveredResults: 'Delivered Expected Results',
@@ -84,9 +83,9 @@ export default function EmployeeAppraisal() {
   const currentYearStr = currentYearNum.toString();
   const yearOptions = [currentYearNum - 3, currentYearNum - 2, currentYearNum - 1, currentYearNum, currentYearNum + 1];
 
-  const [filterYear, setFilterYear] = usePersistentFilter('emp_appr_year', currentYearStr);
+  const [filterYear, setFilterYear] = useState(currentYearStr);
   const [isManualYear, setIsManualYear] = useState(false); // 🚨 ADDED: Manual Year State
-  const [qtr, setQtr] = usePersistentFilter('emp_appr_qtr', '');
+  const [qtr, setQtr] = useState('');
   const [dbQuarters, setDbQuarters] = useState([]);
 
   useEffect(() => {
@@ -129,17 +128,10 @@ export default function EmployeeAppraisal() {
   }, [router]);
 
   useEffect(() => {
-    if (dbQuarters.length === 0) return; // Guard clause prevents overriding saved filter on mount
-
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
     if (qtrsForSelectedYear.length > 0) {
       const q1 = qtrsForSelectedYear.find(q => q.name.toUpperCase().includes('Q1'));
-      setQtr((prev) => {
-        if (!prev || !qtrsForSelectedYear.some(q => q._id === prev)) {
-          return q1 ? q1._id : qtrsForSelectedYear[0]._id;
-        }
-        return prev;
-      });
+      setQtr(q1 ? q1._id : qtrsForSelectedYear[0]._id);
     } else {
       setQtr('');
     }
