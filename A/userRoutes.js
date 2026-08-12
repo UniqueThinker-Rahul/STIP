@@ -39,10 +39,9 @@ router.get('/', async (req, res) => {
 // PATCH /api/v1/users/notification-email (Update or Remove own notification email)
 router.patch('/notification-email', async (req, res) => {
   try {
-    // 🚨 UPGRADE: Capture the exact payload keys sent from the Profile Page frontend
-    const roleKey = req.body.roleContext || req.body.targetRole || req.body.role || req.user.role;
-    const emailValue = req.body.notificationEmail !== undefined ? req.body.notificationEmail : (req.body.newEmail !== undefined ? req.body.newEmail : req.body.email);
-    const userId = req.body.userId || req.user.id || req.user._id;
+    const roleKey = req.body.targetRole || req.body.role || req.user.role;
+    const emailValue = req.body.newEmail !== undefined ? req.body.newEmail : req.body.email;
+    const userId = req.body.userId || req.user.id;
 
     if (!roleKey || typeof roleKey !== 'string') {
       return res.status(400).json({ success: false, message: 'Valid role key is required to update notification emails.' });
@@ -61,8 +60,7 @@ router.patch('/notification-email', async (req, res) => {
     
     const isMap = user.personalDetails.notificationEmails instanceof Map;
 
-    // 🚨 UPGRADE: Safely check for null/undefined before calling .trim() to prevent 500 crash on "Remove"
-    if (!emailValue || String(emailValue).trim() === '') {
+    if (!emailValue || emailValue.trim() === '') {
       if (isMap) {
         user.personalDetails.notificationEmails.delete(roleKey);
       } else {
@@ -70,11 +68,11 @@ router.patch('/notification-email', async (req, res) => {
       }
     } else {
       if (isMap) {
-        user.personalDetails.notificationEmails.set(roleKey, String(emailValue).trim());
+        user.personalDetails.notificationEmails.set(roleKey, emailValue);
       } else {
         user.personalDetails.notificationEmails = {
           ...user.personalDetails.notificationEmails,
-          [roleKey]: String(emailValue).trim()
+          [roleKey]: emailValue
         };
       }
     }
@@ -82,13 +80,11 @@ router.patch('/notification-email', async (req, res) => {
     user.markModified('personalDetails.notificationEmails');
     await user.save();
 
-    // 🚨 UPGRADE: Send the fully updated user object back so the frontend UI updates instantly and permanently
     res.status(200).json({ 
       success: true, 
-      data: user,
-      message: (!emailValue || String(emailValue).trim() === '') 
-        ? `Notification email removed successfully for ${roleKey.replace('_', ' ')}.` 
-        : `Notification email updated successfully for ${roleKey.replace('_', ' ')}.` 
+      message: (!emailValue || emailValue.trim() === '') 
+        ? 'Notification email removed successfully.' 
+        : 'Notification email updated successfully.' 
     });
 
   } catch (error) {
