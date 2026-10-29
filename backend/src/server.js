@@ -11,7 +11,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 
 // 🚨 UPGRADE: INITIALIZE EVENT LISTENERS FOR BACKGROUND TASKS (EMAILS)
-// This must be required early so it starts listening before routes are hit
 require('./events/emailListeners'); 
 
 // 1. Import your route files
@@ -26,59 +25,72 @@ const User = require('./models/User'); // Required for dependency checks
 const { authGuard, roleGuard } = require('./middleware/auth'); // Required for securing config routes
 const quarterRoutes = require('./routes/quarterRoutes');
 const auditRoutes = require('./routes/auditRoutes');
-// 🚨 UPGRADE: Import the global API logger middleware
 const apiLogger = require('./middleware/apiLogger');
 const notificationRoutes = require('./routes/notificationRoutes');
 const configRoutes = require('./routes/configRoutes');
 const backupRoutes = require('./routes/backupRoutes');
 const path = require('path');
 
-
 const app = express();
 
-// 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
 app.set('trust proxy', 1);
 
-// Parse ALLOWED_ORIGINS to securely support custom VPN networks and proxy IPs
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : [];
+// 🚨 BULLETPROOF CORS CONFIGURATION
+const getAllowedOrigins = () => {
+  const configured = [
+    'https://stipdash.vercel.app',
+    process.env.FRONTEND_URL,
+    process.env.ALLOWED_ORIGINS
+  ].filter(Boolean);
 
-// === THE CHANGE ===
-// Explicitly inject the Vercel domain if it's missing from the .env variable
-if (!allowedOrigins.includes('https://stipdash.vercel.app')) {
-  allowedOrigins.push('https://stipdash.vercel.app');
-}
+  return configured
+    .flatMap(item => item.split(','))
+    .map(o => o.trim().replace(/\/$/, ''));
+};
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman or mobile apps)
+    // Allow non-browser requests (Postman, mobile apps, server-to-server)
     if (!origin) return callback(null, true);
-    
-    // Dynamically allow any Vercel domain, local dev, Railway, AND Network IPs
-    const isAllowed = allowedOrigins.some(allowed => origin.startsWith(allowed)) ||
-        origin.includes('fsmpc.com') || // 🚨 VPN FIX: Allow corporate domain names regardless of routing IP
-        origin.includes('localhost') || 
-        origin.includes('vercel.app') || 
-        origin.includes('railway.app') ||
-        origin.includes('192.168.') || 
-        origin.includes('10.') || 
-        origin.includes('172.');
+
+    const cleanOrigin = origin.trim().replace(/\/$/, '');
+    const allowed = getAllowedOrigins();
+
+    const isAllowed = 
+      allowed.includes(cleanOrigin) ||
+      allowed.some(domain => cleanOrigin.startsWith(domain)) ||
+      cleanOrigin.endsWith('.vercel.app') ||
+      cleanOrigin.endsWith('.railway.app') ||
+      cleanOrigin.includes('fsmpc.com') ||
+      cleanOrigin.includes('localhost') ||
+      cleanOrigin.includes('127.0.0.1') ||
+      cleanOrigin.includes('192.168.') ||
+      cleanOrigin.includes('10.') ||
+      cleanOrigin.includes('172.');
 
     if (isAllowed) {
       return callback(null, true);
     } else {
-      return callback(new Error('Not allowed by CORS'));
+      // FIX: Pass false instead of throwing an Error object to prevent Express from crashing during OPTIONS preflight
+      console.warn(`[CORS Blocked]: Origin ${origin} not matched.`);
+      return callback(null, false);
     }
   },
-  credentials: true, // Required for cookies/sessions to cross domains
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  optionsSuccessStatus: 200 // Ensures legacy browsers and proxies handle preflight 200 OK cleanly
+};
+
+// Apply CORS globally
+app.use(cors(corsOptions));
+
+// FIX: Handle explicit preflight OPTIONS requests across all endpoints
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
-// 🚨 UPGRADE: Activate the global logger to watch all incoming requests
+// Activate the global logger
 app.use(apiLogger);
 
 // 2. Map the routes to the URL paths
@@ -88,7 +100,6 @@ app.use('/api/v1/appraisals', appraisalRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/company-metrics', companyMetricsRoutes);
-app.use('/api/v1/audit', require('./routes/auditRoutes'));
 app.use('/api/v1/quarters', quarterRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
@@ -105,12 +116,11 @@ app.get('/api/v1/config/dropdowns', async (req, res) => {
   try {
     let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
     
-    // Fallback failsafe if the database isn't populated yet
     if (!config) {
       config = {
         companyCodes: ["FSM", "CDU", "NAR", "GUM"],
         officeLocations: ["HR", "P3MO", "Communications", "ICT", "Finance", "ORCA", "Administration", "Pohnpei Terminal", "CDU", "NPP", "AMMO", "Chuuk Terminal", "Maritime", "Tonoas", "Guam", "Yap Terminal", "Kosrae Terminal", "Nauru Terminal"],
-        jobTitles: [] // Left empty for brevity, but you can populate it
+        jobTitles: []
       };
     }
     
@@ -121,24 +131,21 @@ app.get('/api/v1/config/dropdowns', async (req, res) => {
 });
 
 // PUT /api/v1/config/dropdowns/:category
-// Handles ADD, EDIT, and DELETE with strict Database Dependency Checks
 app.put(
   '/api/v1/config/dropdowns/:category', 
   authGuard, 
-  roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), // 🚨 Managers are explicitly blocked
+  roleGuard('HR_ADMIN', 'ICT_ADMIN', 'CEO'), 
   async (req, res) => {
     try {
-      const { category } = req.params; // 'companyCodes', 'officeLocations', or 'jobTitles'
+      const { category } = req.params;
       const { action, value, oldValue, newValue } = req.body;
 
-      // Validate category
       if (!['companyCodes', 'officeLocations', 'jobTitles'].includes(category)) {
         return res.status(400).json({ message: "Invalid configuration category." });
       }
 
       let config = await AppConfig.findOne({ configType: 'SYSTEM_DROPDOWNS' });
       
-      // Auto-create config if it doesn't exist during the first update
       if (!config) {
           config = new AppConfig({
               configType: 'SYSTEM_DROPDOWNS',
@@ -148,13 +155,9 @@ app.put(
           });
       }
 
-      // ---------------------------------------------------------
-      // ACTION: DELETE (Strict Dependency Check)
-      // ---------------------------------------------------------
       if (action === 'DELETE') {
         let usageCount = 0;
 
-        // 1. Check if the value is currently assigned to any user
         if (category === 'companyCodes') {
           usageCount = await User.countDocuments({ companyCode: value });
         } else if (category === 'officeLocations') {
@@ -163,29 +166,22 @@ app.put(
           usageCount = await User.countDocuments({ 'employmentDetails.jobTitle': value });
         }
 
-        // 2. Block deletion if in use
         if (usageCount > 0) {
           return res.status(409).json({ 
             message: `Deletion Blocked: "${value}" is currently assigned to ${usageCount} employee(s). You must reassign them before deleting this value.` 
           });
         }
 
-        // 3. Safe to delete
         config[category] = config[category].filter(item => item !== value);
       }
 
-      // ---------------------------------------------------------
-      // ACTION: EDIT (Cascade Updates to Users)
-      // ---------------------------------------------------------
       else if (action === 'EDIT') {
         if (!newValue || newValue.trim() === '') return res.status(400).json({ message: "Value cannot be empty." });
         if (config[category].includes(newValue)) return res.status(400).json({ message: "This value already exists." });
 
-        // 1. Update the Config Array
         const index = config[category].indexOf(oldValue);
         if (index !== -1) config[category][index] = newValue.trim();
 
-        // 2. CASCADE UPDATE: Automatically update all users using the old value
         if (category === 'companyCodes') {
           await User.updateMany({ companyCode: oldValue }, { $set: { companyCode: newValue.trim() } });
         } else if (category === 'officeLocations') {
@@ -195,9 +191,6 @@ app.put(
         }
       }
 
-      // ---------------------------------------------------------
-      // ACTION: ADD
-      // ---------------------------------------------------------
       else if (action === 'ADD') {
         if (!value || value.trim() === '') return res.status(400).json({ message: "Value cannot be empty." });
         if (config[category].includes(value.trim())) return res.status(400).json({ message: "This value already exists." });
@@ -220,9 +213,8 @@ app.put(
 
 const PORT = process.env.PORT || 5000;
 
-// 🚀 UPGRADED: Added Connection Pooling to prevent database timeouts
 mongoose.connect(process.env.MONGO_URI, {
-  maxPoolSize: 50, // Allows 50 concurrent database operations instead of the default 5
+  maxPoolSize: 50,
   serverSelectionTimeoutMS: 30000
 })
   .then(() => {
