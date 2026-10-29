@@ -44,6 +44,12 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : [];
 
+// === THE CHANGE ===
+// Explicitly inject the Vercel domain if it's missing from the .env variable
+if (!allowedOrigins.includes('https://stipdash.vercel.app')) {
+  allowedOrigins.push('https://stipdash.vercel.app');
+}
+
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like Postman or mobile apps)
