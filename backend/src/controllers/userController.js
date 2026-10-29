@@ -1,5 +1,4 @@
-// controllers/userController.js
-const User = require('../models/User'); // Ensure the model is imported
+const User = require('../models/User');
 
 exports.getMyTeam = async (req, res) => {
   try {
@@ -7,7 +6,7 @@ exports.getMyTeam = async (req, res) => {
 
     const team = await User.find({ 
       'employmentDetails.reportingTo': managerId,
-      'employmentDetails.isDeleted': { $ne: true } // 🚨 UPGRADE: Hide recycled users from manager's team
+      'employmentDetails.isDeleted': { $ne: true } 
     })
     .populate('employmentDetails.reportingTo', 'personalDetails') 
     .select('-password -security.currentSessionId');
@@ -21,21 +20,51 @@ exports.getMyTeam = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { 
+        $set: { 
+          'employmentDetails.isDeleted': true,
+          'employmentDetails.isActive': false 
+        } 
+      },
+      { new: true }
+    );
+
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
-    res.status(200).json({ success: true, message: "Employee deleted successfully" });
+
+    res.status(200).json({ success: true, message: "Employee moved to recycle bin successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error deleting employee" });
   }
 };
 
-// --- UPGRADED: Comprehensive Dynamic Update Logic ---
+exports.restoreUser = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { 
+        $set: { 
+          'employmentDetails.isDeleted': false,
+          'employmentDetails.isActive': true 
+        } 
+      },
+      { new: true }
+    );
+    
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    res.status(200).json({ success: true, message: "Employee restored successfully" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error restoring employee" });
+  }
+};
+
 exports.updateUserByHR = async (req, res) => {
   try {
-    const { firstName, lastName, jobTitle, officeLocation, companyCode, role, reportingTo, salary, dateOfHire, isActive } = req.body;
+    // 🚨 FIX: Added executiveTo and secondaryRoles to the destructured body parameters
+    const { firstName, lastName, jobTitle, officeLocation, companyCode, role, reportingTo, salary, dateOfHire, isActive, executiveTo, secondaryRoles } = req.body;
     
-    // 🚨 DYNAMIC UPDATE OBJECT: Only updates fields that are provided and not empty strings.
-    // This explicitly prevents empty fields from wiping out existing database data!
     const updateData = {};
     
     if (firstName && firstName.trim() !== '') updateData['personalDetails.firstName'] = firstName.trim();
@@ -53,7 +82,6 @@ exports.updateUserByHR = async (req, res) => {
     if (dateOfHire && dateOfHire.trim() !== '') updateData['employmentDetails.dateOfHire'] = dateOfHire;
     if (isActive !== undefined && isActive !== '') updateData['employmentDetails.isActive'] = isActive;
 
-    // Handle reportingTo safely (Extracts ID and explicitly allows null for 'Unassigned')
     if (reportingTo !== undefined) {
       if (reportingTo === '' || reportingTo === 'unassigned' || reportingTo === null) {
         updateData['employmentDetails.reportingTo'] = null;
@@ -64,7 +92,22 @@ exports.updateUserByHR = async (req, res) => {
       }
     }
 
-    // Failsafe: if nothing was changed, don't ping the database
+    // 🚨 FIX: Explicitly handle and save the Executive Assignment
+    if (executiveTo !== undefined) {
+      if (executiveTo === '' || executiveTo === 'unassigned' || executiveTo === null) {
+        updateData['employmentDetails.executiveTo'] = null;
+      } else if (typeof executiveTo === 'object' && executiveTo._id) {
+        updateData['employmentDetails.executiveTo'] = executiveTo._id;
+      } else {
+        updateData['employmentDetails.executiveTo'] = executiveTo;
+      }
+    }
+
+    // 🚨 FIX: Explicitly handle secondary roles mapping
+    if (secondaryRoles !== undefined && Array.isArray(secondaryRoles)) {
+      updateData['security.secondaryRoles'] = secondaryRoles;
+    }
+
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ success: false, message: "No valid fields provided to update." });
     }
@@ -85,12 +128,21 @@ exports.updateUserByHR = async (req, res) => {
     res.status(500).json({ success: false, message: "Error updating employee" });
   }
 };
-// 🚨 NEW: Fetch all executives for the HR dropdowns
+
 exports.getExecutives = async (req, res) => {
   try {
-    const executives = await User.find({ role: 'EXECUTIVE' }).select('-password');
+    // 🚨 FIX: Query the correct 'security.role' path based on the User schema, and include secondary roles
+    const executives = await User.find({
+      $or: [
+        { 'security.role': 'EXECUTIVE' },
+        { 'security.secondaryRoles': 'EXECUTIVE' }
+      ],
+      'employmentDetails.isDeleted': { $ne: true }
+    }).select('-password');
+
     res.status(200).json({ success: true, data: executives });
   } catch (error) {
+    console.error("Executive Fetch Error:", error);
     res.status(500).json({ success: false, message: 'Server Error fetching executives.' });
   }
 };

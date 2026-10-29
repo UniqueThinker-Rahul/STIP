@@ -77,9 +77,15 @@ router.get('/analytics/category-averages', async (req, res) => {
        'workflow.status': 'APPROVED' 
     };
 
-    // If scope is explicitly team, filter by manager. Otherwise, process the entire company.
+    // If scope is explicitly team, filter by manager or current reporting line.
     if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
-       matchStage.managerId = req.user.id || req.user._id;
+       const userId = req.user.id || req.user._id;
+       const teamUsers = await User.find({ 'employmentDetails.isDeleted': { $ne: true }, 'employmentDetails.reportingTo': userId }).select('_id');
+       const teamUserIds = teamUsers.map(u => u._id);
+       matchStage.$or = [
+         { managerId: userId },
+         { employeeId: { $in: teamUserIds } }
+       ];
     }
 
     let pipeline = [];
@@ -132,7 +138,7 @@ router.get('/analytics/category-averages', async (req, res) => {
 
       // Apply the date filters
       if (andConditions.length > 0) {
-        pipeline.push({ $match: { $and: andConditions } });
+        pipeline.push({ $match: {$and: andConditions } });
       }
     }
 
@@ -176,8 +182,14 @@ router.get('/', async (req, res) => {
     let query = {};
     const userId = req.user.id || req.user._id;
 
-    if (req.user.role === 'MANAGER') query.managerId = userId;
-    else if (req.user.role === 'EMPLOYEE') {
+    if (req.user.role === 'MANAGER') {
+      const teamUsers = await User.find({ 'employmentDetails.isDeleted': { $ne: true }, 'employmentDetails.reportingTo': userId }).select('_id');
+      const teamUserIds = teamUsers.map(u => u._id);
+      query.$or = [
+        { managerId: userId },
+        { employeeId: { $in: teamUserIds } }
+      ];
+    } else if (req.user.role === 'EMPLOYEE') {
       query.employeeId = userId;
       query['workflow.status'] = 'APPROVED'; 
     }
@@ -210,6 +222,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
       if (!['DRAFT', 'REOPENED', 'NOT_APPROVED'].includes(appraisal.workflow.status)) {
         return res.status(403).json({ message: 'Cannot edit an appraisal that has already been submitted.' });
       }
+      appraisal.managerId = managerId;
     } else {
       appraisal = new Appraisal({
         employeeId, managerId, appraisalQuarter, reviewYear: actualYear,

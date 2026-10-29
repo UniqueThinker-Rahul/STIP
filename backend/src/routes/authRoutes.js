@@ -13,7 +13,7 @@ const eventBus = require('../events/eventBus');
 const { sendPasswordResetEmail, sendAdminPasswordAlertEmail } = require('../utils/emailService');
 
 const { authGuard, roleGuard } = require('../middleware/auth');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { updatePassword } = require('../controllers/authController');
 const { logAudit } = require('../utils/logger');
 
@@ -78,8 +78,10 @@ router.post('/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 })
         
         await user.save({ validateBeforeSave: false });
 
-        // 🚨 FIX: Prevent 'undefined' string evaluation in environment variables
-        let frontendUrl = process.env.FRONTEND_URL;
+        // 🚨 FIX: Extract canonical base URL to handle comma-separated environment variables safely
+        let rawFrontend = process.env.FRONTEND_URL || 'https://hrportal.fsmpc.com';
+        let frontendUrl = rawFrontend.split(',')[0].trim();
+
         if (!frontendUrl || frontendUrl === 'undefined' || frontendUrl === 'null' || frontendUrl.includes('undefined')) {
             frontendUrl = 'http://localhost:3000';
         }
@@ -150,8 +152,7 @@ router.post('/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 })
           try {
             const ictAdmins = await User.find({
               'employmentDetails.isActive': true,
-              'employmentDetails.isDeleted': { $ne: true },
-              $or: [
+              'employmentDetails.isDeleted': { $ne: true },$or: [
                 { 'security.role': { $in: ['ICT_ADMIN', 'ICT Admin', 'ict_admin', 'ADMIN', 'admin'] } }, 
                 { 'security.secondaryRoles': { $in: ['ICT_ADMIN', 'ICT Admin', 'ict_admin', 'ADMIN', 'admin'] } }
               ]
@@ -331,12 +332,7 @@ router.patch('/admin-mass-reset', authGuard, roleGuard('ICT_ADMIN'), async (req,
     const result = await User.updateMany(
       { _id: { $ne: req.user.id } }, 
       { 
-        $set: { 
-          password: hashedPassword, 
-          'security.isFirstLogin': true, 
-          'security.currentSessionId': null 
-        },
-        $unset: {
+        $set: {            password: hashedPassword,            'security.isFirstLogin': true,            'security.currentSessionId': null          },$unset: {
           'security.resetRequested': 1,
           'security.resetRequestDate': 1
         }
@@ -361,10 +357,15 @@ router.patch('/update-password', authGuard, updatePassword);
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 100, 
+  max: 25, // Allow 25 attempts per specific user to prevent false locks
   message: { message: 'Too many login attempts. Account temporarily locked.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req, res) => {
+    // 🚨 FIX: Rate limit by username to prevent false corporate subnet lockouts
+    // Uses ipKeyGenerator for safe fallback to prevent IPv6 bypass vulnerabilities
+    return req.body.username ? req.body.username.trim().toLowerCase() : ipKeyGenerator(req, res);
+  }
 });
 
 // POST /api/v1/auth/login

@@ -5,7 +5,6 @@ const appraisalSchema = new mongoose.Schema({
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   
-  // 🚨 UPGRADE: Connected the Appraisal directly to the new AppraisalQuarter model
   appraisalQuarter: { type: mongoose.Schema.Types.ObjectId, ref: 'AppraisalQuarter', required: true },
   
   period: {
@@ -16,7 +15,7 @@ const appraisalSchema = new mongoose.Schema({
   workflow: {
     status: { 
       type: String, 
-      // 🚨 UPGRADE: Added 'ACKNOWLEDGED' to the enum array to prevent MongoDB validation crashes
+      // 🚨 FIX: Removed 'ARCHIVED' completely. Only standard workflow statuses are permitted.
       enum: ['DRAFT', 'SUBMITTED', 'UNDER_HR_REVIEW', 'WITH_CEO', 'APPROVED', 'REOPENED', 'NOT_APPROVED', 'ACKNOWLEDGED'],
       default: 'DRAFT'
     },
@@ -46,10 +45,8 @@ const appraisalSchema = new mongoose.Schema({
 
   stipAward: { type: Number, default: 0 },
 
-  // 🚨 UPGRADE: Added acknowledgedAt field to store the timestamp
   acknowledgedAt: { type: Date }
   
 }, { timestamps: true });
 
-// 🚨 UPGRADE: Safe export to prevent "find is not a function" crash during server hot-reloads
 module.exports = mongoose.models.Appraisal || mongoose.model('Appraisal', appraisalSchema);

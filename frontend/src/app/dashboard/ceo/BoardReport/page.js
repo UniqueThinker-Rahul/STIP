@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import api from '../../../../lib/api';
 import { Search, ChevronDown } from 'lucide-react';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 /* ── stylesheet ── */
 const CSS = `

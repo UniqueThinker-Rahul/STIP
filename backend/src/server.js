@@ -1,6 +1,8 @@
+const dns = require('node:dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+
 // 🚨 GLOBAL NETWORK FIX: Forces Node.js to use IPv4 for all outbound connections.
 // This permanently prevents the Railway ENETUNREACH IPv6 timeout error.
-// const dns = require('dns');
 // dns.setDefaultResultOrder('ipv4first');
 
 require('dotenv').config();
@@ -29,11 +31,18 @@ const apiLogger = require('./middleware/apiLogger');
 const notificationRoutes = require('./routes/notificationRoutes');
 const configRoutes = require('./routes/configRoutes');
 const backupRoutes = require('./routes/backupRoutes');
+const path = require('path');
+
 
 const app = express();
 
 // 🚨 UPGRADED CORS CONFIGURATION: Dynamic domain support to fix Vercel preview blocks
 app.set('trust proxy', 1);
+
+// Parse ALLOWED_ORIGINS to securely support custom VPN networks and proxy IPs
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : [];
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -41,14 +50,16 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     // Dynamically allow any Vercel domain, local dev, Railway, AND Network IPs
-    if (
+    const isAllowed = allowedOrigins.some(allowed => origin.startsWith(allowed)) ||
+        origin.includes('fsmpc.com') || // 🚨 VPN FIX: Allow corporate domain names regardless of routing IP
         origin.includes('localhost') || 
         origin.includes('vercel.app') || 
         origin.includes('railway.app') ||
         origin.includes('192.168.') || 
         origin.includes('10.') || 
-        origin.includes('172.')
-    ) {
+        origin.includes('172.');
+
+    if (isAllowed) {
       return callback(null, true);
     } else {
       return callback(new Error('Not allowed by CORS'));
@@ -80,6 +91,8 @@ app.use('/api/v1/backup', backupRoutes);
 app.use('/api/v1/quarterly-scorecards', require('./routes/quarterlyScorecardRoutes'));
 app.use('/api/v1/executive', require('./routes/executiveRoutes'));
 app.use('/api/v1/reports', require('./routes/boardReportRoutes'));
+app.use('/api/v1/disciplinary', require('./routes/disciplinaryRoutes'));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

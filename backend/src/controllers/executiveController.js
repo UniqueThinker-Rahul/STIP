@@ -18,12 +18,13 @@ exports.createExecutive = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create new Executive User
+    // 🚨 FIX: Moved the role into the 'security' object to strictly match User schema
     user = new User({
       employeeId,
       companyCode: companyCode || 'FSM',
       personalDetails: { firstName, lastName, email },
       employmentDetails: { jobTitle: 'Executive Member' },
-      role: 'EXECUTIVE',
+      security: { role: 'EXECUTIVE' }, 
       password: hashedPassword,
       isFirstLogin: true
     });
@@ -40,21 +41,43 @@ exports.createExecutive = async (req, res) => {
 // 2. PRIVILEGES: Fetches the read-only oversight data for the Executive Dashboard
 exports.getExecutiveDashboardData = async (req, res) => {
   try {
-    // Fetch all employees and managers
-    const employees = await User.find({ role: { $in: ['EMPLOYEE', 'MANAGER'] } }).select('-password');
-    const managers = employees.filter(emp => emp.role === 'MANAGER');
+    const executiveId = req.user.id || req.user._id;
+
+    // Fetch ONLY employees explicitly assigned to this Executive
+    const portfolioStaff = await User.find({ 
+        'employmentDetails.executiveTo': executiveId 
+    })
+    .select('-password')
+    .populate('employmentDetails.reportingTo', 'personalDetails employmentDetails _id');
     
-    // Fetch all appraisals to calculate IPRF and submission status
-    const appraisals = await Appraisal.find().populate('employeeId', 'personalDetails employmentDetails companyCode employeeId');
+    // Extract staff IDs to filter appraisals
+    const staffIds = portfolioStaff.map(emp => String(emp._id));
+
+    // Fetch ONLY appraisals belonging to this Executive's staff
+    const appraisals = await Appraisal.find({
+        employeeId: { $in: staffIds }
+    }).populate('employeeId', 'personalDetails employmentDetails companyCode employeeId');
+
+    // Extract unique managers from the assigned staff to build portfolio metrics
+    const managerMap = new Map();
+    portfolioStaff.forEach(emp => {
+        if (emp.employmentDetails?.reportingTo) {
+            const mgr = emp.employmentDetails.reportingTo;
+            managerMap.set(String(mgr._id), mgr);
+        }
+    });
+    const managers = Array.from(managerMap.values());
 
     // Aggregate Manager Portfolios (Total Staff, Submitted, Remaining, Avg IPRF)
     const managerPortfolios = managers.map(mgr => {
-      // Find all staff reporting to this specific manager
-      const staff = employees.filter(emp => String(emp.employmentDetails?.reportingTo) === String(mgr._id));
-      const staffIds = staff.map(s => String(s._id));
+      // Find all staff reporting to this specific manager within this portfolio
+      const staff = portfolioStaff.filter(emp => 
+        String(emp.employmentDetails?.reportingTo?._id || emp.employmentDetails?.reportingTo) === String(mgr._id)
+      );
+      const mgrStaffIds = staff.map(s => String(s._id));
 
       // Find appraisals belonging to this manager's staff
-      const staffAppraisals = appraisals.filter(app => staffIds.includes(String(app.employeeId?._id || app.employeeId)));
+      const staffAppraisals = appraisals.filter(app => mgrStaffIds.includes(String(app.employeeId?._id || app.employeeId)));
 
       const submittedCount = staffAppraisals.filter(app => app.workflow?.status && app.workflow.status !== 'DRAFT').length;
       const remainingCount = staff.length - submittedCount;
@@ -78,9 +101,9 @@ exports.getExecutiveDashboardData = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        totalEmployees: employees.length,
+        totalEmployees: portfolioStaff.length,
+        portfolioStaff, 
         managerPortfolios,
-        // Send all appraisals so the Executive can view the read-only details of any employee
         allAppraisals: appraisals 
       }
     });

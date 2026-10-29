@@ -2,7 +2,6 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const Appraisal = require('../models/Appraisal'); // 🚨 UPGRADE: Imported Appraisal model for deletion hook
 const userController = require('../controllers/userController');
 const Notification = require('../models/Notification');
 
@@ -23,11 +22,10 @@ router.get('/', async (req, res) => {
       return res.status(403).json({ message: 'Employees do not have directory access.' });
     }
 
-    // Heavy Projection Optimization. We strip out giant data blobs to speed up loading.
     const users = await User.find(query)
       .select('employeeId username personalDetails.firstName personalDetails.lastName personalDetails.notificationEmails employmentDetails.isActive employmentDetails.jobTitle employmentDetails.officeLocation employmentDetails.dateOfHire employmentDetails.salary employmentDetails.prorateValue companyCode security.role security.secondaryRoles')
       .populate('employmentDetails.reportingTo', 'personalDetails.firstName personalDetails.lastName')
-      .populate('employmentDetails.executiveTo', 'personalDetails.firstName personalDetails.lastName') // Added Executive population
+      .populate('employmentDetails.executiveTo', 'personalDetails.firstName personalDetails.lastName') 
       .lean(); 
 
     res.json({ count: users.length, data: users });
@@ -39,7 +37,6 @@ router.get('/', async (req, res) => {
 // PATCH /api/v1/users/notification-email (Update or Remove own notification email)
 router.patch('/notification-email', async (req, res) => {
   try {
-    // 🚨 UPGRADE: Capture the exact payload keys sent from the Profile Page frontend
     const roleKey = req.body.roleContext || req.body.targetRole || req.body.role || req.user.role;
     const emailValue = req.body.notificationEmail !== undefined ? req.body.notificationEmail : (req.body.newEmail !== undefined ? req.body.newEmail : req.body.email);
     const userId = req.body.userId || req.user.id || req.user._id;
@@ -61,7 +58,6 @@ router.patch('/notification-email', async (req, res) => {
     
     const isMap = user.personalDetails.notificationEmails instanceof Map;
 
-    // 🚨 UPGRADE: Safely check for null/undefined before calling .trim() to prevent 500 crash on "Remove"
     if (!emailValue || String(emailValue).trim() === '') {
       if (isMap) {
         user.personalDetails.notificationEmails.delete(roleKey);
@@ -82,7 +78,6 @@ router.patch('/notification-email', async (req, res) => {
     user.markModified('personalDetails.notificationEmails');
     await user.save();
 
-    // 🚨 UPGRADE: Send the fully updated user object back so the frontend UI updates instantly and permanently
     res.status(200).json({ 
       success: true, 
       data: user,
@@ -179,8 +174,7 @@ router.get('/managers', async (req, res) => {
     const managerRoles = ['MANAGER', 'HR_ADMIN', 'CEO'];
     
     const managers = await User.find({
-      'employmentDetails.isDeleted': { $ne: true },
-      $or: [
+      'employmentDetails.isDeleted': { $ne: true },$or: [
         { 'security.role': { $in: managerRoles } },
         { 'security.secondaryRoles': { $in: managerRoles } }
       ]
@@ -195,12 +189,10 @@ router.get('/managers', async (req, res) => {
   }
 });
 
-// 🚨 UPGRADED: Expanded roleGuard to prevent 403 blocks for dual-admins
 router.get('/executives', roleGuard('HR_ADMIN', 'ADMIN', 'ICT_ADMIN', 'admin'), async (req, res) => {
   try {
     const executives = await User.find({
-      'employmentDetails.isDeleted': { $ne: true },
-      $or: [
+      'employmentDetails.isDeleted': { $ne: true },$or: [
         { 'security.role': 'EXECUTIVE' },
         { 'security.secondaryRoles': 'EXECUTIVE' },
         { 'role': 'EXECUTIVE' } 
@@ -391,18 +383,8 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', '
     user.employmentDetails.isActive = false; 
     await user.save();
 
-    // 🚨 UPGRADE: Automatically move active appraisals to Inactive Directory when employee is recycled
-    await Appraisal.updateMany(
-      { employeeId: req.params.id, isArchived: { $ne: true } },
-      { 
-        $set: { 
-          isArchived: true, 
-          archiveReason: 'EMPLOYEE_DELETED',
-          archivedAt: new Date(),
-          'workflow.status': 'ARCHIVED' 
-        } 
-      }
-    );
+    // 🚨 FIX: The "ARCHIVED" overwrite block has been completely deleted here.
+    // Appraisals will now retain their original workflow status safely.
 
     const { logAudit } = require('../utils/logger');
     await logAudit({
@@ -415,7 +397,5 @@ router.delete('/:id', roleGuard('HR_ADMIN', 'ICT_ADMIN', 'ICT Admin', 'admin', '
     res.status(500).json({ message: 'Error deleting user.' });
   }
 });
-
-// 🚨 UPGRADE: Permanent Delete route completely removed to secure the API.
 
 module.exports = router;

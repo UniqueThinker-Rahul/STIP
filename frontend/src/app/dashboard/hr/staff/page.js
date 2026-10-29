@@ -140,6 +140,7 @@ export default function StaffManagement() {
   const [coFilter, setCoFilter] = usePersistentFilter('staff_mgr_co', '');
   const [roleFilter, setRoleFilter] = usePersistentFilter('staff_mgr_role', '');
   const [managerFilter, setManagerFilter] = usePersistentFilter('staff_mgr_manager', '');
+  const [execFilter, setExecFilter] = usePersistentFilter('staff_mgr_exec', ''); // NEW EXECUTIVE FILTER
   
   const [editingStaff, setEditingStaff] = useState(null);
   const [viewingStaff, setViewingStaff] = useState(null);
@@ -220,7 +221,7 @@ export default function StaffManagement() {
   useEffect(() => {
     setCurrentPage(1);
     setSelectedStaffIds([]);
-  }, [search, coFilter, roleFilter, managerFilter, isRecycleBinView]);
+  }, [search, coFilter, roleFilter, managerFilter, execFilter, isRecycleBinView]); // ADDED EXECUTIVES TO DEPENDENCIES
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -250,6 +251,15 @@ export default function StaffManagement() {
       data = data.filter(e => !e.employmentDetails?.reportingTo);
     } else {
       data = data.filter(e => e.employmentDetails?.reportingTo?._id === managerFilter || e.employmentDetails?.reportingTo === managerFilter);
+    }
+  }
+  
+  // NEW EXECUTIVE FILTER LOGIC
+  if (execFilter) {
+    if (execFilter === 'unassigned') {
+      data = data.filter(e => !e.employmentDetails?.executiveTo);
+    } else {
+      data = data.filter(e => e.employmentDetails?.executiveTo?._id === execFilter || e.employmentDetails?.executiveTo === execFilter);
     }
   }
 
@@ -622,8 +632,8 @@ export default function StaffManagement() {
 
       {/* Filters Area */}
       <div className={`p-4 rounded-xl shadow-sm border space-y-4 ${isRecycleBinView ? 'bg-red-50/30 border-red-100' : 'bg-white border-slate-200'}`}>
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="relative flex-1">
+        <div className="flex flex-col md:flex-row gap-4 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..." className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none bg-white" />
           </div>
@@ -654,14 +664,29 @@ export default function StaffManagement() {
           <SearchableFilterDropdown 
             value={managerFilter}
             onChange={setManagerFilter}
-            placeholder="All Managers (Any)"
-            widthClass="w-full md:w-64"
+            placeholder="All Line Managers"
+            widthClass="w-full md:w-56"
             options={[
               { value: 'unassigned', label: '-- Unassigned / CEO --' },
               ...dbManagers.map(m => {
                 const { firstName, middleName, lastName } = splitName(m.personalDetails || m);
                 const mNameStr = middleName ? ` ${middleName}` : '';
                 return { value: m._id, label: `${firstName}${mNameStr} ${lastName}`.trim() };
+              })
+            ]}
+          />
+
+          <SearchableFilterDropdown 
+            value={execFilter}
+            onChange={setExecFilter}
+            placeholder="All Executives"
+            widthClass="w-full md:w-56"
+            options={[
+              { value: 'unassigned', label: '-- Unassigned --' },
+              ...dbExecutives.map(e => {
+                const { firstName, middleName, lastName } = splitName(e.personalDetails || e);
+                const mNameStr = middleName ? ` ${middleName}` : '';
+                return { value: e._id, label: `${firstName}${mNameStr} ${lastName}`.trim() };
               })
             ]}
           />

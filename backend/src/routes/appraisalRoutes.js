@@ -71,7 +71,13 @@ router.get('/analytics/category-averages', async (req, res) => {
     };
 
     if (req.user.role === 'MANAGER' && req.query.scope === 'team') {
-       matchStage.managerId = req.user.id || req.user._id;
+       const userId = req.user.id || req.user._id;
+       const teamUsers = await User.find({ 'employmentDetails.isDeleted': { $ne: true }, 'employmentDetails.reportingTo': userId }).select('_id');
+       const teamUserIds = teamUsers.map(u => u._id);
+       matchStage.$or = [
+         { managerId: userId },
+         { employeeId: { $in: teamUserIds } }
+       ];
     }
 
     let pipeline = [];
@@ -117,7 +123,7 @@ router.get('/analytics/category-averages', async (req, res) => {
       }
 
       if (andConditions.length > 0) {
-        pipeline.push({ $match: { $and: andConditions } });
+        pipeline.push({ $match: {$and: andConditions } });
       }
     }
 
@@ -161,7 +167,12 @@ router.get('/', async (req, res) => {
     const userId = req.user.id || req.user._id;
 
     if (req.user.role === 'MANAGER') {
-      query.managerId = userId;
+      const teamUsers = await User.find({ 'employmentDetails.isDeleted': { $ne: true }, 'employmentDetails.reportingTo': userId }).select('_id');
+      const teamUserIds = teamUsers.map(u => u._id);
+      query.$or = [
+        { managerId: userId },
+        { employeeId: { $in: teamUserIds } }
+      ];
     } else if (req.user.role === 'EMPLOYEE') {
       query.employeeId = userId;
     }
@@ -194,6 +205,7 @@ router.post('/', roleGuard('MANAGER'), async (req, res) => {
       if (!['DRAFT', 'REOPENED', 'NOT_APPROVED'].includes(appraisal.workflow.status)) {
         return res.status(403).json({ message: 'Cannot edit an appraisal that has already been submitted.' });
       }
+      appraisal.managerId = managerId;
     } else {
       appraisal = new Appraisal({
         employeeId, managerId, appraisalQuarter, reviewYear: actualYear,
@@ -558,7 +570,7 @@ exports.approveRejectAppraisal = async (req, res) => {
             }
         }
 
-      } catch (e) { console.error("EMAIL SYSTEM CRASH:", e) }
+      } catch (e) { console.error("📧 [EMAIL SYSTEM CRASH]:", e) }
     });
 
     res.status(200).json({ success: true, data: appraisal }); 
@@ -660,7 +672,6 @@ router.patch('/:id/approve', roleGuard('HR_ADMIN'), async (req, res) => {
 });
 
 // CEO Final Approval
-// 🚨 FIX: Expanded roleGuard to include HR_ADMIN and ADMIN to prevent 404 blocks for dual-role Executives!
 router.patch('/:id/ceo-approve', roleGuard('CEO', 'HR_ADMIN', 'ADMIN', 'ICT_ADMIN'), async (req, res) => {
   try {
     const appraisal = await Appraisal.findById(req.params.id)
@@ -709,7 +720,6 @@ router.patch('/:id/ceo-approve', roleGuard('CEO', 'HR_ADMIN', 'ADMIN', 'ICT_ADMI
         type: 'APPRAISAL_APPROVED', actionUrl: `${process.env.FRONTEND_URL}/dashboard/hr/appraisals`
       });
 
-      // 🚨 UPGRADE: Explicitly separate the Manager loop to ensure MANAGER target email context is used
       if (managerTargets.length > 0) {
         for (const target of managerTargets) {
           let adminEmail = null;
@@ -733,7 +743,6 @@ router.patch('/:id/ceo-approve', roleGuard('CEO', 'HR_ADMIN', 'ADMIN', 'ICT_ADMI
         }
       }
 
-      // 🚨 UPGRADE: Explicitly separate the HR loop to ensure HR_ADMIN target email context is used
       if (hrTargets.length > 0) {
         for (const target of hrTargets) {
           let adminEmail = null;

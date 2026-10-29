@@ -74,6 +74,51 @@ userSchema.pre('save', async function () {
   this.password = await bcrypt.hash(this.password, salt);
 });
 
+// Automatically update managerId on active/draft/pending appraisals when reportingTo changes
+userSchema.post('save', async function () {
+  if (this.isModified('employmentDetails.reportingTo')) {
+    try {
+      const Appraisal = mongoose.model('Appraisal');
+      await Appraisal.updateMany(
+        {
+          employeeId: this._id,
+          'workflow.status': { $nin: ['APPROVED', 'ACKNOWLEDGED'] }
+        },
+        {
+          $set: { managerId: this.employmentDetails.reportingTo }
+        }
+      );
+    } catch (err) {
+      console.error('Error updating appraisals on manager change:', err);
+    }
+  }
+});
+
+userSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (doc) {
+  if (!doc) return;
+  const update = this.getUpdate();
+  const reportingTo = update.$set 
+    ? (update.$set['employmentDetails.reportingTo'] !== undefined ? update.$set['employmentDetails.reportingTo'] : update.$set.employmentDetails?.reportingTo) 
+    : (update['employmentDetails.reportingTo'] !== undefined ? update['employmentDetails.reportingTo'] : update.employmentDetails?.reportingTo);
+
+  if (reportingTo !== undefined) {
+    try {
+      const Appraisal = mongoose.model('Appraisal');
+      await Appraisal.updateMany(
+        {
+          employeeId: doc._id,
+          'workflow.status': { $nin: ['APPROVED', 'ACKNOWLEDGED'] }
+        },
+        {
+          $set: { managerId: reportingTo }
+        }
+      );
+    } catch (err) {
+      console.error('Error updating appraisals on query manager change:', err);
+    }
+  }
+});
+
 // 🚀 UPGRADE: Added indexes to fix the hanging Staff Directory load times
 userSchema.index({ 'security.role': 1, 'employmentDetails.isDeleted': 1 });
 userSchema.index({ 'employmentDetails.reportingTo': 1 });

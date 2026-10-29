@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import api from '../../../../lib/api';
+import usePersistentFilter from '../../../../hooks/usePersistentFilter';
 
 /* ── stylesheet ── */
 const CSS = `

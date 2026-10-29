@@ -91,12 +91,17 @@ const SearchableDropdown = ({ value, onChange, options, placeholder, widthClass 
 };
 // ----------------------------------------------
 
+const getSafeStatus = (appraisal) => {
+  if (!appraisal) return 'UNKNOWN';
+  if (appraisal.isMissing) return 'NOT_STARTED';
+  return appraisal.workflow?.status || 'UNKNOWN';
+};
+
 export default function CEOAllAppraisals() {
   const [appraisals, setAppraisals] = useState([]);
   const [staff, setStaff] = useState([]); 
   const [loading, setLoading] = useState(true);
   
-  // 🚨 UPGRADE: Now holding a dictionary of LIVE CP scores for ALL quarters
   const [quarterCPs, setQuarterCPs] = useState({});
   
   const [dbQuarters, setDbQuarters] = useState([]);
@@ -191,7 +196,6 @@ export default function CEOAllAppraisals() {
     fetchData();
   }, []);
 
-  // 🚨 UPGRADE: Fetch ALL metrics for the selected year and calculate true CP dynamically
   useEffect(() => {
     const fetchAllYearMetrics = async () => {
       if (!filterYear) return;
@@ -228,7 +232,7 @@ export default function CEOAllAppraisals() {
             }
           }
         } catch (e) {
-          // If a quarter isn't created yet, ignore
+          // Ignore uncreated quarters
         }
       }));
       
@@ -239,7 +243,6 @@ export default function CEOAllAppraisals() {
   }, [filterYear]);
 
   useEffect(() => {
-    // 🚨 UPGRADE: Guard clause prevents the system from wiping out the persistent qtr filter on initial mount
     if (dbQuarters.length === 0) return;
 
     const qtrsForSelectedYear = dbQuarters.filter(q => q.year.toString() === filterYear);
@@ -324,13 +327,13 @@ export default function CEOAllAppraisals() {
     
     let matchesStatus = true;
     if (statusFilter !== '') {
-      const st = a.workflow?.status;
+      const st = getSafeStatus(a);
       if (statusFilter === 'NOT_STARTED') {
         matchesStatus = a.isMissing || ['NOT_STARTED'].includes(st);
       } else if (statusFilter === 'DRAFT') {
         matchesStatus = ['DRAFT', 'REOPENED'].includes(st);
       } else if (statusFilter === 'SUBMITTED_TO_HR') {
-        matchesStatus = ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(st);
+        matchesStatus = ['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR', 'SUBMITTED_TO_HR'].includes(st);
       } else if (statusFilter === 'WITH_CEO') {
         matchesStatus = ['WITH_CEO'].includes(st);
       } else if (statusFilter === 'APPROVED') {
@@ -345,8 +348,8 @@ export default function CEOAllAppraisals() {
     return matchesSearch && matchesYear && matchesQtr && matchesStatus && matchesCo && matchesMgr && matchesOffice;
   }).sort((a, b) => {
     const ceoStatuses = ['WITH_CEO', 'APPROVED', 'ACKNOWLEDGED'];
-    const isACeo = ceoStatuses.includes(a.workflow?.status) ? 1 : 0;
-    const isBCeo = ceoStatuses.includes(b.workflow?.status) ? 1 : 0;
+    const isACeo = ceoStatuses.includes(getSafeStatus(a)) ? 1 : 0;
+    const isBCeo = ceoStatuses.includes(getSafeStatus(b)) ? 1 : 0;
 
     if (isACeo !== isBCeo) {
       return isBCeo - isACeo; 
@@ -396,26 +399,31 @@ export default function CEOAllAppraisals() {
 
   const StatusTag = ({ st }) => {
     if (!st) return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
-    switch(st) {
+    
+    const normalizedSt = String(st).toUpperCase();
+    
+    switch(normalizedSt) {
       case 'NOT_STARTED': 
         return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Not started</span>;
       case 'DRAFT':
       case 'REOPENED':
         return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">Saved in Draft</span>;
       case 'SUBMITTED':
+      case 'SUBMITTED_TO_HR':
       case 'APPROVED_BY_HR': 
       case 'UNDER_HR_REVIEW':
         return <span className="bg-[#DBEAFE] text-[#1E40AF] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#BFDBFE] whitespace-nowrap">Submitted to HR</span>;
       case 'WITH_CEO': 
         return <span className="bg-[#FEF3C7] text-[#92400E] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FDE68A] whitespace-nowrap">With CEO</span>;
       case 'APPROVED': 
+      case 'COMPLETED': 
         return <span className="bg-[#D1FAE5] text-[#065F46] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#A7F3D0] whitespace-nowrap">CEO Approved</span>;
       case 'NOT_APPROVED': 
         return <span className="bg-[#FEF2F2] text-[#991B1B] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#FECACA] whitespace-nowrap">Rejected by CEO</span>;
       case 'ACKNOWLEDGED':
         return <span className="bg-[#F0FDF4] text-[#15803D] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[800] border border-[#BBF7D0] whitespace-nowrap flex items-center gap-[4px]"><span className="text-[10px]">✓</span> Acknowledged</span>;
       default: 
-        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap">UNKNOWN</span>;
+        return <span className="bg-[#FAF8F4] text-[#6b7280] px-[8px] py-[3px] rounded-[6px] text-[11px] font-[700] border border-[#E2DDD4] whitespace-nowrap uppercase">{String(st).replace(/_/g, ' ')}</span>;
     }
   };
 
@@ -423,7 +431,12 @@ export default function CEOAllAppraisals() {
     let csvContent = "Employee Name,Employee ID,Job Title,Office Station,Company,Line Manager,Quarter,Score,Pro-Rata,Award %,Status,Last Updated Date & Time\n";
     
     filteredData.forEach(a => {
-      const empName = `"${a.employeeId?.personalDetails?.firstName || ''} ${a.employeeId?.personalDetails?.lastName || ''}"`;
+      const isDeleted = !staff.some(s => s._id === (a.employeeId?._id || a.employeeId)) && !a.isMissing;
+      
+      const fName = a.employeeId?.personalDetails?.firstName || '';
+      const lName = a.employeeId?.personalDetails?.lastName || '';
+      const empName = `"${fName} ${lName}${isDeleted ? ' (Left Company)' : ''}"`;
+      
       const empId = `"${a.employeeId?.employeeId || ''}"`;
       const jobTitle = `"${a.employeeId?.employmentDetails?.jobTitle || ''}"`;
       const office = `"${a.employeeId?.employmentDetails?.officeLocation || 'Unassigned'}"`;
@@ -435,34 +448,37 @@ export default function CEOAllAppraisals() {
       const qtrNameFull = getQuarterName(appQuarterId);
       const qtrName = `"${qtrNameFull}"`;
       
-      const iprf = a.calculatedResults?.finalIprfScore || 0;
-      const score = `"${a.isMissing ? 'N/A' : iprf.toFixed(1)}"`;
+      // ✅ FIX: Check for explicit existence rather than just > 0
+      const hasIprf = a.calculatedResults?.finalIprfScore !== undefined && a.calculatedResults?.finalIprfScore !== null;
+      const iprf = hasIprf ? a.calculatedResults.finalIprfScore : 0;
+      const score = `"${a.isMissing || !hasIprf ? 'N/A' : iprf.toFixed(1)}"`;
       
       const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
       const proRataValue = prMonths / 12;
       const proRataStr = `"${proRataValue.toFixed(3)}"`;
 
-      // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
       const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
       const qKey = qMatch ? qMatch[0].toUpperCase() : null;
       const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
 
+      // ✅ FIX: Check for explicit existence rather than just > 0
       let awardDisplay = '—';
-      if (liveCp !== null && iprf > 0) {
-        // Calculation: %Award = CP * IPRF rating
+      if (liveCp !== null && hasIprf) {
         const finalAw = liveCp * iprf;
         awardDisplay = `"${finalAw.toFixed(2)}"`;
       }
       
-      let statusRaw = a.workflow?.status;
-      let statusText = 'UNKNOWN';
+      let statusRaw = getSafeStatus(a);
+      let statusText = statusRaw ? String(statusRaw).replace(/_/g, ' ') : 'UNKNOWN';
+      
       if (a.isMissing || ['NOT_STARTED'].includes(statusRaw)) statusText = 'Not started';
       else if (['DRAFT', 'REOPENED'].includes(statusRaw)) statusText = 'Saved in Draft';
-      else if (['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR'].includes(statusRaw)) statusText = 'Submitted to HR';
+      else if (['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR', 'SUBMITTED_TO_HR'].includes(statusRaw)) statusText = 'Submitted to HR';
       else if (statusRaw === 'WITH_CEO') statusText = 'With CEO/ Pending to CEO';
-      else if (statusRaw === 'APPROVED') statusText = 'CEO Approved';
+      else if (['APPROVED', 'COMPLETED'].includes(statusRaw)) statusText = 'CEO Approved';
       else if (statusRaw === 'NOT_APPROVED') statusText = 'Rejected by CEO/ Not Approve by CEO';
       else if (statusRaw === 'ACKNOWLEDGED') statusText = 'Emp. Acknowledged';
+      
       const status = `"${statusText}"`;
       
       const updated = `"${a.updatedAt ? new Date(a.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}"`;
@@ -729,21 +745,28 @@ export default function CEOAllAppraisals() {
                   const coCode = a.employeeId?.companyCode || 'FSM';
                   const jobTitle = a.employeeId?.employmentDetails?.jobTitle || 'Staff';
                   
+                  const isActiveStaff = staff.some(s => s._id === (a.employeeId?._id || a.employeeId));
+                  const isDeleted = !isActiveStaff && !a.isMissing;
+
+                  const currentStatus = getSafeStatus(a);
+
                   const appQuarterId = a.appraisalQuarter?._id || a.appraisalQuarter || a.period?.quarter;
                   const qtrNameFull = getQuarterName(appQuarterId);
                   
-                  const iprf = a.calculatedResults?.finalIprfScore || 0;
+                  // ✅ FIX: Check for explicit existence rather than just > 0
+                  const hasIprf = a.calculatedResults?.finalIprfScore !== undefined && a.calculatedResults?.finalIprfScore !== null;
+                  const iprf = hasIprf ? a.calculatedResults.finalIprfScore : 0;
+                  
                   const prMonths = a.employeeId?.employmentDetails?.prorateValue || 12;
                   const proRataValue = prMonths / 12;
                   
-                  // 🚨 UPGRADE: Fetch dynamic CP strictly for this row's quarter
                   const qMatch = String(qtrNameFull).match(/Q[1-4]/i);
                   const qKey = qMatch ? qMatch[0].toUpperCase() : null;
                   const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
 
+                  // ✅ FIX: Check for explicit existence rather than just > 0
                   let awardDisplay = '—';
-                  if (liveCp !== null && iprf > 0) {
-                    // Calculation: %Award = CP * IPRF rating
+                  if (liveCp !== null && hasIprf) {
                     const finalAw = liveCp * iprf;
                     awardDisplay = `${finalAw.toFixed(2)}`;
                   }
@@ -752,11 +775,18 @@ export default function CEOAllAppraisals() {
                     <tr key={a._id} className={`${a.isMissing ? 'bg-red-50/30' : i % 2 === 1 ? 'bg-[#FAF8F4]/40' : 'bg-white'} hover:bg-[#FAF8F4] transition-colors`}>
                       <td className="p-[12px_16px] whitespace-nowrap">
                         <div className="flex items-center gap-[9px]">
-                          <div className="w-[30px] h-[30px] rounded-[6px] bg-[#E2DDD4] text-[#0f1923] font-[800] flex items-center justify-center text-[11px]">
+                          <div className={`w-[30px] h-[30px] rounded-[6px] font-[800] flex items-center justify-center text-[11px] ${isDeleted ? 'bg-red-100 text-red-700' : 'bg-[#E2DDD4] text-[#0f1923]'}`}>
                             {init1}{init2}
                           </div>
                           <div>
-                            <div className="font-[600] text-[#0D2B55]">{empName}</div>
+                            <div className="font-[600] text-[#0D2B55] flex items-center gap-[6px]">
+                              {empName}
+                              {isDeleted && (
+                                <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] text-[9px] font-[800] px-[4px] py-[2px] rounded uppercase tracking-wider">
+                                  Left Company
+                                </span>
+                              )}
+                            </div>
                             {!a.isMissing && a.updatedAt && (
                                <div className="text-[10px] text-[#6b7280]">
                                  {new Date(a.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
@@ -765,7 +795,7 @@ export default function CEOAllAppraisals() {
                           </div>
                         </div>
                       </td>
-                      <td className="p-[12px_16px] whitespace-nowrap text-[12px] text-[#0f1923]">
+                      <td className={`p-[12px_16px] whitespace-nowrap text-[12px] ${isDeleted ? 'text-gray-400 italic' : 'text-[#0f1923]'}`}>
                         {jobTitle}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
@@ -779,14 +809,13 @@ export default function CEOAllAppraisals() {
                         </span>
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        {a.isMissing ? (
-                           <span className="text-[#6b7280] font-bold">—</span>
-                        ) : iprf > 0 ? (
+                        {/* ✅ FIX: Correctly check hasIprf to allow 0.0 scores to be displayed */}
+                        {a.isMissing || !hasIprf ? (
+                           <span className="text-[11px] font-[800] text-[#6b7280]">—</span>
+                        ) : (
                           <span className={`px-[8px] py-[4px] rounded-[6px] text-[11px] font-[800] border ${iprfStyle(iprf)}`}>
                             {iprf.toFixed(1)} ({iprfLabel(iprf)})
                           </span>
-                        ) : (
-                          <span className="text-[11px] font-[800] text-[#6b7280">—</span>
                         )}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center font-[600] text-[#0D2B55]">
@@ -796,7 +825,7 @@ export default function CEOAllAppraisals() {
                         {a.isMissing ? '—' : awardDisplay}
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
-                        <StatusTag st={a.workflow?.status} />
+                        <StatusTag st={currentStatus} />
                       </td>
                       <td className="p-[12px_16px] whitespace-nowrap text-center">
                         {a.isMissing ? (
@@ -885,8 +914,13 @@ export default function CEOAllAppraisals() {
                   {selectedAppraisal.employeeId?.personalDetails?.firstName?.[0] || ''}{selectedAppraisal.employeeId?.personalDetails?.lastName?.[0] || ''}
                 </div>
                 <div>
-                  <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight">
+                  <h3 className="text-[20px] font-[800] text-[#0D2B55] leading-tight flex items-center gap-2">
                     {selectedAppraisal.employeeId?.personalDetails?.firstName} {selectedAppraisal.employeeId?.personalDetails?.lastName}
+                    {!staff.some(s => s._id === (selectedAppraisal.employeeId?._id || selectedAppraisal.employeeId)) && (
+                      <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] text-[10px] font-[800] px-[6px] py-[2px] rounded uppercase tracking-wider whitespace-nowrap">
+                        Left Company
+                      </span>
+                    )}
                   </h3>
                   <div className="text-[13px] text-[#6b7280] mt-[2px] font-[500]">
                     {selectedAppraisal.employeeId?.employmentDetails?.jobTitle} &middot; ID: {selectedAppraisal.employeeId?.employeeId}
@@ -903,7 +937,9 @@ export default function CEOAllAppraisals() {
                   <div className="text-[10px] font-[800] text-[#6b7280] uppercase tracking-widest mb-[4px]">STIP Award</div>
                   <div className="text-[22px] font-[800] text-[#059669]">
                     {(() => {
-                      const iprf = selectedAppraisal.calculatedResults?.finalIprfScore || 0;
+                      // ✅ FIX: Apply identical check here
+                      const hasIprf = selectedAppraisal.calculatedResults?.finalIprfScore !== undefined && selectedAppraisal.calculatedResults?.finalIprfScore !== null;
+                      const iprf = hasIprf ? selectedAppraisal.calculatedResults.finalIprfScore : 0;
                       
                       const appQuarterId = selectedAppraisal.appraisalQuarter?._id || selectedAppraisal.appraisalQuarter || selectedAppraisal.period?.quarter;
                       const qtrNameFull = getQuarterName(appQuarterId);
@@ -912,8 +948,7 @@ export default function CEOAllAppraisals() {
                       const liveCp = qKey && quarterCPs[qKey] !== undefined ? quarterCPs[qKey] : null;
 
                       let displayAward = '—';
-                      if (liveCp !== null && iprf > 0) {
-                        // Calculation: %Award = CP * IPRF rating
+                      if (liveCp !== null && hasIprf) {
                         const finalAw = liveCp * iprf;
                         displayAward = `${finalAw.toFixed(2)}`;
                       }
@@ -1009,7 +1044,7 @@ export default function CEOAllAppraisals() {
               })()}
               
               <div className="mt-[24px] pt-[16px] border-t border-[#E2DDD4] flex items-center justify-between">
-                <StatusTag st={selectedAppraisal.workflow?.status} />
+                <StatusTag st={getSafeStatus(selectedAppraisal)} />
                 <div className="text-[11px] text-[#6b7280] font-mono font-[600]">REF: {selectedAppraisal.appraisalRef || selectedAppraisal._id}</div>
               </div>
             </div>

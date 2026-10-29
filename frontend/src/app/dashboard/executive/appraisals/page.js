@@ -47,43 +47,59 @@ export default function PortfolioAppraisals() {
         const execName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Executive Member';
         
         const res = await api.get('/executive/dashboard');
-        const { managerPortfolios = [], allAppraisals = [] } = res.data?.data || {};
+        // ✅ FIX: Extract portfolioStaff
+        const { managerPortfolios = [], allAppraisals = [], portfolioStaff = [] } = res.data?.data || {};
 
         const staffMap = new Map();
-        const mgrMap = new Map();
-        managerPortfolios.forEach(m => mgrMap.set(String(m.managerId), m.managerName));
-
-        allAppraisals.forEach(a => {
-          const emp = a.employeeId;
-          if (!emp) return;
+        
+        // ✅ FIX: Build the staffMap purely from the real assigned portfolioStaff, NOT from appraisals
+        portfolioStaff.forEach(emp => {
+          let first = emp.personalDetails?.firstName || '';
+          const last = emp.personalDetails?.lastName || '';
+          const mName = emp.personalDetails?.middleName || '';
+          if (!mName && first.trim().includes(' ')) {
+            first = first.trim().split(/\s+/)[0];
+          }
           
-          if (!staffMap.has(emp._id)) {
-            let first = emp.personalDetails?.firstName || '';
-            const last = emp.personalDetails?.lastName || '';
-            const mName = emp.personalDetails?.middleName || '';
-            if (!mName && first.trim().includes(' ')) {
-              first = first.trim().split(/\s+/)[0];
-            }
-            
-            staffMap.set(emp._id, {
-              id: emp._id,
-              fn: first,
-              ln: last,
-              title: emp.employmentDetails?.jobTitle || '',
-              station: emp.employmentDetails?.officeLocation || '',
-              parent: emp.employmentDetails?.reportingTo?._id || emp.employmentDetails?.reportingTo || null,
-              mgr: 'Line Manager',
-              appr: {}
-            });
+          let mgrName = 'Line Manager';
+          let parentId = null;
+          
+          if (emp.employmentDetails?.reportingTo) {
+             const rt = emp.employmentDetails.reportingTo;
+             parentId = rt._id || rt;
+             if (rt.personalDetails) {
+                 mgrName = `${rt.personalDetails.firstName || ''} ${rt.personalDetails.lastName || ''}`.trim();
+             }
           }
 
-          const q = a.quarter || 'Q2';
+          staffMap.set(emp._id, {
+            id: emp._id,
+            fn: first,
+            ln: last,
+            title: emp.employmentDetails?.jobTitle || '',
+            station: emp.employmentDetails?.officeLocation || '',
+            parent: parentId,
+            mgr: mgrName,
+            appr: {}
+          });
+        });
+
+        // ✅ FIX: Map allAppraisals onto the existing staffMap
+        allAppraisals.forEach(a => {
+          const emp = a.employeeId;
+          if (!emp || !staffMap.has(emp._id)) return;
+          
+          // Use nested quarter naming if populated
+          const q = a.appraisalQuarter?.name || a.quarter || 'Q2';
           const s = staffMap.get(emp._id);
           
           let st = 'Pending';
-          if (a.workflow?.status === 'APPROVED_BY_CEO') st = 'CEO Approved';
-          else if (a.workflow?.status === 'SUBMITTED_TO_HR') st = 'With HR';
-          else if (a.workflow?.status === 'SUBMITTED_TO_CEO') st = 'Submitted to CEO';
+          const wfStatus = a.workflow?.status;
+          
+          // Broad status matching handling both legacy and current statuses
+          if (wfStatus === 'APPROVED_BY_CEO' || wfStatus === 'APPROVED' || wfStatus === 'COMPLETED') st = 'CEO Approved';
+          else if (['SUBMITTED', 'UNDER_HR_REVIEW', 'APPROVED_BY_HR', 'SUBMITTED_TO_HR'].includes(wfStatus)) st = 'With HR';
+          else if (wfStatus === 'SUBMITTED_TO_CEO' || wfStatus === 'WITH_CEO') st = 'Submitted to CEO';
 
           s.appr[q] = { 
             status: st,
@@ -100,11 +116,7 @@ export default function PortfolioAppraisals() {
           };
         });
 
-        const finalStaff = Array.from(staffMap.values()).map(s => {
-          if (s.parent) s.mgr = mgrMap.get(String(s.parent)) || 'Line Manager';
-          return s;
-        });
-
+        const finalStaff = Array.from(staffMap.values());
         setExecData({ name: execName, title: user.jobTitle, area: user.companyCode, staff: finalStaff });
       } catch (error) {
         console.error("Error fetching appraisals:", error);
@@ -182,6 +194,8 @@ export default function PortfolioAppraisals() {
             >
               <option value="Q2">Q2 2026</option>
               <option value="Q1">Q1 2026</option>
+              <option value="Q3">Q3 2026</option>
+              <option value="Q4">Q4 2026</option>
             </select>
             <select 
               value={filterLM} onChange={e => setFilterLM(e.target.value)}
@@ -221,7 +235,7 @@ export default function PortfolioAppraisals() {
             </thead>
             <tbody>
               {list.length === 0 ? (
-                <tr><td colSpan="7" className="p-[20px] text-center text-[#667085] text-[13px]">No appraisals match your filters.</td></tr>
+                <tr><td colSpan="7" className="p-[30px] text-center text-[#667085] text-[13px]">No staff assigned to your portfolio yet.</td></tr>
               ) : list.map(s => {
                 const a = s.appr[filterQ];
                 const pen = !a || a.status === 'Pending';
@@ -255,7 +269,7 @@ export default function PortfolioAppraisals() {
 
       {/* Built-in Modal */}
       {selectedAppraisal && (
-        <div className="fixed inset-0 bg-[#0D2B55]/40 flex items-center justify-center p-[20px] z-50 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-[#0D2B55]/40 flex items-center justify-center p-[20px] z-[100] animate-in fade-in duration-200">
           <div className="bg-white rounded-[16px] w-[600px] max-w-full shadow-2xl flex flex-col max-h-[90vh] zoom-in-95 animate-in">
             <div className="p-[18px_24px] border-b border-[#E4E0D8] flex justify-between items-center bg-[#FBFAF7] rounded-t-[16px]">
               <h2 className="text-[16px] font-extrabold text-[#0D2B55] m-0">Appraisal Review</h2>

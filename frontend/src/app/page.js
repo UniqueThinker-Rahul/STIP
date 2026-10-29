@@ -66,7 +66,7 @@ export default function UnifiedLogin() {
         else if (activeRole === 'CEO') router.push('/dashboard/ceo');
         else if (activeRole === 'ICT_ADMIN') router.push('/dashboard/ict');
         // 👇 ADDED: Executive Member Route Support
-        else if (activeRole === 'EXECUTIVE') router.push('/dashboard/executive');
+        else if (activeRole === 'EXECUTIVE') router.push('/dashboard/executive/disciplinary/appraisals');
         else router.push('/dashboard/manager');
       }
     } catch (err) {

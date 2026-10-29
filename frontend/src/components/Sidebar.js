@@ -5,10 +5,10 @@ import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import Cookies from 'js-cookie';
 import { 
-  Home, Activity, CheckCircle, FileText, Users, BarChart, 
+  Home, AlertTriangleIcon, Activity, CheckCircle, FileText, Users, BarChart, 
   UserPlus, FileEdit, Settings, HelpCircle, X, CheckSquare,
   Lock, Shield, Database, Calendar, Mail, Download, Calculator,
-  Network // Added for Portfolio Tree icon
+  Network, Scale, MessageSquare, Inbox, RotateCcw, Folder, Wrench, Info, PlusCircle, Landmark
 } from 'lucide-react';
 
 export default function Sidebar({ role, isOpen, setIsOpen, user }) {
@@ -46,8 +46,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         category: 'Scorecard',
         items: [
           { name: 'KPA Scorecard', href: '/dashboard/ceo/kpa', icon: Activity },
-           { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar },
-           { name: 'Quarter Scorecard', href: '/dashboard/ceo/QuarterlyScorecard', icon: Calendar }
+          { name: 'Quarter Cycles', href: '/dashboard/admin/quarters', icon: Calendar },
+          { name: 'Quarter Scorecard', href: '/dashboard/ceo/QuarterlyScorecard', icon: Calendar }
         ]
       },
       {
@@ -61,6 +61,18 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         category: 'Staff',
         items: [
           { name: 'All Staff', href: '/dashboard/ceo/staff', icon: Users }
+        ]
+      },
+      {
+        category: 'Disciplinary Management',
+        items: [
+          { name: 'Referrals', href: '/dashboard/ceo/disciplinary/referrals', icon: Inbox },
+          { name: 'Table of Charges', href: '/dashboard/ceo/disciplinary/charges', icon: Scale },
+          { name: 'Re-instatement', href: '/dashboard/ceo/disciplinary/reinstatement', icon: RotateCcw },
+          { name: 'Weekly Report', href: '/dashboard/ceo/disciplinary/weekly-report', icon: FileText },
+          { name: 'Counselling Log', href: '/dashboard/ceo/disciplinary/counselling', icon: MessageSquare },
+          { name: 'Audit Log', href: '/dashboard/ceo/disciplinary/audit', icon: FileText },
+          { name: 'How it works', href: '/dashboard/ceo/disciplinary/help', icon: Info }
         ]
       },
       {
@@ -102,6 +114,18 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         ]
       },
       {
+        category: 'Disciplinary Management',
+        items: [
+          { name: 'HR Queue', href: '/dashboard/hr/disciplinary/queue', icon: Inbox },
+          { name: 'All Cases', href: '/dashboard/hr/disciplinary/cases', icon: Folder },
+          { name: 'Counselling Log', href: '/dashboard/hr/disciplinary/counselling', icon: MessageSquare },
+          { name: 'Table of Charges', href: '/dashboard/hr/disciplinary/charges', icon: Scale },
+          { name: 'Weekly CEO Report', href: '/dashboard/hr/disciplinary/weekly-report', icon: FileText },
+          { name: 'Settings', href: '/dashboard/hr/disciplinary/settings', icon: Wrench },
+          { name: 'How it works', href: '/dashboard/hr/disciplinary/help', icon: Info }
+        ]
+      },
+      {
         category: 'Reports',
         items: [
           { name: 'Reports', href: '/dashboard/hr/reports', icon: BarChart },
@@ -129,28 +153,64 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         items: [
           { name: 'My Team', href: '/dashboard/manager/team', icon: Users }
         ]
+      },
+      {
+        category: 'Disciplinary Management',
+        items: [
+          { name: 'My Team', href: '/dashboard/manager/disciplinary/team', icon: Users },
+          { name: 'Counselling', href: '/dashboard/manager/disciplinary/counselling', icon: MessageSquare },
+          { name: 'Raise a Case', href: '/dashboard/manager/disciplinary/raise', icon: PlusCircle },
+          { name: 'Table of Charges', href: '/dashboard/manager/disciplinary/charges', icon: Scale },
+          { name: 'How it works', href: '/dashboard/manager/disciplinary/help', icon: Info }
+        ]
       }
     ],
-    // 🚨 NEW: Integrated exact structure from the Executive prototype image
     EXECUTIVE: [
+      // {
+      //   category: 'Overview',
+      //   items: [
+      //     { name: 'Dashboard', href: '/dashboard/executive', icon: Home }
+      //   ]
+      // },
+      // {
+      //   category: 'Portfolio',
+      //   items: [
+      //     { name: 'My Portfolio', href: '/dashboard/executive/portfolio', icon: Network },
+      //     { name: 'Portfolio Appraisals', href: '/dashboard/executive/appraisals', icon: CheckCircle },
+      //     { name: 'Portfolio Discipline', href: '/dashboard/executive/discipline', icon: Users }
+      //   ]
+      // },
       {
         category: 'Overview',
         items: [
-          { name: 'Dashboard', href: '/dashboard/executive', icon: Home }
+          { name: 'My Portfolio', href: '/dashboard/executive/disciplinary/portfolio', icon: Folder },
+          { name: 'Portfolio Appraisals', href: '/dashboard/executive/disciplinary/appraisals', icon: BarChart },
+          { name: 'Portfolio Counselling', href: '/dashboard/executive/disciplinary/counselling', icon: MessageSquare },
+          { name: 'Portfolio Discipline', href: '/dashboard/executive/disciplinary/discipline', icon: Scale },
+          { name: 'How it works', href: '/dashboard/executive/disciplinary/help', icon: Info }
+        ]
+    //   },
+    //   {
+    //     category: 'Help',
+    //     items: [
+    //       { name: 'How it works', href: '/dashboard/executive/help', icon: HelpCircle }
+    //     ]
+       }
+     ],
+    SMT: [
+      {
+        category: 'Main Menu',
+        items: [
+          { name: 'Dashboard', href: '/dashboard/smt', icon: Home }
         ]
       },
       {
-        category: 'Portfolio',
+        category: 'Disciplinary Management',
         items: [
-          { name: 'My Portfolio', href: '/dashboard/executive/portfolio', icon: Network },
-          { name: 'Portfolio Appraisals', href: '/dashboard/executive/appraisals', icon: CheckCircle },
-          { name: 'Portfolio Discipline', href: '/dashboard/executive/discipline', icon: Users }
-        ]
-      },
-      {
-        category: 'Help',
-        items: [
-          { name: 'How it works', href: '/dashboard/executive/help', icon: HelpCircle }
+          { name: 'SMT Referrals', href: '/dashboard/smt/disciplinary/referrals', icon: Landmark },
+          { name: 'Recommended', href: '/dashboard/smt/disciplinary/recommended', icon: CheckSquare },
+          { name: 'Table of Charges', href: '/dashboard/smt/disciplinary/charges', icon: Scale },
+          { name: 'How it works', href: '/dashboard/smt/disciplinary/help', icon: Info }
         ]
       }
     ],
@@ -166,8 +226,15 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         category: 'My Appraisal',
         items: [
           { name: 'Appraisal', href: '/dashboard/employee/appraisal', icon: FileText },
-           { name: 'My Award', href: '/dashboard/employee/award', icon: Activity },
-            { name: 'Acknowledge', href: '/dashboard/employee/acknowledge', icon: CheckSquare }
+          { name: 'My Award', href: '/dashboard/employee/award', icon: Activity },
+          { name: 'Acknowledge', href: '/dashboard/employee/acknowledge', icon: CheckSquare }
+        ]
+      },
+      {
+        category: 'Disciplinary Management',
+        items: [
+          { name: 'My Notices', href: '/dashboard/employee/disciplinary/notices', icon: Mail },
+          { name: 'How it works', href: '/dashboard/employee/disciplinary/help', icon: Info }
         ]
       },
       {
@@ -199,6 +266,16 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
         ]
       },
       {
+        category: 'Disciplinary Management',
+        items: [
+          { name: 'System Setup', href: '/dashboard/ict/disciplinary/setup', icon: Settings },
+          { name: 'Table of Charges', href: '/dashboard/ict/disciplinary/charges', icon: Scale },
+          { name: 'Settings', href: '/dashboard/ict/disciplinary/settings', icon: Wrench },
+          { name: 'Audit Log', href: '/dashboard/ict/disciplinary/audit', icon: FileText },
+          { name: 'How it works', href: '/dashboard/ict/disciplinary/help', icon: Info }
+        ]
+      },
+      {
         category: 'Information',
         items: [
           { name: 'Staff Data', href: '/dashboard/ict/staff', icon: Users },
@@ -224,7 +301,8 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
   const getBasePath = (r) => {
     if (r === 'HR_ADMIN') return '/dashboard/hr';
     if (r === 'ICT_ADMIN') return '/dashboard/ict';
-    if (r === 'EXECUTIVE') return '/dashboard/executive'; // 🚨 NEW: Added fallback pathing for settings gear
+    if (r === 'EXECUTIVE') return '/dashboard/executive';
+    if (r === 'SMT') return '/dashboard/smt';
     return `/dashboard/${r.toLowerCase()}`;
   };
   const profileLink = `${getBasePath(activeRole)}/profile`;
@@ -299,7 +377,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
           ))}
         </nav>
 
-        {/* Footer Role Badge - Now fully functional and using the Settings icon */}
+        {/* Footer Role Badge */}
         <Link 
           href={profileLink}
           onClick={() => setIsOpen(false)}
@@ -317,7 +395,6 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
                 {activeRole ? activeRole.replace('_', ' ') : 'EMPLOYEE'}
               </p>
             </div>
-            {/* The Settings Icon is applied right here */}
             <div className="text-white/30 group-hover:text-[#C9A84C] transition-colors">
               <Settings size={16} />
             </div>
