@@ -15,7 +15,7 @@ export default function Counselling() {
   const [isLoadingEmployees, setIsLoadingEmployees] = useState(true);
   const [isLoadingCounsellings, setIsLoadingCounsellings] = useState(true);
   const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false);
-  const [viewingRecord, setViewingRecord] = useState(null); // For viewing full text
+  const [viewingRecord, setViewingRecord] = useState(null);
   
   // Form State
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -26,7 +26,6 @@ export default function Counselling() {
   
   const dropdownRef = useRef(null);
 
-  // Fetch Team Members
   const fetchTeamMembers = async () => {
     try {
       const res = await api.get('/users/my-team').catch(() => ({ data: { data: [] } }));
@@ -42,6 +41,7 @@ export default function Counselling() {
           name: `${emp.personalDetails?.firstName || ''} ${emp.personalDetails?.lastName || ''}`.trim(),
           jobTitle: emp.employmentDetails?.jobTitle || 'Employee',
           openCasesCount: openCases.length,
+          originalData: emp // Preserve for fallback matching
         };
       }));
       setEmployees(teamWithCases);
@@ -52,7 +52,6 @@ export default function Counselling() {
     }
   };
 
-  // Fetch Logged Counselling Records from DB
   const fetchCounsellings = async () => {
     try {
       const res = await api.get('/disciplinary/counselling');
@@ -77,25 +76,15 @@ export default function Counselling() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Save to Database
   const handleSave = async () => {
     if (!selectedEmployee) return alert("Please select an employee.");
     if (!issue.trim() || !discussed.trim()) return alert("Please fill out the issue and discussion details.");
     
     try {
       setIsSubmitting(true);
-      
-      const payload = {
-        employeeId: selectedEmployee._id,
-        issue,
-        discussed,
-        outcome,
-        date
-      };
-
+      const payload = { employeeId: selectedEmployee._id, issue, discussed, outcome, date };
       await api.post('/disciplinary/counselling', payload);
       
-      // Reset form and close
       setIsModalOpen(false);
       setSelectedEmployee(null);
       setIssue('');
@@ -103,9 +92,7 @@ export default function Counselling() {
       setOutcome('Resolved');
       setDate(new Date().toISOString().split('T')[0]);
       
-      // Refresh dynamic list
       await fetchCounsellings();
-      
     } catch (error) {
       console.error("Error saving counselling:", error);
       alert("Failed to save counselling to the database.");
@@ -114,15 +101,28 @@ export default function Counselling() {
     }
   };
 
+  // Safe renderer to handle both populated and unpopulated employee references
+  const getEmployeeDisplay = (empData) => {
+    if (!empData) return { name: 'Unknown Employee', title: 'Unknown' };
+    if (typeof empData === 'object' && empData.personalDetails) {
+      return { 
+        name: `${empData.personalDetails.firstName || ''} ${empData.personalDetails.lastName || ''}`.trim(),
+        title: empData.employmentDetails?.jobTitle || 'Employee' 
+      };
+    }
+    // Fallback: If empData is just an ID string, find them in the team array
+    const matched = employees.find(e => e._id === empData || e.originalData?._id === empData);
+    if (matched) return { name: matched.name, title: matched.jobTitle };
+    
+    return { name: 'Unknown Employee', title: 'Employee' };
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6 font-sans text-gray-800">
-      
-      {/* Header */}
       <div className="flex justify-between items-start mb-6">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2 text-[#0f172a]">
-            Counselling
-            <Info size={18} className="text-gray-400 cursor-pointer" />
+            Counselling <Info size={18} className="text-gray-400 cursor-pointer" />
           </h1>
           <p className="text-sm text-gray-500">The informal first step — counsel and record before any formal case</p>
         </div>
@@ -134,7 +134,6 @@ export default function Counselling() {
         </button>
       </div>
 
-      {/* Info Box */}
       {showInfoBox && (
         <div className="bg-[#f8fafc] border border-gray-200 rounded-lg p-4 mb-8 relative shadow-sm">
           <div className="flex items-center justify-between mb-3">
@@ -154,19 +153,16 @@ export default function Counselling() {
         </div>
       )}
 
-      {/* Dynamic Data Rendering */}
-      {isLoadingCounsellings ? (
+      {isLoadingCounsellings || isLoadingEmployees ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Loader2 className="animate-spin text-gray-400 mb-2" size={24} />
           <p className="text-sm text-gray-500">Loading records...</p>
         </div>
       ) : counsellings.length === 0 ? (
-        /* Empty State */
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-sm text-gray-500">No counselling recorded yet. Log the informal step here before raising a case.</p>
         </div>
       ) : (
-        /* Populated Table */
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden mb-6">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
@@ -180,49 +176,50 @@ export default function Counselling() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {counsellings.map((c) => (
-                  <tr key={c._id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="px-4 py-4 font-medium text-gray-700">
-                      {new Date(c.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="font-bold text-[#0f172a]">{c.employeeId?.personalDetails?.firstName} {c.employeeId?.personalDetails?.lastName}</div>
-                      <div className="text-xs text-gray-500">{c.employeeId?.employmentDetails?.jobTitle}</div>
-                    </td>
-                    <td className="px-4 py-4 text-xs text-gray-600 max-w-[200px] truncate" title={c.issue}>
-                      {c.issue}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold shadow-sm border ${
-                        c.outcome === 'Resolved' ? 'bg-green-50 text-green-700 border-green-200' :
-                        c.outcome === 'Verbal admonishment' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                        c.outcome === 'Referred to EAP' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                        'bg-gray-100 text-gray-700 border-gray-200'
-                      }`}>
-                        {c.outcome}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <button 
-                        onClick={() => setViewingRecord(c)}
-                        className="text-[12px] font-bold text-gray-600 border border-gray-300 bg-white px-3 py-1.5 rounded hover:bg-gray-50 shadow-sm transition-colors"
-                      >
-                        View log
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {counsellings.map((c) => {
+                  const empDisplay = getEmployeeDisplay(c.employeeId);
+                  return (
+                    <tr key={c._id} className="hover:bg-gray-50 transition-colors group">
+                      <td className="px-4 py-4 font-medium text-gray-700">
+                        {new Date(c.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="font-bold text-[#0f172a]">{empDisplay.name}</div>
+                        <div className="text-xs text-gray-500">{empDisplay.title}</div>
+                      </td>
+                      <td className="px-4 py-4 text-xs text-gray-600 max-w-[200px] truncate" title={c.issue}>
+                        {c.issue}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold shadow-sm border ${
+                          c.outcome === 'Resolved' ? 'bg-green-50 text-green-700 border-green-200' :
+                          c.outcome === 'Verbal admonishment' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                          c.outcome === 'Referred to EAP' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                          'bg-gray-100 text-gray-700 border-gray-200'
+                        }`}>
+                          {c.outcome}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <button 
+                          onClick={() => setViewingRecord(c)}
+                          className="text-[12px] font-bold text-gray-600 border border-gray-300 bg-white px-3 py-1.5 rounded hover:bg-gray-50 shadow-sm transition-colors"
+                        >
+                          View log
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Log Counselling Form Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-[600px] flex flex-col font-sans">
-            
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
               <h3 className="font-bold text-[#0f172a] text-lg">Log Counselling</h3>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-700 transition-colors">
@@ -231,7 +228,6 @@ export default function Counselling() {
             </div>
             
             <div className="p-6 space-y-5">
-              {/* Employee Dropdown */}
               <div className="relative" ref={dropdownRef}>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Employee <span className="text-red-500">*</span></label>
                 <div 
@@ -339,7 +335,6 @@ export default function Counselling() {
         </div>
       )}
 
-      {/* Read-Only View Record Modal */}
       {viewingRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-[500px] flex flex-col font-sans">
@@ -354,7 +349,7 @@ export default function Counselling() {
               <div className="grid grid-cols-2 gap-4 border-b border-gray-100 pb-4">
                 <div>
                   <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Employee</span>
-                  <div className="text-sm font-semibold text-[#0f172a] mt-1">{viewingRecord.employeeId?.personalDetails?.firstName} {viewingRecord.employeeId?.personalDetails?.lastName}</div>
+                  <div className="text-sm font-semibold text-[#0f172a] mt-1">{getEmployeeDisplay(viewingRecord.employeeId).name}</div>
                 </div>
                 <div>
                   <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Date</span>
@@ -398,7 +393,6 @@ export default function Counselling() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

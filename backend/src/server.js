@@ -31,6 +31,8 @@ const apiLogger = require('./middleware/apiLogger');
 const notificationRoutes = require('./routes/notificationRoutes');
 const configRoutes = require('./routes/configRoutes');
 const backupRoutes = require('./routes/backupRoutes');
+const hrQueueRoutes = require('./routes/hrQueueRoutes');
+const offenceRoutes = require('./routes/offenceRoutes');
 const path = require('path');
 
 const app = express();
@@ -109,6 +111,8 @@ app.use('/api/v1/executive', require('./routes/executiveRoutes'));
 app.use('/api/v1/reports', require('./routes/boardReportRoutes'));
 app.use('/api/v1/disciplinary', require('./routes/disciplinaryRoutes'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/api/v1/hr-queue', hrQueueRoutes);
+app.use('/api/v1/offences', offenceRoutes);
 
 // GET /api/v1/config/dropdowns
 app.get('/api/v1/config/dropdowns', async (req, res) => {

@@ -157,7 +157,7 @@ export default function Sidebar({ role, isOpen, setIsOpen, user }) {
       {
         category: 'Disciplinary Management',
         items: [
-          { name: 'My Team', href: '/dashboard/manager/disciplinary/team', icon: Users },
+          { name: 'My Disc.. Team', href: '/dashboard/manager/disciplinary/team', icon: Users },
           { name: 'Counselling', href: '/dashboard/manager/disciplinary/counselling', icon: MessageSquare },
           { name: 'Raise a Case', href: '/dashboard/manager/disciplinary/raise', icon: PlusCircle },
           { name: 'Table of Charges', href: '/dashboard/manager/disciplinary/charges', icon: Scale },
